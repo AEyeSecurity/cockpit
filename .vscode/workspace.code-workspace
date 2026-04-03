@@ -110,13 +110,6 @@
 				"command": "npm run tauri:build",
 				"group": "build",
 				"problemMatcher": []
-			},
-			{
-				"label": "🐳 Ejecutar comando en contenedor",
-				"detail": "Ejecuta un comando personalizado en un contenedor",
-				"type": "shell",
-				"command": "docker exec -ti ${input:containerName} ${input:command}",
-				"problemMatcher": []
 			}
 		],
 		"inputs": [

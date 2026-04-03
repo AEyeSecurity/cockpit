@@ -29,6 +29,7 @@ export interface CameraStatusData {
 export interface NavigationState {
   waypoints: GoalInput[];
   loopRoute: boolean;
+  goalMode: boolean;
   manualMode: boolean;
   cameraStreamConnected: boolean;
   lastStatus: string;
@@ -85,6 +86,7 @@ export class NavigationService {
   private state: NavigationState = {
     waypoints: [],
     loopRoute: true,
+    goalMode: false,
     manualMode: false,
     cameraStreamConnected: false,
     lastStatus: "No active goal",
@@ -115,6 +117,17 @@ export class NavigationService {
       loopRoute: enabled
     };
     this.emit();
+  }
+
+  toggleGoalMode(): boolean {
+    const next = !this.state.goalMode;
+    this.state = {
+      ...this.state,
+      goalMode: next,
+      lastStatus: next ? "Goal mode ON" : "Goal mode OFF"
+    };
+    this.emit();
+    return next;
   }
 
   queueWaypoint(input: GoalInput): void {

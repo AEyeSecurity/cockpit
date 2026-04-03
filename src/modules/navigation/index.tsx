@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { NAV_EVENTS } from "../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import { notify } from "../../platform/tauri/notifications";
@@ -142,6 +143,15 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             onClick={() => {
+              const enabled = service.toggleGoalMode();
+              emitInfo(enabled ? "Goal mode enabled" : "Goal mode disabled");
+            }}
+          >
+            Goal mode: {state.goalMode ? "ON" : "OFF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               const parsed = parseDraft(draft);
               if (!parsed) {
                 runtime.eventBus.emit("console.event", {
@@ -157,16 +167,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             Add waypoint
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              service.removeLastWaypoint();
-            }}
-            disabled={state.waypoints.length === 0}
-          >
-            Undo
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            service.removeLastWaypoint();
+          }}
+          disabled={state.waypoints.length === 0}
+        >
+          Undo
+        </button>
         <div className="action-grid">
           <button
             type="button"
@@ -472,6 +482,13 @@ function CameraGpsWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.El
   const [mainPane, setMainPane] = useState<"camera" | "gps">("camera");
   const [unlocked, setUnlocked] = useState(false);
   const mainIsCamera = mainPane === "camera";
+
+  useEffect(() => {
+    return runtime.eventBus.on(NAV_EVENTS.swapWorkspaceRequest, () => {
+      setMainPane((current) => (current === "camera" ? "gps" : "camera"));
+    });
+  }, [runtime]);
+
   return (
     <div className="stack">
       <div className="panel-card">
@@ -530,15 +547,42 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     setSnapshot(navigation.lastSnapshot);
   }, [navigation.lastSnapshot]);
 
+  const captureSnapshot = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const next = await service.requestSnapshot();
+      setSnapshot(next);
+      setStatus(`Snapshot loaded (${new Date(next.stamp).toLocaleString()})`);
+    } catch (error) {
+      setStatus(`Snapshot error: ${String(error)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const download = (): void => {
-    if (!snapshot || typeof window === "undefined") return;
-    const mime = snapshot.mime || "image/png";
+    const snapshotToDownload = snapshot ?? service.getState().lastSnapshot;
+    if (!snapshotToDownload || typeof window === "undefined") return;
+    const mime = snapshotToDownload.mime || "image/png";
     const ext = snapshotExtFromMime(mime);
     const link = window.document.createElement("a");
-    link.href = `data:${mime};base64,${snapshot.imageBase64}`;
-    link.download = `nav_snapshot_${snapshot.stamp}.${ext}`;
+    link.href = `data:${mime};base64,${snapshotToDownload.imageBase64}`;
+    link.download = `nav_snapshot_${snapshotToDownload.stamp}.${ext}`;
     link.click();
   };
+
+  useEffect(() => {
+    const unsubscribeCapture = runtime.eventBus.on(NAV_EVENTS.snapshotCaptureRequest, () => {
+      void captureSnapshot();
+    });
+    const unsubscribeDownload = runtime.eventBus.on(NAV_EVENTS.snapshotDownloadRequest, () => {
+      download();
+    });
+    return () => {
+      unsubscribeCapture();
+      unsubscribeDownload();
+    };
+  }, [runtime.eventBus, service]);
 
   return (
     <div className="stack">
@@ -546,17 +590,8 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         <button
           type="button"
           disabled={loading}
-          onClick={async () => {
-            setLoading(true);
-            try {
-              const next = await service.requestSnapshot();
-              setSnapshot(next);
-              setStatus(`Snapshot loaded (${new Date(next.stamp).toLocaleString()})`);
-            } catch (error) {
-              setStatus(`Snapshot error: ${String(error)}`);
-            } finally {
-              setLoading(false);
-            }
+          onClick={() => {
+            void captureSnapshot();
           }}
         >
           {loading ? "Loading..." : "Capture snapshot"}
@@ -797,6 +832,25 @@ function registerToolbarMenu(ctx: ModuleContext, navigationService: NavigationSe
               timestamp: Date.now()
             });
           }
+        }
+      },
+      {
+        id: "navigation.toggle-goal-mode",
+        label: "Toggle goal mode",
+        onSelect: () => {
+          const enabled = navigationService.toggleGoalMode();
+          ctx.eventBus.emit("console.event", {
+            level: "info",
+            text: enabled ? "Goal mode enabled" : "Goal mode disabled",
+            timestamp: Date.now()
+          });
+        }
+      },
+      {
+        id: "navigation.swap-workspace",
+        label: "Swap camera/map",
+        onSelect: () => {
+          ctx.eventBus.emit(NAV_EVENTS.swapWorkspaceRequest, {});
         }
       },
       {

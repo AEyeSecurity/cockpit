@@ -85,6 +85,24 @@ describe("services", () => {
     expect(dispatcher.requestGoal).toHaveBeenCalledTimes(1);
   });
 
+  it("toggles goal mode in NavigationService state", () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+    expect(service.getState().goalMode).toBe(false);
+    const next = service.toggleGoalMode();
+    expect(next).toBe(true);
+    expect(service.getState().goalMode).toBe(true);
+  });
+
   it("persists zone state in MapService local storage adapter", () => {
     const service = new MapService({ requestMap: vi.fn() } as never);
     service.addZone("A");

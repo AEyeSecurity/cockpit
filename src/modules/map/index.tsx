@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { MapDispatcher } from "../../dispatcher/impl/MapDispatcher";
 import { MapService, type MapToolMode, type MapWorkspaceState } from "../../services/impl/MapService";
+import type { NavigationService } from "../../services/impl/NavigationService";
 import { GoogleMapsTransport } from "../../transport/impl/GoogleMapsTransport";
 
 const TRANSPORT_ID = "transport.googlemaps";
 const DISPATCHER_ID = "dispatcher.map";
 const SERVICE_ID = "service.map";
+const NAVIGATION_SERVICE_ID = "service.navigation";
 
 function ZonesSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<MapService>(SERVICE_ID);
@@ -144,6 +146,12 @@ function toolButtonClass(current: MapToolMode, target: MapToolMode): string {
 
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const mapService = runtime.registries.serviceRegistry.getService<MapService>(SERVICE_ID);
+  let navigationService: NavigationService | null = null;
+  try {
+    navigationService = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  } catch {
+    navigationService = null;
+  }
   const [state, setState] = useState<MapWorkspaceState>(mapService.getState());
   const [mapId, setMapId] = useState("default-map");
   const [inspectLat, setInspectLat] = useState("-31.4201");
@@ -241,6 +249,30 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
             }}
           >
             Apply inspect point
+          </button>
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            disabled={!navigationService}
+            onClick={() => {
+              if (!navigationService) return;
+              const lat = Number(inspectLat);
+              const lon = Number(inspectLon);
+              if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+              navigationService.queueWaypoint({
+                x: lat,
+                y: lon,
+                yawDeg: 0
+              });
+              runtime.eventBus.emit("console.event", {
+                level: "info",
+                text: `Waypoint queued from map inspect (${lat.toFixed(5)}, ${lon.toFixed(5)})`,
+                timestamp: Date.now()
+              });
+            }}
+          >
+            Queue waypoint from inspect
           </button>
         </div>
         <p className="muted">Inspect coords: {state.inspectCoords}</p>

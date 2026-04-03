@@ -5,9 +5,18 @@ import { SidebarHost } from "./layout/SidebarHost";
 import { TopToolbar } from "./layout/TopToolbar";
 import { WorkspaceHost } from "./layout/WorkspaceHost";
 import type { AppRuntime } from "../core/types/module";
+import { NAV_EVENTS } from "../core/events/topics";
+import type { NavigationService } from "../services/impl/NavigationService";
 
 interface AppShellProps {
   runtime: AppRuntime;
+}
+
+function isEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
 export function AppShell({ runtime }: AppShellProps): JSX.Element {
@@ -36,6 +45,79 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     if (activeConsoleId && consoleTabs.some((tab) => tab.id === activeConsoleId)) return;
     setActiveConsoleId(consoleTabs[0]?.id ?? "");
   }, [activeConsoleId, consoleTabs]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (isEditingTarget(event.target)) return;
+
+      let navigationService: NavigationService | null = null;
+      try {
+        navigationService = runtime.registries.serviceRegistry.getService<NavigationService>("service.navigation");
+      } catch {
+        navigationService = null;
+      }
+
+      if (event.key === "Escape") {
+        if (!activeModalId) return;
+        if (event.shiftKey && activeModalId === "modal.snapshot") {
+          runtime.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {});
+        }
+        setActiveModalId(null);
+        event.preventDefault();
+        return;
+      }
+
+      if (event.code === "KeyQ") {
+        setActiveModalId("modal.snapshot");
+        runtime.eventBus.emit(NAV_EVENTS.snapshotCaptureRequest, {});
+        event.preventDefault();
+        return;
+      }
+
+      if (event.code === "KeyE") {
+        runtime.eventBus.emit(NAV_EVENTS.swapWorkspaceRequest, {});
+        event.preventDefault();
+        return;
+      }
+
+      if (event.code === "KeyF" && navigationService) {
+        const enabled = navigationService.toggleGoalMode();
+        runtime.eventBus.emit("console.event", {
+          level: "info",
+          text: enabled ? "Goal mode enabled (hotkey)" : "Goal mode disabled (hotkey)",
+          timestamp: Date.now()
+        });
+        event.preventDefault();
+        return;
+      }
+
+      if (event.code === "KeyM" && navigationService) {
+        const current = navigationService.getState().manualMode;
+        void navigationService
+          .setManualMode(!current)
+          .then(() => {
+            runtime.eventBus.emit("console.event", {
+              level: "info",
+              text: !current ? "Manual mode enabled (hotkey)" : "Manual mode disabled (hotkey)",
+              timestamp: Date.now()
+            });
+          })
+          .catch((error) => {
+            runtime.eventBus.emit("console.event", {
+              level: "error",
+              text: `Manual mode hotkey failed: ${String(error)}`,
+              timestamp: Date.now()
+            });
+          });
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [activeModalId, runtime]);
 
   const activeSidebarPanel = sidebarPanels.find((panel) => panel.id === activeSidebarId) ?? null;
   const activeWorkspace = workspaceViews.find((view) => view.id === activeWorkspaceId) ?? null;
@@ -83,4 +165,3 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     </div>
   );
 }
-
