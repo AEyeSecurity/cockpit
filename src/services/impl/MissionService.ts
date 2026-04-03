@@ -30,7 +30,7 @@ export class MissionService {
     if (response.ok === false) {
       throw new Error(response.error ?? "Start rosbag failed");
     }
-    return this.parseRosbagStatus(response.payload);
+    return this.parseRosbagStatus(response);
   }
 
   async stopRosbag(): Promise<RosbagStatus> {
@@ -38,7 +38,7 @@ export class MissionService {
     if (response.ok === false) {
       throw new Error(response.error ?? "Stop rosbag failed");
     }
-    return this.parseRosbagStatus(response.payload);
+    return this.parseRosbagStatus(response);
   }
 
   async getRosbagStatus(): Promise<RosbagStatus> {
@@ -46,20 +46,22 @@ export class MissionService {
     if (response.ok === false) {
       throw new Error(response.error ?? "Rosbag status failed");
     }
-    return this.parseRosbagStatus(response.payload);
+    return this.parseRosbagStatus(response);
   }
 
   subscribeRosbagStatus(callback: (status: RosbagStatus) => void): () => void {
     return this.missionDispatcher.subscribeRosbagStatus((message) => {
-      callback(this.parseRosbagStatus(message.payload));
+      callback(this.parseRosbagStatus(message));
     });
   }
 
   private parseRosbagStatus(payload: unknown): RosbagStatus {
     const value = (payload ?? {}) as Record<string, unknown>;
+    const payloadObject =
+      value.payload && typeof value.payload === "object" ? (value.payload as Record<string, unknown>) : null;
     const source = (value.rosbag && typeof value.rosbag === "object"
       ? (value.rosbag as Record<string, unknown>)
-      : value) as Record<string, unknown>;
+      : payloadObject ?? value) as Record<string, unknown>;
     return {
       active: source.active === true,
       profile: String(source.profile ?? "core"),

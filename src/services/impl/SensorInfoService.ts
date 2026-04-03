@@ -117,6 +117,9 @@ export class SensorInfoService {
     this.robotDispatcher.subscribeSensorInfo((message) => {
       this.applyIncoming(message);
     });
+    this.robotDispatcher.subscribeAck((message) => {
+      this.applyAck(message);
+    });
   }
 
   getState(): SensorInfoState {
@@ -164,12 +167,16 @@ export class SensorInfoService {
       }
     };
     this.emit();
-    await this.robotDispatcher.requestSensorInfoView({
-      enabled: false,
-      tab: null,
-      intervalS: clampInterval(this.state.intervals[this.state.activeTab]),
-      topicName: null
-    });
+    try {
+      await this.robotDispatcher.requestSensorInfoView({
+        enabled: false,
+        tab: null,
+        intervalS: clampInterval(this.state.intervals[this.state.activeTab]),
+        topicName: null
+      });
+    } catch {
+      // Ignore disconnect errors while closing modal.
+    }
   }
 
   async setActiveTab(tab: SensorInfoTab): Promise<void> {
@@ -246,12 +253,27 @@ export class SensorInfoService {
     };
     this.emit();
 
-    await this.robotDispatcher.requestSensorInfoView({
-      enabled: true,
-      tab,
-      intervalS: this.state.intervals[tab],
-      topicName: tab === "topics" ? this.state.topics.selectedTopic || null : null
-    });
+    try {
+      await this.robotDispatcher.requestSensorInfoView({
+        enabled: true,
+        tab,
+        intervalS: this.state.intervals[tab],
+        topicName: tab === "topics" ? this.state.topics.selectedTopic || null : null
+      });
+    } catch (error) {
+      this.state = {
+        ...this.state,
+        loading: {
+          ...this.state.loading,
+          [tab]: false
+        },
+        errors: {
+          ...this.state.errors,
+          [tab]: String(error)
+        }
+      };
+      this.emit();
+    }
   }
 
   private applyIncoming(message: IncomingPacket): void {
@@ -292,6 +314,7 @@ export class SensorInfoService {
               };
             })
             .filter((entry): entry is SensorInfoTopicCatalogEntry => entry !== null)
+            .sort((left, right) => left.name.localeCompare(right.name))
         : [];
       topics = {
         ...topics,
@@ -303,9 +326,12 @@ export class SensorInfoService {
           String(snapshot.selected_topic ?? "") === topics.pendingTopic || message.ok === false ? "" : topics.pendingTopic,
         catalog
       };
+      if (message.ok !== false && String(snapshot.error ?? "").trim()) {
+        errors.topics = String(snapshot.error);
+      }
     }
 
-    if (typeof message.interval_s === "number") {
+    if (Number.isFinite(Number(message.interval_s))) {
       const interval = clampInterval(Number(message.interval_s));
       this.state = {
         ...this.state,
@@ -329,6 +355,51 @@ export class SensorInfoService {
         topics
       };
     }
+    this.emit();
+  }
+
+  private applyAck(message: IncomingPacket): void {
+    if (String(message.request ?? "") !== "set_sensor_info_view") return;
+    const tab = parseTab(message.tab) ?? this.state.activeTab;
+    if (!tab) return;
+
+    const loading = {
+      ...this.state.loading,
+      [tab]: message.ok === true && message.enabled === true && message.implemented === true
+    };
+    const implemented = {
+      ...this.state.implemented,
+      [tab]: message.enabled === true || message.tab ? message.implemented === true : this.state.implemented[tab]
+    };
+    const errors = {
+      ...this.state.errors,
+      [tab]: message.ok === false ? String(message.error ?? "sensor info error") : ""
+    };
+    const intervals = { ...this.state.intervals };
+    if (Number.isFinite(Number(message.interval_s))) {
+      intervals[tab] = clampInterval(Number(message.interval_s));
+    }
+
+    let topics = this.state.topics;
+    if (tab === "topics") {
+      const selectedTopic = String(message.topic_name ?? topics.selectedTopic ?? "");
+      const selectedType = String(message.selected_type ?? topics.selectedType ?? "");
+      topics = {
+        ...topics,
+        pendingTopic: message.ok === false || message.topic_name ? "" : topics.pendingTopic,
+        selectedTopic,
+        selectedType
+      };
+    }
+
+    this.state = {
+      ...this.state,
+      loading,
+      implemented,
+      errors,
+      intervals,
+      topics
+    };
     this.emit();
   }
 

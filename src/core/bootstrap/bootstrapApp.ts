@@ -1,4 +1,5 @@
 import { DispatchRouter } from "../../dispatcher/DispatchRouter";
+import { DIALOG_SERVICE_ID, DialogService } from "../../services/impl/DialogService";
 import { TransportManager } from "../../transport/manager/TransportManager";
 import { loadEnvConfig } from "../config/envConfig";
 import { isModuleEnabled, loadModuleConfig } from "../config/moduleConfigLoader";
@@ -30,6 +31,12 @@ export async function bootstrapApp(): Promise<AppRuntime> {
     }
   };
 
+  runtime.registries.serviceRegistry.registerService({
+    id: DIALOG_SERVICE_ID,
+    order: 0,
+    service: new DialogService()
+  });
+
   const catalog = getModuleCatalog();
   const enabledModules = catalog.filter((module) => isModuleEnabled(module, moduleConfig));
 
@@ -50,4 +57,3 @@ export async function bootstrapApp(): Promise<AppRuntime> {
 
   return runtime;
 }
-

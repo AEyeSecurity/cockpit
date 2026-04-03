@@ -1,3 +1,4 @@
+import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { readConfig, writeConfig } from "../../platform/tauri/configFs";
 
@@ -53,4 +54,3 @@ export function createSettingsModule(): CockpitModule {
     }
   };
 }
-

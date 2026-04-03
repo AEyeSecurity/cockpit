@@ -35,6 +35,12 @@ export interface ConsoleTabDefinition {
   render: (runtime: AppRuntime) => ReactNode;
 }
 
+export interface FooterItemDefinition {
+  id: string;
+  order?: number;
+  render: (runtime: AppRuntime) => ReactNode;
+}
+
 export interface ModalDialogDefinition {
   id: string;
   title: string;
@@ -42,4 +48,3 @@ export interface ModalDialogDefinition {
   render: (ctx: { runtime: AppRuntime; close: () => void }) => ReactNode;
   renderFooter?: (ctx: { runtime: AppRuntime; close: () => void }) => ReactNode;
 }
-

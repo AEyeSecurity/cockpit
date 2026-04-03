@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import "./styles.css";
 import { NAV_EVENTS } from "../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import { notify } from "../../platform/tauri/notifications";
-import { ConnectionService } from "../../services/impl/ConnectionService";
+import { ConnectionService, type ConnectionState } from "../../services/impl/ConnectionService";
+import { DIALOG_SERVICE_ID, type DialogService } from "../../services/impl/DialogService";
+import { MapService, type MapWorkspaceState } from "../../services/impl/MapService";
 import { SensorInfoService, type SensorInfoTab } from "../../services/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../services/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../../services/impl/NavigationService";
@@ -13,6 +16,7 @@ const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.robot";
 const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
+const MAP_SERVICE_ID = "service.map";
 const TELEMETRY_SERVICE_ID = "service.telemetry";
 const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
 
@@ -29,6 +33,39 @@ function getTelemetryService(runtime: ModuleContext): TelemetryServiceLike | nul
   }
 }
 
+function getMapService(runtime: ModuleContext): MapService | null {
+  try {
+    return runtime.registries.serviceRegistry.getService<MapService>(MAP_SERVICE_ID);
+  } catch {
+    return null;
+  }
+}
+
+function formatBytes(bytes: number): string {
+  const value = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  if (value < 1024) return `${Math.floor(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatInfoNumber(value: unknown, digits = 2): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(digits);
+}
+
+function formatInfoCoordinate(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(6);
+}
+
+function formatInfoTimestamp(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "n/a";
+  return new Date(numeric).toLocaleString();
+}
+
 function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const [state, setState] = useState(service.getState());
@@ -39,7 +76,6 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     <div className="stack">
       <div className="panel-card">
         <h3>Connection</h3>
-        <p className="muted">Preset + host/port (migrado desde UI monolítica).</p>
         <div className="stack">
           <select
             value={state.preset}
@@ -79,12 +115,28 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               Disconnect
             </button>
           </div>
-          <div className={`status-pill ${state.connected ? "ok" : "bad"}`}>
-            {state.connected ? "connected" : "disconnected"}
-          </div>
           {state.lastError ? <p className="muted">Error: {state.lastError}</p> : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ConnectionFooterItem({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const service = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  const [state, setState] = useState(service.getState());
+  const totalBytes = state.txBytes + state.rxBytes;
+
+  useEffect(() => service.subscribe((next) => setState(next)), [service]);
+
+  return (
+    <div className="connection-footer">
+      <span className={`connection-footer-status ${state.connected ? "connected" : "disconnected"}`}>
+        {state.connected ? "Conectado" : "Desconectado"}
+      </span>
+      <span className="connection-footer-metric">TX {formatBytes(state.txBytes)}</span>
+      <span className="connection-footer-metric">RX {formatBytes(state.rxBytes)}</span>
+      <span className="connection-footer-total">(Total {formatBytes(totalBytes)})</span>
     </div>
   );
 }
@@ -108,8 +160,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     <div className="stack">
       <div className="panel-card">
         <h3>Navigation</h3>
-        <p className="muted">Controles rápidos de navegación.</p>
-        <div className="nav-legacy-row nav-legacy-top">
+        <div className="nav-legacy-grid">
           <button
             type="button"
             className={state.goalMode ? "active" : ""}
@@ -158,11 +209,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             🧹
           </button>
-        </div>
-        <div className="nav-legacy-row nav-legacy-primary">
           <button
             type="button"
-            className="nav-legacy-send"
+            className="nav-legacy-send-btn"
             onClick={async () => {
               try {
                 const sent = await service.sendQueuedGoal();
@@ -182,7 +231,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </button>
           <button
             type="button"
-            className="danger-btn nav-legacy-cancel"
+            className="danger-btn nav-legacy-cancel-btn"
             onClick={async () => {
               try {
                 await service.cancelGoal();
@@ -198,13 +247,19 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             ⊗ Cancel
           </button>
-        </div>
-        <div className="nav-legacy-row nav-legacy-bottom">
           <button
             type="button"
-            onClick={() => {
-              const count = service.saveWaypoints();
-              emitInfo(`Saved ${count} waypoints`);
+            onClick={async () => {
+              try {
+                const count = await service.saveWaypointsFile();
+                emitInfo(`Saved ${count} waypoints`);
+              } catch (error) {
+                runtime.eventBus.emit("console.event", {
+                  level: "error",
+                  text: `Save waypoints failed: ${String(error)}`,
+                  timestamp: Date.now()
+                });
+              }
             }}
             title="Save route"
           >
@@ -212,9 +267,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </button>
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               try {
-                const count = service.loadWaypoints();
+                const count = await service.loadWaypointsFile();
                 emitInfo(`Loaded ${count} waypoints`);
               } catch (error) {
                 runtime.eventBus.emit("console.event", {
@@ -240,6 +295,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </button>
           <button
             type="button"
+            className={state.manualMode ? "active" : ""}
             onClick={async () => {
               const next = !state.manualMode;
               try {
@@ -259,17 +315,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             {state.manualMode ? "ON" : "OFF"}
           </button>
         </div>
-        <p className="nav-legacy-text">Queued: {state.waypoints.length}</p>
-        <p className="nav-legacy-text">Selected: {selectedCount}</p>
-        <p className="nav-legacy-text">Loop: {state.loopRoute ? "ON" : "OFF"}</p>
-        <button
-          type="button"
-          className="nav-legacy-toggle"
-          onClick={() => service.setLoopRoute(!state.loopRoute)}
-          title="Toggle loop route"
-        >
-          Loop route: {state.loopRoute ? "ON" : "OFF"}
-        </button>
+        <label className="check-row nav-loop-check">
+          <input
+            type="checkbox"
+            checked={state.loopRoute}
+            onChange={(event) => service.setLoopRoute(event.target.checked)}
+          />
+          Loop route
+        </label>
         <p className="nav-legacy-text">
           Manual: {state.manualDisablePending ? "DISABLING" : state.manualMode ? "ON" : "OFF"} · keys=
           {service.getManualKeysSummary()} · vx={state.manualCommand.linearX.toFixed(2)} · wz=
@@ -278,6 +331,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         <p className="nav-legacy-text">{state.lastStatus}</p>
       </div>
       <ManualControlSidebarPanel runtime={runtime} />
+      <ZonesSidebarSection runtime={runtime} />
       <CameraSidebarPanel runtime={runtime} />
     </div>
   );
@@ -292,7 +346,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
   return (
     <div className="stack">
       <div className="panel-card">
-        <h3>Sliders</h3>
+        <h3>Speed limits</h3>
         <label className="range-row">
           Linear speed (m/s): {state.manualLinearSpeed.toFixed(2)}
           <input
@@ -315,6 +369,142 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
             onChange={(event) => service.setManualAngularSpeed(Number(event.target.value))}
           />
         </label>
+      </div>
+    </div>
+  );
+}
+
+function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Element | null {
+  const mapService = getMapService(runtime);
+  const dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+  const [state, setState] = useState<MapWorkspaceState | null>(mapService ? mapService.getState() : null);
+
+  useEffect(() => {
+    if (!mapService) return;
+    return mapService.subscribe((next) => setState(next));
+  }, [mapService]);
+
+  if (!mapService || !state) return null;
+
+  return (
+    <div className="stack">
+      <div className="panel-card">
+        <h3>Zones</h3>
+        <div className="zones-legacy-grid">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await mapService.loadMap("map");
+                runtime.eventBus.emit("console.event", {
+                  level: "info",
+                  text: "Zones refreshed",
+                  timestamp: Date.now()
+                });
+              } catch (error) {
+                runtime.eventBus.emit("console.event", {
+                  level: "error",
+                  text: `Refresh zones failed: ${String(error)}`,
+                  timestamp: Date.now()
+                });
+              }
+            }}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            className="danger-btn"
+            onClick={async () => {
+              const ok = await dialogService.confirm({
+                title: "Clear zones",
+                message: `Clear all ${state.zones.length} no-go zones?`,
+                confirmLabel: "Clear",
+                cancelLabel: "Cancel",
+                danger: true
+              });
+              if (!ok) return;
+              mapService.clearZones();
+              runtime.eventBus.emit("console.event", {
+                level: "warn",
+                text: "Zones cleared",
+                timestamp: Date.now()
+              });
+            }}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await mapService.pushZonesToBackend();
+                const count = mapService.persistZonesToStorage();
+                runtime.eventBus.emit("console.event", {
+                  level: "info",
+                  text: `Zones saved (${count})`,
+                  timestamp: Date.now()
+                });
+              } catch (error) {
+                runtime.eventBus.emit("console.event", {
+                  level: "error",
+                  text: `Save zones failed: ${String(error)}`,
+                  timestamp: Date.now()
+                });
+              }
+            }}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const count = mapService.loadZonesFromStorage();
+                await mapService.loadZonesFromBackend();
+                runtime.eventBus.emit("console.event", {
+                  level: "info",
+                  text: `Zones loaded (${count})`,
+                  timestamp: Date.now()
+                });
+              } catch (error) {
+                runtime.eventBus.emit("console.event", {
+                  level: "error",
+                  text: `Load zones failed: ${String(error)}`,
+                  timestamp: Date.now()
+                });
+              }
+            }}
+          >
+            Load
+          </button>
+        </div>
+        <label className="check-row">
+          <input type="checkbox" checked={state.autoSync} onChange={(event) => mapService.setAutoSync(event.target.checked)} />
+          Auto-sync edits
+        </label>
+      </div>
+      <div className="panel-card">
+        <h3>Zone List</h3>
+        {state.zones.length === 0 ? (
+          <p className="muted">No zones.</p>
+        ) : (
+          <ul className="zone-list">
+            {state.zones.map((zone) => (
+              <li key={zone.id} className="zone-item">
+                <div>
+                  <strong>{zone.name}</strong>
+                  <div className="muted">
+                    vertices={zone.vertices} · {new Date(zone.updatedAt).toLocaleTimeString()}
+                  </div>
+                </div>
+                <button type="button" className="danger-btn" onClick={() => mapService.removeZone(zone.id)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -384,7 +574,6 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const [navigation, setNavigation] = useState<NavigationState>(service.getState());
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(service.getState().lastSnapshot);
-  const [status, setStatus] = useState("No snapshot loaded.");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => service.subscribe((next) => setNavigation(next)), [service]);
@@ -397,9 +586,12 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     try {
       const next = await service.requestSnapshot();
       setSnapshot(next);
-      setStatus(`Snapshot loaded (${new Date(next.stamp).toLocaleString()})`);
     } catch (error) {
-      setStatus(`Snapshot error: ${String(error)}`);
+      runtime.eventBus.emit("console.event", {
+        level: "error",
+        text: `Snapshot capture failed: ${String(error)}`,
+        timestamp: Date.now()
+      });
     } finally {
       setLoading(false);
     }
@@ -410,10 +602,22 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     if (!snapshotToDownload || typeof window === "undefined") return;
     const mime = snapshotToDownload.mime || "image/png";
     const ext = snapshotExtFromMime(mime);
-    const link = window.document.createElement("a");
-    link.href = `data:${mime};base64,${snapshotToDownload.imageBase64}`;
-    link.download = `nav_snapshot_${snapshotToDownload.stamp}.${ext}`;
-    link.click();
+    try {
+      const link = window.document.createElement("a");
+      link.href = `data:${mime};base64,${snapshotToDownload.imageBase64}`;
+      link.download = `nav_snapshot_${snapshotToDownload.stamp}.${ext}`;
+      link.click();
+      runtime.eventBus.emit(NAV_EVENTS.snapshotDownloadResult, {
+        ok: true,
+        text: "Captura descargada correctamente."
+      });
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "error",
+        text: `Snapshot download failed: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    }
   };
 
   useEffect(() => {
@@ -454,8 +658,73 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       ) : (
         <div className="modal-preview">Snapshot preview area</div>
       )}
-      <p className="muted">{status}</p>
       <p className="muted">Esc: close · Shift+Esc: download + close</p>
+    </div>
+  );
+}
+
+function SnapshotModalFooter({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const [message, setMessage] = useState("");
+  const hideTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = runtime.eventBus.on<{ ok?: unknown; text?: unknown }>(NAV_EVENTS.snapshotDownloadResult, (event) => {
+      if (event.ok !== true) return;
+      const text =
+        typeof event.text === "string" && event.text.trim().length > 0
+          ? event.text.trim()
+          : "Captura descargada correctamente.";
+      setMessage(text);
+      if (hideTimerRef.current != null) {
+        window.clearTimeout(hideTimerRef.current);
+      }
+      hideTimerRef.current = window.setTimeout(() => {
+        setMessage("");
+      }, 5000);
+    });
+
+    return () => {
+      unsubscribe();
+      if (hideTimerRef.current != null) {
+        window.clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, [runtime.eventBus]);
+
+  return (
+    <div className="snapshot-modal-footer">
+      {message ? <span className="snapshot-modal-footer-status">{message}</span> : null}
+    </div>
+  );
+}
+
+function InfoModalFooter({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const sensorInfoService = runtime.registries.serviceRegistry.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  const [state, setState] = useState(sensorInfoService.getState());
+
+  useEffect(() => sensorInfoService.subscribe((next) => setState(next)), [sensorInfoService]);
+
+  const activeInterval = state.intervals[state.activeTab];
+  const activeLoading = state.loading[state.activeTab];
+
+  return (
+    <div className="modal-footer-split">
+      <div className="modal-footer-left">{activeLoading ? <span className="modal-footer-loading">Loading...</span> : null}</div>
+      <div className="modal-footer-right">
+        <label className="modal-footer-refresh">
+          <span>Refresh (s)</span>
+          <input
+            type="number"
+            min={0.1}
+            max={5}
+            step={0.1}
+            value={activeInterval.toFixed(1)}
+            onChange={(event) => {
+              void sensorInfoService.setInterval(state.activeTab, Number(event.target.value));
+            }}
+          />
+        </label>
+      </div>
     </div>
   );
 }
@@ -463,16 +732,49 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const telemetryService = getTelemetryService(runtime);
   const sensorInfoService = runtime.registries.serviceRegistry.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  let connectionService: ConnectionService | null = null;
+  try {
+    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  } catch {
+    connectionService = null;
+  }
   const [state, setState] = useState(sensorInfoService.getState());
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
+  const [connectionState, setConnectionState] = useState<ConnectionState | null>(
+    connectionService ? connectionService.getState() : null
+  );
+  const topicsSearchRef = useRef<HTMLInputElement | null>(null);
+  const topicsCopyRef = useRef<HTMLButtonElement | null>(null);
+  const topicsListRef = useRef<HTMLUListElement | null>(null);
+  const topicsStreamRef = useRef<HTMLPreElement | null>(null);
+  const topicButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const topicsUiStateRef = useRef<{
+    activeRole: "" | "search" | "copy" | "topic";
+    activeTopicName: string;
+    selectionStart: number | null;
+    selectionEnd: number | null;
+    listScrollTop: number;
+    streamScrollTop: number;
+  }>({
+    activeRole: "",
+    activeTopicName: "",
+    selectionStart: null,
+    selectionEnd: null,
+    listScrollTop: 0,
+    streamScrollTop: 0
+  });
 
   useEffect(() => sensorInfoService.subscribe((next) => setState(next)), [sensorInfoService]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetry(next));
   }, [telemetryService]);
+  useEffect(() => {
+    if (!connectionService) return;
+    return connectionService.subscribe((next) => setConnectionState(next));
+  }, [connectionService]);
 
   useEffect(() => {
     void sensorInfoService.open();
@@ -488,14 +790,46 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const activePayload = state.payloads[state.activeTab] as Record<string, unknown> | undefined;
   const activeSnapshot = (activePayload?.snapshot ?? {}) as Record<string, unknown>;
   const activeError = state.errors[state.activeTab];
-  const activeInterval = state.intervals[state.activeTab];
-  const activeLoading = state.loading[state.activeTab];
   const topicRows = state.topics.catalog.filter((entry) =>
     entry.name.toLowerCase().includes(state.topics.search.trim().toLowerCase())
   );
+  const selectedTopicMeta = state.topics.catalog.find((entry) => entry.name === state.topics.selectedTopic) ?? null;
+  const topicsPayload = state.payloads.topics as Record<string, unknown> | undefined;
+  const topicsSnapshot = (topicsPayload?.snapshot ?? {}) as Record<string, unknown>;
+  const topicsSnapshotError = String(topicsSnapshot.error ?? "").trim();
+  const connected = connectionState ? connectionState.connected : true;
+  const showDisconnected = !connected && state.implemented[state.activeTab];
+
+  useLayoutEffect(() => {
+    if (state.activeTab !== "topics") return;
+    const ui = topicsUiStateRef.current;
+    if (topicsListRef.current) {
+      topicsListRef.current.scrollTop = ui.listScrollTop;
+    }
+    if (topicsStreamRef.current) {
+      topicsStreamRef.current.scrollTop = ui.streamScrollTop;
+    }
+    if (!state.open) return;
+    if (ui.activeRole === "search" && topicsSearchRef.current) {
+      topicsSearchRef.current.focus({ preventScroll: true });
+      if (ui.selectionStart != null) {
+        const selectionEnd = ui.selectionEnd != null ? ui.selectionEnd : ui.selectionStart;
+        topicsSearchRef.current.setSelectionRange(ui.selectionStart, selectionEnd);
+      }
+      return;
+    }
+    if (ui.activeRole === "copy" && topicsCopyRef.current) {
+      topicsCopyRef.current.focus({ preventScroll: true });
+      return;
+    }
+    if (ui.activeRole === "topic" && ui.activeTopicName) {
+      const topicButton = topicButtonRefs.current.get(ui.activeTopicName);
+      topicButton?.focus({ preventScroll: true });
+    }
+  }, [state.activeTab, state.open, state.topics.catalog, state.topics.historyText, state.topics.search, state.topics.selectedTopic]);
 
   return (
-    <div className="stack">
+    <div className="stack info-modal-root">
       <div className="modal-tabs">
         {(["general", "topics", "pixhawk_gps", "lidar", "camera"] as SensorInfoTab[]).map((tab) => (
           <button
@@ -508,56 +842,125 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           </button>
         ))}
       </div>
-      <div className="row">
-        <label className="grow">
-          Refresh (s)
-          <input
-            type="number"
-            min={0.1}
-            max={5}
-            step={0.1}
-            value={activeInterval.toFixed(1)}
-            onChange={(event) => {
-              void sensorInfoService.setInterval(state.activeTab, Number(event.target.value));
-            }}
-          />
-        </label>
-      </div>
       {activeError ? <div className="status-pill bad">Error: {activeError}</div> : null}
-      {activeLoading ? <div className="status-pill">Loading...</div> : null}
-      {state.activeTab === "general" ? (
-        <div className="info-grid-ui">
+      {showDisconnected ? (
+        <div className="panel-card info-placeholder-card">
+          <strong>{state.activeTab === "pixhawk_gps" ? "Pixhawk/GPS" : state.activeTab[0].toUpperCase() + state.activeTab.slice(1)}</strong>
+          <p className="muted">Conecta el WebSocket para consultar informacion de sensores.</p>
+        </div>
+      ) : null}
+      {!showDisconnected && state.loading[state.activeTab] && !activePayload ? (
+        <div className="panel-card info-placeholder-card">
+          <strong>Cargando...</strong>
+          <p className="muted">Esperando datos del backend.</p>
+        </div>
+      ) : null}
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "general" ? (
+        <div className="info-card-grid">
           <div className="panel-card">
-            <strong>Robot mode</strong>
-            <p className="muted">{telemetry?.robotStatus.mode ?? "unknown"}</p>
+            <h4>General</h4>
+            <div className="key-value-grid">
+              <span>Robot mode</span>
+              <span>{telemetry?.robotStatus.mode ?? "unknown"}</span>
+              <span>Battery</span>
+              <span>{telemetry ? `${Number(telemetry.robotStatus.batteryPct).toFixed(1)}%` : "n/a"}</span>
+              <span>GPS fix</span>
+              <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.fix_type_name ?? "UNKNOWN")}</span>
+              <span>Precision</span>
+              <span>{formatInfoNumber((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.estimated_precision_m, 2)} m</span>
+              <span>RTK source</span>
+              <span>
+                {String(
+                  (activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ??
+                    (activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_id ??
+                    "n/a"
+                )}
+              </span>
+            </div>
           </div>
           <div className="panel-card">
-            <strong>Battery</strong>
-            <p className="muted">{telemetry ? `${Number(telemetry.robotStatus.batteryPct).toFixed(1)}%` : "n/a"}</p>
+            <h4>Datum</h4>
+            <div className="key-value-grid">
+              <span>Status</span>
+              <span>{(activeSnapshot.datum as Record<string, unknown> | undefined)?.already_set === true ? "set" : "unset"}</span>
+              <span>Latitude</span>
+              <span>{formatInfoCoordinate((activeSnapshot.datum as Record<string, unknown> | undefined)?.datum_lat)}</span>
+              <span>Longitude</span>
+              <span>{formatInfoCoordinate((activeSnapshot.datum as Record<string, unknown> | undefined)?.datum_lon)}</span>
+              <span>Source</span>
+              <span>{String((activeSnapshot.datum as Record<string, unknown> | undefined)?.last_set_source ?? "n/a")}</span>
+              <span>Last set</span>
+              <span>{formatInfoTimestamp((activeSnapshot.datum as Record<string, unknown> | undefined)?.last_set_epoch_ms)}</span>
+            </div>
           </div>
           <div className="panel-card">
-            <strong>RTK Source</strong>
-            <p className="muted">
-              {String(
-                (activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a"
-              )}
-            </p>
+            <h4>RTK Source</h4>
+            <div className="key-value-grid">
+              <span>Connected</span>
+              <span>{(activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.connected === true ? "yes" : "no"}</span>
+              <span>Label</span>
+              <span>{String((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a")}</span>
+              <span>RTCM age</span>
+              <span>{formatInfoNumber((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.rtcm_age_s, 1)} s</span>
+              <span>Received count</span>
+              <span>{formatInfoNumber((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.received_count, 0)}</span>
+              <span>Last error</span>
+              <span>{String((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.last_error ?? "none")}</span>
+            </div>
           </div>
         </div>
       ) : null}
-      {state.activeTab === "topics" ? (
-        <div className="stack">
-          <input
-            value={state.topics.search}
-            onChange={(event) => sensorInfoService.setTopicSearch(event.target.value)}
-            placeholder="Buscar topic..."
-          />
-          <div className="feed-grid">
-            <ul className="feed-list">
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "topics" ? (
+        <div className="stack info-modal-topics">
+          {topicsSnapshotError ? <div className="status-pill bad">{topicsSnapshotError}</div> : null}
+          {state.topics.truncated ? <div className="status-pill">Historial truncado por limites de memoria.</div> : null}
+          <div className="info-topics-layout">
+            <div className="info-topics-sidebar">
+              <input
+                ref={topicsSearchRef}
+                value={state.topics.search}
+                onFocus={(event) => {
+                  topicsUiStateRef.current.activeRole = "search";
+                  topicsUiStateRef.current.selectionStart = event.target.selectionStart;
+                  topicsUiStateRef.current.selectionEnd = event.target.selectionEnd;
+                }}
+                onSelect={(event) => {
+                  const target = event.target as HTMLInputElement;
+                  topicsUiStateRef.current.selectionStart = target.selectionStart;
+                  topicsUiStateRef.current.selectionEnd = target.selectionEnd;
+                }}
+                onChange={(event) => {
+                  const target = event.target;
+                  topicsUiStateRef.current.activeRole = "search";
+                  topicsUiStateRef.current.selectionStart = target.selectionStart;
+                  topicsUiStateRef.current.selectionEnd = target.selectionEnd;
+                  sensorInfoService.setTopicSearch(target.value);
+                }}
+                placeholder="Buscar topic..."
+              />
+              <ul
+                ref={topicsListRef}
+                className="info-topics-list"
+                onScroll={(event) => {
+                  topicsUiStateRef.current.listScrollTop = event.currentTarget.scrollTop;
+                }}
+              >
               {topicRows.map((entry) => (
                 <li key={entry.name} className="feed-item">
                   <button
+                    ref={(button) => {
+                      if (button) {
+                        topicButtonRefs.current.set(entry.name, button);
+                      } else {
+                        topicButtonRefs.current.delete(entry.name);
+                      }
+                    }}
                     type="button"
+                    className={entry.name === state.topics.selectedTopic ? "active" : ""}
+                    onFocus={() => {
+                      topicsUiStateRef.current.activeRole = "topic";
+                      topicsUiStateRef.current.activeTopicName = entry.name;
+                    }}
                     onClick={() => {
                       void sensorInfoService.selectTopic(entry.name);
                     }}
@@ -570,14 +973,39 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                 </li>
               ))}
               {topicRows.length === 0 ? <li className="feed-item muted">No hay topics.</li> : null}
-            </ul>
-            <div className="panel-card">
-              <strong>{state.topics.selectedTopic || "Topics stream"}</strong>
-              <pre className="code-block">{state.topics.historyText || "Selecciona un topic."}</pre>
+              </ul>
+            </div>
+            <div className="panel-card info-topics-content">
+              <div className="info-topics-content-header">
+                <strong>{state.topics.selectedTopic || "Topics stream"}</strong>
+                <div className="info-topics-selected-meta">
+                  {state.topics.selectedType ? (
+                    <span className="info-topics-selected-badge">{state.topics.selectedType}</span>
+                  ) : null}
+                  <span className="info-topics-selected-badge">
+                    {selectedTopicMeta
+                      ? `pub=${selectedTopicMeta.publisherCount} · sub=${selectedTopicMeta.subscriberCount}`
+                      : "pub=n/a · sub=n/a"}
+                  </span>
+                </div>
+              </div>
+              <pre
+                ref={topicsStreamRef}
+                className="code-block info-topics-stream"
+                onScroll={(event) => {
+                  topicsUiStateRef.current.streamScrollTop = event.currentTarget.scrollTop;
+                }}
+              >
+                {state.topics.historyText || "Selecciona un topic para ver su stream en tiempo real."}
+              </pre>
               <div className="row">
                 <button
+                  ref={topicsCopyRef}
                   type="button"
                   disabled={!state.topics.historyText}
+                  onFocus={() => {
+                    topicsUiStateRef.current.activeRole = "copy";
+                  }}
                   onClick={async () => {
                     if (typeof navigator === "undefined" || !navigator.clipboard) return;
                     await navigator.clipboard.writeText(state.topics.historyText);
@@ -595,22 +1023,91 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           </div>
         </div>
       ) : null}
-      {state.activeTab === "pixhawk_gps" ? (
-        <div className="panel-card">
-          <strong>Pixhawk/GPS</strong>
-          <div className="key-value-grid">
-            <span>Fix</span>
-            <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.fix_type_name ?? "n/a")}</span>
-            <span>Satellites</span>
-            <span>
-              {String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.satellites_visible ?? "n/a")}
-            </span>
-            <span>RTK status</span>
-            <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.rtk_status ?? "n/a")}</span>
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "pixhawk_gps" ? (
+        <div className="info-card-grid">
+          <div className="panel-card">
+            <h4>IMU (EKF)</h4>
+            <div className="key-value-grid">
+              <span>q.w</span>
+              <span>{formatInfoNumber(((activeSnapshot.imu as Record<string, unknown> | undefined)?.orientation as Record<string, unknown> | undefined)?.w, 4)}</span>
+              <span>q.x</span>
+              <span>{formatInfoNumber(((activeSnapshot.imu as Record<string, unknown> | undefined)?.orientation as Record<string, unknown> | undefined)?.x, 4)}</span>
+              <span>q.y</span>
+              <span>{formatInfoNumber(((activeSnapshot.imu as Record<string, unknown> | undefined)?.orientation as Record<string, unknown> | undefined)?.y, 4)}</span>
+              <span>q.z</span>
+              <span>{formatInfoNumber(((activeSnapshot.imu as Record<string, unknown> | undefined)?.orientation as Record<string, unknown> | undefined)?.z, 4)}</span>
+              <span>yaw ENU</span>
+              <span>{formatInfoNumber((activeSnapshot.imu as Record<string, unknown> | undefined)?.yaw_enu_deg, 2)} deg</span>
+            </div>
+          </div>
+          <div className="panel-card">
+            <h4>GPS</h4>
+            <div className="key-value-grid">
+              <span>lat</span>
+              <span>{formatInfoCoordinate((activeSnapshot.gps as Record<string, unknown> | undefined)?.latitude)}</span>
+              <span>lon</span>
+              <span>{formatInfoCoordinate((activeSnapshot.gps as Record<string, unknown> | undefined)?.longitude)}</span>
+              <span>alt</span>
+              <span>{formatInfoNumber((activeSnapshot.gps as Record<string, unknown> | undefined)?.altitude, 2)} m</span>
+              <span>fix</span>
+              <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.fix_type_name ?? "n/a")}</span>
+              <span>rtk status</span>
+              <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.rtk_status ?? "n/a")}</span>
+              <span>satellites</span>
+              <span>{formatInfoNumber((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.satellites_visible, 0)}</span>
+            </div>
+          </div>
+          <div className="panel-card">
+            <h4>Velocity</h4>
+            <div className="key-value-grid">
+              <span>vx</span>
+              <span>{formatInfoNumber(((activeSnapshot.velocity as Record<string, unknown> | undefined)?.linear as Record<string, unknown> | undefined)?.x, 3)} m/s</span>
+              <span>vy</span>
+              <span>{formatInfoNumber(((activeSnapshot.velocity as Record<string, unknown> | undefined)?.linear as Record<string, unknown> | undefined)?.y, 3)} m/s</span>
+              <span>vz</span>
+              <span>{formatInfoNumber(((activeSnapshot.velocity as Record<string, unknown> | undefined)?.linear as Record<string, unknown> | undefined)?.z, 3)} m/s</span>
+              <span>yaw rate</span>
+              <span>{formatInfoNumber(((activeSnapshot.velocity as Record<string, unknown> | undefined)?.angular as Record<string, unknown> | undefined)?.z, 3)} rad/s</span>
+            </div>
+          </div>
+          <div className="panel-card">
+            <h4>Odometry (EKF)</h4>
+            <div className="key-value-grid">
+              <span>x</span>
+              <span>{formatInfoNumber(((activeSnapshot.odom as Record<string, unknown> | undefined)?.position as Record<string, unknown> | undefined)?.x, 3)} m</span>
+              <span>y</span>
+              <span>{formatInfoNumber(((activeSnapshot.odom as Record<string, unknown> | undefined)?.position as Record<string, unknown> | undefined)?.y, 3)} m</span>
+              <span>z</span>
+              <span>{formatInfoNumber(((activeSnapshot.odom as Record<string, unknown> | undefined)?.position as Record<string, unknown> | undefined)?.z, 3)} m</span>
+              <span>yaw ENU</span>
+              <span>{formatInfoNumber((activeSnapshot.odom as Record<string, unknown> | undefined)?.yaw_enu_deg, 2)} deg</span>
+            </div>
+          </div>
+          <div className="panel-card">
+            <h4>Yaw Diagnostics</h4>
+            <div className="key-value-grid">
+              <span>Delta yaw</span>
+              <span>{formatInfoNumber((activeSnapshot.diagnostics as Record<string, unknown> | undefined)?.yaw_delta_deg, 2)} deg</span>
+              <span>ENU convention</span>
+              <span>0°=E, 90°=N</span>
+            </div>
+          </div>
+          <div className="panel-card">
+            <h4>Topic Bindings</h4>
+            <div className="key-value-grid">
+              <span>IMU</span>
+              <span>{String((activeSnapshot.topics as Record<string, unknown> | undefined)?.imu ?? "--")}</span>
+              <span>GPS</span>
+              <span>{String((activeSnapshot.topics as Record<string, unknown> | undefined)?.gps ?? "--")}</span>
+              <span>Velocity</span>
+              <span>{String((activeSnapshot.topics as Record<string, unknown> | undefined)?.velocity ?? "--")}</span>
+              <span>Odom</span>
+              <span>{String((activeSnapshot.topics as Record<string, unknown> | undefined)?.odom ?? "--")}</span>
+            </div>
           </div>
         </div>
       ) : null}
-      {state.activeTab === "lidar" ? (
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "lidar" ? (
         <div className="panel-card">
           <strong>LiDAR</strong>
           <p className="muted">
@@ -618,7 +1115,7 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           </p>
         </div>
       ) : null}
-      {state.activeTab === "camera" ? (
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "camera" ? (
         <div className="panel-card">
           <strong>Camera</strong>
           <p className="muted">
@@ -696,13 +1193,23 @@ function registerModals(ctx: ModuleContext): void {
     id: "modal.snapshot",
     title: "Navigation Snapshot",
     order: 5,
-    render: ({ runtime }) => <SnapshotModal runtime={runtime} />
+    render: ({ runtime }) => <SnapshotModal runtime={runtime} />,
+    renderFooter: ({ runtime }) => <SnapshotModalFooter runtime={runtime} />
   });
   ctx.registries.modalRegistry.registerModalDialog({
     id: "modal.info",
     title: "Info",
     order: 6,
-    render: ({ runtime }) => <InfoModal runtime={runtime} />
+    render: ({ runtime }) => <InfoModal runtime={runtime} />,
+    renderFooter: ({ runtime }) => <InfoModalFooter runtime={runtime} />
+  });
+}
+
+function registerFooterItems(ctx: ModuleContext): void {
+  ctx.registries.footerItemRegistry.registerFooterItem({
+    id: "footer.connection",
+    order: 10,
+    render: (runtime) => <ConnectionFooterItem runtime={runtime} />
   });
 }
 
@@ -787,6 +1294,7 @@ export function createNavigationModule(): CockpitModule {
       const navigationService = registerServices(ctx, dispatcher);
       registerSidebarPanels(ctx);
       registerModals(ctx);
+      registerFooterItems(ctx);
       registerToolbarMenu(ctx, navigationService);
     }
   };

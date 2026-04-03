@@ -1,5 +1,6 @@
 import { ConsoleTabRegistry } from "./consoleTabRegistry";
 import { DispatcherRegistry } from "./dispatcherRegistry";
+import { FooterItemRegistry } from "./footerItemRegistry";
 import { ModalRegistry } from "./modalRegistry";
 import { ServiceRegistry } from "./serviceRegistry";
 import { SidebarPanelRegistry } from "./sidebarPanelRegistry";
@@ -14,10 +15,10 @@ export function createRegistries(): RegistryBundle {
     sidebarPanelRegistry: new SidebarPanelRegistry(),
     workspaceViewRegistry: new WorkspaceViewRegistry(),
     consoleTabRegistry: new ConsoleTabRegistry(),
+    footerItemRegistry: new FooterItemRegistry(),
     modalRegistry: new ModalRegistry(),
     serviceRegistry: new ServiceRegistry(),
     dispatcherRegistry: new DispatcherRegistry(),
     transportRegistry: new TransportRegistry()
   };
 }
-

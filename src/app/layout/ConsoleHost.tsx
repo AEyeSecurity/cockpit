@@ -8,7 +8,6 @@ interface ConsoleHostProps {
   onSelectTab: (tabId: string) => void;
   collapsed: boolean;
   height: number;
-  onToggleCollapse: () => void;
 }
 
 export function ConsoleHost({
@@ -17,8 +16,7 @@ export function ConsoleHost({
   activeTabId,
   onSelectTab,
   collapsed,
-  height,
-  onToggleCollapse
+  height
 }: ConsoleHostProps): JSX.Element {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
 
@@ -35,9 +33,6 @@ export function ConsoleHost({
             {tab.label}
           </button>
         ))}
-        <button type="button" className="console-collapse-btn" onClick={onToggleCollapse}>
-          {collapsed ? "▲" : "▼"}
-        </button>
       </div>
       <div className="console-tab-content">
         {activeTab ? activeTab.render(runtime) : "No console tabs registered."}

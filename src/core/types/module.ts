@@ -6,6 +6,7 @@ import type { Container } from "../di/container";
 import type { EventBus } from "../events/eventBus";
 import type { ConsoleTabRegistry } from "../registries/consoleTabRegistry";
 import type { DispatcherRegistry } from "../registries/dispatcherRegistry";
+import type { FooterItemRegistry } from "../registries/footerItemRegistry";
 import type { ModalRegistry } from "../registries/modalRegistry";
 import type { ServiceRegistry } from "../registries/serviceRegistry";
 import type { SidebarPanelRegistry } from "../registries/sidebarPanelRegistry";
@@ -18,6 +19,7 @@ export interface RegistryBundle {
   sidebarPanelRegistry: SidebarPanelRegistry;
   workspaceViewRegistry: WorkspaceViewRegistry;
   consoleTabRegistry: ConsoleTabRegistry;
+  footerItemRegistry: FooterItemRegistry;
   modalRegistry: ModalRegistry;
   serviceRegistry: ServiceRegistry;
   dispatcherRegistry: DispatcherRegistry;
@@ -44,4 +46,3 @@ export interface CockpitModule {
   enabledByDefault: boolean;
   register(ctx: ModuleContext): void | Promise<void>;
 }
-

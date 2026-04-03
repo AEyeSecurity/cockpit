@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { MissionDispatcher } from "../../dispatcher/impl/MissionDispatcher";
 import { notify } from "../../platform/tauri/notifications";
@@ -10,38 +11,6 @@ import { RosBridgeTransport } from "../../transport/impl/RosBridgeTransport";
 const TRANSPORT_ID = "transport.rosbridge";
 const DISPATCHER_ID = "dispatcher.mission";
 const SERVICE_ID = "service.mission";
-
-interface ConsoleEvent {
-  level: string;
-  text: string;
-  timestamp: number;
-}
-
-function EventConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const [events, setEvents] = useState<ConsoleEvent[]>([]);
-
-  useEffect(() => {
-    const unsubscribe = runtime.eventBus.on<ConsoleEvent>("console.event", (event) => {
-      setEvents((prev) => [event, ...prev].slice(0, 80));
-    });
-    return () => unsubscribe();
-  }, [runtime]);
-
-  if (events.length === 0) {
-    return <p className="muted">No events yet.</p>;
-  }
-
-  return (
-    <ul className="feed-list">
-      {events.map((event, idx) => (
-        <li key={`${event.timestamp}.${idx}`} className="feed-item">
-          <strong>[{event.level}]</strong> {event.text}
-          <div className="muted">{new Date(event.timestamp).toLocaleTimeString()}</div>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 function MissionModal({ runtime, close }: { runtime: ModuleContext; close: () => void }): JSX.Element {
   const missionService = runtime.registries.serviceRegistry.getService<MissionService>(SERVICE_ID);
@@ -205,13 +174,6 @@ export function createDebugModule(): CockpitModule {
         id: SERVICE_ID,
         order: 40,
         service
-      });
-
-      ctx.registries.consoleTabRegistry.registerConsoleTab({
-        id: "console.events",
-        label: "Events",
-        order: 10,
-        render: (runtime) => <EventConsoleTab runtime={runtime} />
       });
 
       ctx.registries.modalRegistry.registerModalDialog({

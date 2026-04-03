@@ -10,8 +10,8 @@ export class MapDispatcher extends DispatcherBase {
     this.publish(message.op, message);
   }
 
-  async requestMap(mapId: string): Promise<IncomingPacket> {
-    return this.request("get_state", { map_id: mapId } as never, { timeoutMs: 6000 });
+  async requestMap(_mapId: string): Promise<IncomingPacket> {
+    return this.request("get_state", {}, { timeoutMs: 6000 });
   }
 
   async setZonesGeoJson(geojson: unknown): Promise<IncomingPacket> {
@@ -20,5 +20,9 @@ export class MapDispatcher extends DispatcherBase {
 
   async loadZonesFile(): Promise<IncomingPacket> {
     return this.request("load_zones_file", {}, { timeoutMs: 6000 });
+  }
+
+  async setDatum(): Promise<IncomingPacket> {
+    return this.request("set_datum", {}, { timeoutMs: 6000 });
   }
 }

@@ -39,12 +39,13 @@ export class RobotDispatcher extends DispatcherBase {
   }
 
   async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<IncomingPacket> {
+    // Legacy backend contract expects snake_case controls at top level.
     return this.request(
       "set_manual_cmd",
       {
-        linear_x_mps: linearX,
-        angular_z_radps: angularZ,
-        brake_pct: brake ? 1.0 : 0.0
+        linear_x: linearX,
+        angular_z: angularZ,
+        brake_pct: brake ? 100 : 0
       } as never,
       { timeoutMs: 2500 }
     );
@@ -52,6 +53,14 @@ export class RobotDispatcher extends DispatcherBase {
 
   async requestSnapshot(): Promise<IncomingPacket> {
     return this.request("get_nav_snapshot", {}, { timeoutMs: 7000 });
+  }
+
+  async requestSaveWaypointsFile(waypoints: Array<{ lat: number; lon: number; yaw_deg: number }>): Promise<IncomingPacket> {
+    return this.request("save_waypoints_file", { waypoints } as never, { timeoutMs: 7000 });
+  }
+
+  async requestLoadWaypointsFile(): Promise<IncomingPacket> {
+    return this.request("load_waypoints_file", {}, { timeoutMs: 7000 });
   }
 
   async requestCameraPan(angleDeg: number): Promise<IncomingPacket> {
@@ -129,5 +138,9 @@ export class RobotDispatcher extends DispatcherBase {
 
   subscribeSensorInfo(callback: (message: IncomingPacket) => void): () => void {
     return this.subscribe("sensor_info", callback);
+  }
+
+  subscribeAck(callback: (message: IncomingPacket) => void): () => void {
+    return this.subscribe("ack", callback);
   }
 }

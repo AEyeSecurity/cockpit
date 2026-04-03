@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { ConnectionState, ConnectionService } from "../../services/impl/ConnectionService";
@@ -116,17 +117,22 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
 function TelemetryConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<TelemetryService>(SERVICE_ID);
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot>(service.getSnapshot());
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => service.subscribeTelemetry((next) => setSnapshot(next)), [service]);
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   return (
-    <div className="feed-grid">
-      <div className="panel-card">
+    <div className="feed-grid telemetry-console-grid">
+      <div className="panel-card telemetry-scroll-card">
         <h4>Recent Events</h4>
         {snapshot.recentEvents.length === 0 ? (
           <p className="muted">No events.</p>
         ) : (
-          <ul className="feed-list">
+          <ul className="feed-list telemetry-scroll-list">
             {snapshot.recentEvents.map((entry, index) => (
               <li key={`${entry.timestamp}.${index}`} className="feed-item">
                 <div>
@@ -138,14 +144,17 @@ function TelemetryConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Eleme
           </ul>
         )}
       </div>
-      <div className="panel-card">
+      <div className="panel-card telemetry-scroll-card">
         <h4>Alerts Timeline</h4>
         {snapshot.alerts.length === 0 ? (
           <p className="muted">No alerts.</p>
         ) : (
-          <ul className="feed-list">
+          <ul className="feed-list telemetry-scroll-list">
             {snapshot.alerts.map((entry, index) => (
-              <li key={`${entry.timestamp}.${index}`} className="feed-item">
+              <li
+                key={`${entry.timestamp}.${index}`}
+                className={`feed-item ${nowMs - entry.timestamp <= 5000 ? "alert-recent" : ""}`}
+              >
                 <div>
                   <strong>{entry.level.toUpperCase()}</strong> {entry.text}
                 </div>

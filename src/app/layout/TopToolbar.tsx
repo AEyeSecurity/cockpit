@@ -75,9 +75,6 @@ export function TopToolbar({ runtime, menus, openModal }: TopToolbarProps): JSX.
           ))}
         </nav>
       </div>
-      <div className="toolbar-center">
-        <span>workspace (área de trabajo)</span>
-      </div>
     </header>
   );
 }

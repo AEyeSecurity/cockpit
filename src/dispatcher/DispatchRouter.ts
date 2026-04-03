@@ -25,7 +25,7 @@ export class DispatchRouter {
     const transport = this.transportManager.getTransport(transportId);
     if (!transport) return;
 
-    const unsubscribe = transport.recv((message) => {
+    const unsubscribe = this.transportManager.recv(transportId, (message) => {
       this.handleIncoming(transportId, message);
     });
     this.transportBindings.set(transportId, unsubscribe);
@@ -69,7 +69,6 @@ export class DispatchRouter {
       void this.transportManager
         .send(transportId, {
           op,
-          request: op,
           requestId,
           clientReqId: requestId,
           payload

@@ -1,0 +1,61 @@
+.telemetry-console-grid {
+  min-height: 0;
+  height: 100%;
+}
+
+.telemetry-scroll-card {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.telemetry-scroll-list {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+.feed-item.alert-recent {
+  background: rgba(251, 180, 94, 0.22);
+  border-color: rgba(251, 180, 94, 0.6);
+  transition: background-color 220ms ease, border-color 220ms ease;
+}
+
+.status-board {
+  background: #352d2d;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.status-row {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-ok {
+  color: var(--good);
+}
+
+.status-bad {
+  color: var(--bad);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.console-tab-content .telemetry-console-grid {
+  min-height: 0;
+  height: 100%;
+}

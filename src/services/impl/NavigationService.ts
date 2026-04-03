@@ -61,7 +61,7 @@ type NavigationListener = (state: NavigationState) => void;
 const WAYPOINT_STORAGE_KEY = "cockpit.navigation.waypoints.v1";
 const DEFAULT_MANUAL_LINEAR_SPEED = 1.2;
 const DEFAULT_MANUAL_ANGULAR_SPEED = 0.4;
-const MANUAL_LOOP_INTERVAL_MS = 120;
+const MANUAL_LOOP_INTERVAL_MS = 50;
 const navigationMemoryStorage = new Map<string, string>();
 
 function getStorageAdapter(): {
@@ -161,8 +161,14 @@ export class NavigationService {
       subscribeState?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeNavTelemetry?: (callback: (message: Record<string, unknown>) => void) => () => void;
     };
-    dispatcher.subscribeState?.((message) => this.applyControlLockPayload(message));
-    dispatcher.subscribeNavTelemetry?.((message) => this.applyControlLockPayload(message));
+    dispatcher.subscribeState?.((message) => {
+      this.applyControlLockPayload(message);
+      this.applyManualControlPayload(message);
+    });
+    dispatcher.subscribeNavTelemetry?.((message) => {
+      this.applyControlLockPayload(message);
+      this.applyManualControlPayload(message);
+    });
   }
 
   getState(): NavigationState {
@@ -309,6 +315,28 @@ export class NavigationService {
     return this.state.waypoints.length;
   }
 
+  async saveWaypointsFile(): Promise<number> {
+    if (this.state.waypoints.length === 0) {
+      throw new Error("No waypoints to save");
+    }
+    const waypoints = this.state.waypoints.map((entry) => ({
+      lat: Number(entry.x),
+      lon: Number(entry.y),
+      yaw_deg: Number(entry.yawDeg ?? 0)
+    }));
+    const response = await this.robotDispatcher.requestSaveWaypointsFile(waypoints);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Save waypoints failed");
+    }
+    const count = Number(response.waypoint_count ?? waypoints.length);
+    this.state = {
+      ...this.state,
+      lastStatus: `Waypoints saved (${Number.isFinite(count) ? count : waypoints.length})`
+    };
+    this.emit();
+    return Number.isFinite(count) ? count : waypoints.length;
+  }
+
   loadWaypoints(): number {
     const raw = getStorageAdapter().getItem(WAYPOINT_STORAGE_KEY);
     if (!raw) {
@@ -325,6 +353,41 @@ export class NavigationService {
       waypoints: loaded,
       selectedWaypointIndexes: [],
       lastStatus: `Loaded ${loaded.length} waypoints`
+    };
+    this.emit();
+    return loaded.length;
+  }
+
+  async loadWaypointsFile(): Promise<number> {
+    const response = await this.robotDispatcher.requestLoadWaypointsFile();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Load waypoints failed");
+    }
+    const raw = Array.isArray(response.waypoints) ? response.waypoints : [];
+    const loaded = raw
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const value = entry as Record<string, unknown>;
+        const lat = Number(value.lat);
+        const lon = Number(value.lon);
+        const yawDeg = Number(value.yaw_deg ?? value.yawDeg ?? 0);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+          return null;
+        }
+        return {
+          x: lat,
+          y: lon,
+          yawDeg
+        } satisfies GoalInput;
+      })
+      .filter((entry): entry is GoalInput => entry !== null)
+      .slice(0, 40);
+
+    this.state = {
+      ...this.state,
+      waypoints: loaded,
+      selectedWaypointIndexes: [],
+      lastStatus: `Waypoints loaded (${loaded.length})`
     };
     this.emit();
     return loaded.length;
@@ -564,6 +627,9 @@ export class NavigationService {
     };
     this.updateManualLoopLifecycle();
     this.emit();
+    if (nextPressed) {
+      this.autoEnableManualModeFromTeleop();
+    }
   }
 
   setManualBrakeHeld(pressed: boolean): void {
@@ -575,6 +641,9 @@ export class NavigationService {
     };
     this.updateManualLoopLifecycle();
     this.emit();
+    if (nextPressed) {
+      this.autoEnableManualModeFromTeleop();
+    }
   }
 
   getManualKeysSummary(): string {
@@ -590,6 +659,17 @@ export class NavigationService {
   private emit(): void {
     const snapshot = this.getState();
     this.listeners.forEach((listener) => listener(snapshot));
+  }
+
+  private autoEnableManualModeFromTeleop(): void {
+    if (this.state.manualMode || this.state.manualDisablePending || this.state.controlLocked) return;
+    void this.setManualMode(true).catch((error) => {
+      this.state = {
+        ...this.state,
+        lastStatus: `Manual mode auto-enable failed: ${String(error)}`
+      };
+      this.emit();
+    });
   }
 
   private async setControlLock(locked: boolean, graceMs = 2000): Promise<void> {
@@ -643,6 +723,38 @@ export class NavigationService {
       this.updateManualLoopLifecycle();
       this.stopControlHeartbeat();
     }
+    this.emit();
+  }
+
+  private applyManualControlPayload(message: Record<string, unknown>): void {
+    if (!message || typeof message !== "object") return;
+    const manualRaw = message.manual_control;
+    if (!manualRaw || typeof manualRaw !== "object") return;
+    const manual = manualRaw as Record<string, unknown>;
+    const enabledFromServer = manual.enabled === true;
+    if (this.state.manualDisablePending && enabledFromServer) {
+      return;
+    }
+
+    const nextLinear = Number(manual.linear_x_cmd ?? 0);
+    const nextAngular = Number(manual.angular_z_cmd ?? 0);
+    const safeLinear = Number.isFinite(nextLinear) ? nextLinear : 0;
+    const safeAngular = Number.isFinite(nextAngular) ? nextAngular : 0;
+
+    this.state = {
+      ...this.state,
+      manualMode: enabledFromServer,
+      manualDisablePending: enabledFromServer ? this.state.manualDisablePending : false,
+      manualCommand: {
+        linearX: safeLinear,
+        angularZ: safeAngular
+      }
+    };
+
+    if (!enabledFromServer) {
+      this.clearManualIntent();
+    }
+    this.updateManualLoopLifecycle();
     this.emit();
   }
 
@@ -722,6 +834,9 @@ export class NavigationService {
       const right = this.state.manualKeys.d ? 1 : 0;
       linear = (forward - reverse) * this.state.manualLinearSpeed;
       angular = (left - right) * this.state.manualAngularSpeed;
+      if (linear < 0) {
+        angular = -angular;
+      }
     }
 
     if (Math.abs(linear) < 1e-3) linear = 0;

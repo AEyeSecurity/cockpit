@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { ConsoleHost } from "./layout/ConsoleHost";
+import { FooterHost } from "./layout/FooterHost";
+import { GlobalDialogHost } from "./layout/GlobalDialogHost";
 import { ModalHost } from "./layout/ModalHost";
 import { SidebarHost } from "./layout/SidebarHost";
 import { TopToolbar } from "./layout/TopToolbar";
 import { WorkspaceHost } from "./layout/WorkspaceHost";
 import type { AppRuntime } from "../core/types/module";
 import { NAV_EVENTS } from "../core/events/topics";
+import type { ConnectionService } from "../services/impl/ConnectionService";
 import type { NavigationService } from "../services/impl/NavigationService";
+import { DIALOG_SERVICE_ID, type DialogService } from "../services/impl/DialogService";
 
 interface AppShellProps {
   runtime: AppRuntime;
@@ -30,12 +34,27 @@ function sidebarEmoji(panelId: string): string {
   return "🧩";
 }
 
+function isDisconnectedErrorText(text: string): boolean {
+  const normalized = text.toLowerCase();
+  if (!normalized.trim()) return false;
+  return (
+    normalized.includes(" is disconnected") ||
+    normalized.includes("disconnected (") ||
+    normalized.includes("connection lost") ||
+    normalized.includes("websocket connection failed") ||
+    normalized.includes("no active connection")
+  );
+}
+
+const CONNECTION_SERVICE_ID = "service.connection";
+
 export function AppShell({ runtime }: AppShellProps): JSX.Element {
   const toolbarMenus = runtime.registries.toolbarMenuRegistry.list();
   const sidebarPanels = runtime.registries.sidebarPanelRegistry.list();
   const workspaceViews = runtime.registries.workspaceViewRegistry.list();
   const consoleTabs = runtime.registries.consoleTabRegistry.list();
   const modalDialogs = runtime.registries.modalRegistry.list();
+  const footerItems = runtime.registries.footerItemRegistry.list();
 
   const [activeSidebarId, setActiveSidebarId] = useState<string>(sidebarPanels[0]?.id ?? "");
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(workspaceViews[0]?.id ?? "");
@@ -62,8 +81,102 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
   }, [activeConsoleId, consoleTabs]);
 
   useEffect(() => {
+    let connectionService: ConnectionService | null = null;
+    let dialogService: DialogService | null = null;
+    try {
+      connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+      dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+    } catch {
+      connectionService = null;
+      dialogService = null;
+    }
+    if (!connectionService || !dialogService) return;
+
+    let connected = connectionService.getState().connected;
+    let notifiedLoss = false;
+    let lastNoConnectionNoticeAt = 0;
+
+    const notifyLostConnection = (reason: string): void => {
+      if (notifiedLoss) return;
+      notifiedLoss = true;
+      const detail = reason.trim() ? `\n\nDetalle: ${reason.trim()}` : "";
+      void dialogService.alert({
+        title: "Conexión perdida",
+        message: `Se perdió la conexión con el backend remoto.${detail}`,
+        confirmLabel: "Entendido",
+        danger: true
+      });
+    };
+
+    const notifyNoConnection = (): void => {
+      const now = Date.now();
+      if (now - lastNoConnectionNoticeAt < 1200) return;
+      lastNoConnectionNoticeAt = now;
+      void dialogService.alert({
+        title: "Sin conexión activa",
+        message: "No hay conexión activa con el backend. Conéctate para ejecutar esta acción.",
+        confirmLabel: "Entendido",
+        danger: true
+      });
+    };
+
+    const unsubscribeConnection = connectionService.subscribe((next) => {
+      const lostByTransition = connected && !next.connected && next.lastError.trim().length > 0;
+      connected = next.connected;
+      if (next.connected) {
+        notifiedLoss = false;
+      } else if (lostByTransition) {
+        notifyLostConnection(next.lastError);
+      }
+    });
+
+    const unsubscribeConsole = runtime.eventBus.on<{ level?: unknown; text?: unknown }>("console.event", (entry) => {
+      const level = typeof entry.level === "string" ? entry.level : "";
+      if (level !== "error") return;
+      const rawText = typeof entry.text === "string" ? entry.text : "";
+      if (!isDisconnectedErrorText(rawText)) return;
+      if (connected) {
+        notifyLostConnection(rawText);
+        return;
+      }
+      notifyNoConnection();
+    });
+
+    return () => {
+      unsubscribeConnection();
+      unsubscribeConsole();
+    };
+  }, [runtime]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isEditingTarget(event.target)) return;
+
+      const withCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
+      if (withCtrl && event.code === "KeyJ") {
+        setConsoleCollapsed((prev) => !prev);
+        event.preventDefault();
+        return;
+      }
+      if (withCtrl && event.code === "KeyB") {
+        setSidebarCollapsed((prev) => !prev);
+        event.preventDefault();
+        return;
+      }
+
+      let dialogService: DialogService | null = null;
+      try {
+        dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+      } catch {
+        dialogService = null;
+      }
+      if (dialogService?.getActiveDialog()) {
+        if (event.key === "Escape") {
+          dialogService.dismiss();
+          event.preventDefault();
+        }
+        return;
+      }
 
       let navigationService: NavigationService | null = null;
       try {
@@ -73,23 +186,53 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       }
 
       if (event.key === "Escape") {
-        if (!activeModalId) return;
-        if (event.shiftKey && activeModalId === "modal.snapshot") {
-          runtime.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {});
+        if (activeModalId) {
+          if (event.shiftKey && activeModalId === "modal.snapshot") {
+            runtime.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {});
+          }
+          setActiveModalId(null);
+          event.preventDefault();
+          return;
         }
-        setActiveModalId(null);
+        if (navigationService?.getState().goalMode) {
+          navigationService.toggleGoalMode();
+          runtime.eventBus.emit("console.event", {
+            level: "info",
+            text: "Goal mode disabled (Esc)",
+            timestamp: Date.now()
+          });
+          event.preventDefault();
+          return;
+        }
+      }
+
+      if (event.code === "KeyQ") {
+        setActiveModalId("modal.snapshot");
+        if (navigationService) {
+          void navigationService
+            .requestSnapshot()
+            .then(() => {
+              runtime.eventBus.emit("console.event", {
+                level: "info",
+                text: "Snapshot captured (hotkey)",
+                timestamp: Date.now()
+              });
+            })
+            .catch((error) => {
+              runtime.eventBus.emit("console.event", {
+                level: "error",
+                text: `Snapshot capture failed: ${String(error)}`,
+                timestamp: Date.now()
+              });
+            });
+        } else {
+          runtime.eventBus.emit(NAV_EVENTS.snapshotCaptureRequest, {});
+        }
         event.preventDefault();
         return;
       }
 
       if (activeModalId) return;
-
-      if (event.code === "KeyQ") {
-        setActiveModalId("modal.snapshot");
-        runtime.eventBus.emit(NAV_EVENTS.snapshotCaptureRequest, {});
-        event.preventDefault();
-        return;
-      }
 
       if (event.code === "KeyI" && !event.ctrlKey && !event.altKey && !event.metaKey) {
         setActiveModalId("modal.info");
@@ -324,22 +467,17 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
             onSelectTab={setActiveConsoleId}
             collapsed={consoleCollapsed}
             height={consoleCollapsed ? 36 : consoleHeight}
-            onToggleCollapse={() => setConsoleCollapsed((prev) => !prev)}
           />
-          {consoleCollapsed ? (
-            <button
-              type="button"
-              className="console-restore-floating"
-              onClick={() => setConsoleCollapsed(false)}
-              title="Expand console"
-              aria-label="Expand console"
-            >
-              ▲
-            </button>
-          ) : null}
         </main>
       </div>
       <ModalHost runtime={runtime} dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
+      <GlobalDialogHost runtime={runtime} />
+      <FooterHost
+        runtime={runtime}
+        items={footerItems}
+        consoleCollapsed={consoleCollapsed}
+        onToggleConsoleCollapse={() => setConsoleCollapsed((prev) => !prev)}
+      />
     </div>
   );
 }

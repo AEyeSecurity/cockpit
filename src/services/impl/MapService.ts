@@ -190,12 +190,13 @@ export class MapService {
     return zone;
   }
 
-  removeZone(zoneId: string): void {
+  removeZone(zoneId: string, options?: { sync?: boolean }): void {
     this.state = {
       ...this.state,
       zones: this.state.zones.filter((zone) => zone.id !== zoneId)
     };
     this.emit();
+    this.syncZonesIfEnabled(options);
   }
 
   toggleZoneEnabled(zoneId: string): void {
@@ -212,6 +213,7 @@ export class MapService {
       )
     };
     this.emit();
+    this.syncZonesIfEnabled();
   }
 
   setZonePolygon(zoneId: string, polygon: Array<{ lat: number; lon: number }>): void {
@@ -243,6 +245,7 @@ export class MapService {
       zones: []
     };
     this.emit();
+    this.syncZonesIfEnabled();
   }
 
   refreshZones(): void {
@@ -336,9 +339,23 @@ export class MapService {
     this.emit();
   }
 
+  async setDatumOnBackend(): Promise<void> {
+    const response = await this.mapDispatcher.setDatum();
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "set_datum failed"));
+    }
+    this.setDatumFromRobot();
+  }
+
   private emit(): void {
     const state = this.getState();
     this.listeners.forEach((listener) => listener(state));
+  }
+
+  private syncZonesIfEnabled(options?: { sync?: boolean }): void {
+    const shouldSync = options?.sync ?? true;
+    if (!shouldSync || !this.state.autoSync) return;
+    void this.pushZonesToBackend().catch(() => undefined);
   }
 
   private buildGeoJsonFromState(): Record<string, unknown> {

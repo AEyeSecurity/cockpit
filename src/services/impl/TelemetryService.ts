@@ -132,9 +132,7 @@ export class TelemetryService {
   pushEvent(event: TelemetryEvent): void {
     const nextRecent = [event, ...this.snapshot.recentEvents].slice(0, 40);
     const nextAlerts =
-      event.level === "error" || event.level === "warn"
-        ? [event, ...this.snapshot.alerts].slice(0, 20)
-        : this.snapshot.alerts;
+      event.level === "error" || event.level === "warn" ? this.mergeAlerts([event], this.snapshot.alerts) : this.snapshot.alerts;
 
     this.snapshot = {
       ...this.snapshot,
@@ -147,7 +145,7 @@ export class TelemetryService {
   private setAlerts(alerts: TelemetryEvent[]): void {
     this.snapshot = {
       ...this.snapshot,
-      alerts: alerts.slice(0, 40)
+      alerts: this.mergeAlerts(alerts, this.snapshot.alerts)
     };
   }
 
@@ -207,5 +205,23 @@ export class TelemetryService {
   private emit(): void {
     const snapshot = this.getSnapshot();
     this.listeners.forEach((listener) => listener(snapshot));
+  }
+
+  private mergeAlerts(incoming: TelemetryEvent[], existing: TelemetryEvent[]): TelemetryEvent[] {
+    const keyed = new Map<string, TelemetryEvent>();
+    [...incoming, ...existing].forEach((entry) => {
+      const level = String(entry.level ?? "info").toLowerCase();
+      const text = String(entry.text ?? "");
+      const timestamp = Number(entry.timestamp ?? 0);
+      const key = `${timestamp}|${level}|${text}`;
+      if (!keyed.has(key)) {
+        keyed.set(key, {
+          level,
+          text,
+          timestamp
+        });
+      }
+    });
+    return [...keyed.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 80);
   }
 }

@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
+import "./styles.css";
 import { NAV_EVENTS } from "../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { MapDispatcher } from "../../dispatcher/impl/MapDispatcher";
@@ -19,7 +20,9 @@ const CONNECTION_SERVICE_ID = "service.connection";
 const TELEMETRY_SERVICE_ID = "service.telemetry";
 const GPS_NATIVE_MAX_ZOOM = 19;
 const GPS_DEFAULT_ZOOM = GPS_NATIVE_MAX_ZOOM - 3;
-const GPS_DEFAULT_CENTER: L.LatLngTuple = [-31.421785, -64.102448];
+const GPS_DEFAULT_CENTER: L.LatLngTuple = [-31.4201, -64.1888];
+const MAP_WHEEL_PX_PER_ZOOM_LEVEL = 160;
+const MAP_WHEEL_DEBOUNCE_MS = 80;
 
 interface TelemetryServiceLike {
   getSnapshot: () => TelemetrySnapshot;
@@ -31,158 +34,6 @@ function isEditingTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
-function ZonesSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<MapService>(SERVICE_ID);
-  const [state, setState] = useState<MapWorkspaceState>(service.getState());
-  const [zoneName, setZoneName] = useState("");
-
-  useEffect(() => service.subscribe((next) => setState(next)), [service]);
-
-  return (
-    <div className="stack">
-      <div className="panel-card">
-        <h3>Zones</h3>
-        <p className="muted">Gestion de zonas editable separada del transport.</p>
-        <div className="action-grid">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await service.loadMap("map");
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: "Zones refreshed",
-                  timestamp: Date.now()
-                });
-              } catch (error) {
-                runtime.eventBus.emit("console.event", {
-                  level: "error",
-                  text: `Refresh failed: ${String(error)}`,
-                  timestamp: Date.now()
-                });
-              }
-            }}
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            className="danger-btn"
-            onClick={() => {
-              if (typeof window !== "undefined") {
-                const ok = window.confirm(`Clear all ${state.zones.length} no-go zones?`);
-                if (!ok) return;
-              }
-              service.clearZones();
-              runtime.eventBus.emit("console.event", {
-                level: "warn",
-                text: "Zones cleared",
-                timestamp: Date.now()
-              });
-            }}
-          >
-            Clear
-          </button>
-        </div>
-        <div className="action-grid">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await service.pushZonesToBackend();
-                const count = service.persistZonesToStorage();
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: `Zones saved (${count})`,
-                  timestamp: Date.now()
-                });
-              } catch (error) {
-                runtime.eventBus.emit("console.event", {
-                  level: "error",
-                  text: `Save zones failed: ${String(error)}`,
-                  timestamp: Date.now()
-                });
-              }
-            }}
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const count = service.loadZonesFromStorage();
-                await service.loadZonesFromBackend();
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: `Zones loaded (${count})`,
-                  timestamp: Date.now()
-                });
-              } catch (error) {
-                runtime.eventBus.emit("console.event", {
-                  level: "error",
-                  text: `Load zones failed: ${String(error)}`,
-                  timestamp: Date.now()
-                });
-              }
-            }}
-          >
-            Load
-          </button>
-        </div>
-        <label className="check-row">
-          <input type="checkbox" checked={state.autoSync} onChange={(event) => service.setAutoSync(event.target.checked)} />
-          Auto-sync edits
-        </label>
-        <div className="row">
-          <input
-            className="grow"
-            value={zoneName}
-            onChange={(event) => setZoneName(event.target.value)}
-            placeholder="Zone name"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const zone = service.addZone(zoneName);
-              setZoneName("");
-              runtime.eventBus.emit("console.event", {
-                level: "info",
-                text: `Zone added: ${zone.name}`,
-                timestamp: Date.now()
-              });
-            }}
-          >
-            Add
-          </button>
-        </div>
-      </div>
-      <div className="panel-card">
-        <h4>Zone List</h4>
-        {state.zones.length === 0 ? (
-          <p className="muted">No zones.</p>
-        ) : (
-          <ul className="zone-list">
-            {state.zones.map((zone) => (
-              <li key={zone.id} className="zone-item">
-                <div>
-                  <strong>{zone.name}</strong>
-                  <div className="muted">
-                    vertices={zone.vertices} · {new Date(zone.updatedAt).toLocaleTimeString()}
-                  </div>
-                </div>
-                <button type="button" className="danger-btn" onClick={() => service.removeZone(zone.id)}>
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function toolButtonClass(current: MapToolMode, target: MapToolMode): string {
@@ -328,7 +179,11 @@ function LeafletMapCanvas({
   const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg: number; dragYaw: boolean } | null>(null);
   const goalCreateSessionRef = useRef<{ active: boolean; hasMoved: boolean }>({ active: false, hasMoved: false });
   const waypointDragEndMsRef = useRef(0);
+  const waypointRenderKeyRef = useRef("");
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
+  const measureTooltipRef = useRef<L.Tooltip | null>(null);
+  const mapToolPreviewLatLngRef = useRef<L.LatLng | null>(null);
+  const centerRequestHandledRef = useRef(0);
   const measurePointsRef = useRef<L.LatLng[]>([]);
   const inspectCopyHandlersRef = useRef<Array<() => void>>([]);
   const goalModeRef = useRef(goalMode);
@@ -390,9 +245,115 @@ function LeafletMapCanvas({
     draftMarkerRef.current = marker;
   };
 
+  const clearMeasureTooltip = (): void => {
+    const map = mapRef.current;
+    const tooltip = measureTooltipRef.current;
+    if (map && tooltip && map.hasLayer(tooltip)) {
+      map.removeLayer(tooltip);
+    }
+    measureTooltipRef.current = null;
+  };
+
+  const setMeasureTooltip = (latLng: L.LatLng, text: string): void => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!measureTooltipRef.current) {
+      measureTooltipRef.current = L.tooltip({
+        permanent: false,
+        direction: "top",
+        offset: [0, -8],
+        className: "map-measure-tooltip"
+      });
+    }
+    const tooltip = measureTooltipRef.current;
+    tooltip.setLatLng(latLng).setContent(text);
+    if (!map.hasLayer(tooltip)) {
+      tooltip.addTo(map);
+    }
+  };
+
+  const renderRulerMeasure = (preview: L.LatLng | null): void => {
+    const map = mapRef.current;
+    const layer = measureLayerRef.current;
+    if (!map || !layer) return;
+    const points = [...measurePointsRef.current];
+    layer.clearLayers();
+    points.forEach((point) => {
+      L.circleMarker(point, {
+        radius: 3,
+        color: "#fbd47f",
+        weight: 1.5,
+        fillColor: "#fbd47f",
+        fillOpacity: 0.9
+      }).addTo(layer);
+    });
+
+    const displayPoints = preview && points.length > 0 ? [...points, preview] : points;
+    if (points.length > 1) {
+      L.polyline(points, { color: "#fbd47f", weight: 2 }).addTo(layer);
+    }
+    if (preview && points.length > 0) {
+      L.polyline([points[points.length - 1], preview], { color: "#fbd47f", weight: 2, dashArray: "5 5" }).addTo(layer);
+    }
+
+    let meters = 0;
+    for (let index = 1; index < displayPoints.length; index += 1) {
+      meters += map.distance(displayPoints[index - 1], displayPoints[index]);
+    }
+    mapService.setToolInfo(`Ruler: ${formatDistanceMeters(meters)} (${displayPoints.length} puntos)`);
+    if (preview && points.length > 0) {
+      setMeasureTooltip(preview, formatDistanceMeters(meters));
+    } else {
+      clearMeasureTooltip();
+    }
+  };
+
+  const renderAreaMeasure = (preview: L.LatLng | null): void => {
+    const map = mapRef.current;
+    const layer = measureLayerRef.current;
+    if (!map || !layer) return;
+    const points = [...measurePointsRef.current];
+    layer.clearLayers();
+    points.forEach((point) => {
+      L.circleMarker(point, {
+        radius: 3,
+        color: "#8dd8ff",
+        weight: 1.5,
+        fillColor: "#8dd8ff",
+        fillOpacity: 0.9
+      }).addTo(layer);
+    });
+
+    const drawPoints = preview && points.length > 0 ? [...points, preview] : points;
+    if (drawPoints.length > 2) {
+      L.polygon(drawPoints, { color: "#8dd8ff", weight: 2, fillOpacity: 0.2 }).addTo(layer);
+    } else if (drawPoints.length > 1) {
+      L.polyline(drawPoints, { color: "#8dd8ff", weight: 2 }).addTo(layer);
+    }
+
+    let perimeter = 0;
+    for (let index = 1; index < drawPoints.length; index += 1) {
+      perimeter += map.distance(drawPoints[index - 1], drawPoints[index]);
+    }
+    if (drawPoints.length > 2) {
+      perimeter += map.distance(drawPoints[drawPoints.length - 1], drawPoints[0]);
+    }
+    const area = drawPoints.length > 2 ? geodesicArea(drawPoints) : 0;
+    mapService.setToolInfo(`Area ${formatAreaSqMeters(area)} · Perim ${formatDistanceMeters(perimeter)}`);
+    if (preview && points.length > 0) {
+      setMeasureTooltip(preview, `${formatAreaSqMeters(area)} · ${formatDistanceMeters(perimeter)}`);
+    } else {
+      clearMeasureTooltip();
+    }
+  };
+
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
-    const map = L.map(hostRef.current, { zoomControl: true }).setView(GPS_DEFAULT_CENTER, GPS_DEFAULT_ZOOM);
+    const map = L.map(hostRef.current, {
+      zoomControl: true,
+      wheelPxPerZoomLevel: MAP_WHEEL_PX_PER_ZOOM_LEVEL,
+      wheelDebounceTime: MAP_WHEEL_DEBOUNCE_MS
+    }).setView(GPS_DEFAULT_CENTER, GPS_DEFAULT_ZOOM);
     L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
@@ -414,6 +375,7 @@ function LeafletMapCanvas({
     mapRef.current = map;
     drawnItemsRef.current = drawnItems;
     waypointLayerRef.current = waypointLayer;
+    waypointRenderKeyRef.current = "";
     draftLayerRef.current = draftLayer;
     measureLayerRef.current = measureLayer;
 
@@ -472,7 +434,7 @@ function LeafletMapCanvas({
         if (!(layer instanceof L.Polygon)) return;
         const zoneId = (layer as L.Polygon & { zoneId?: string }).zoneId;
         if (!zoneId) return;
-        mapService.removeZone(zoneId);
+        mapService.removeZone(zoneId, { sync: false });
       });
       if (mapService.getState().autoSync) {
         void mapService.pushZonesToBackend().catch(() => undefined);
@@ -513,52 +475,15 @@ function LeafletMapCanvas({
       if (mode === "ruler") {
         const points = [...measurePointsRef.current, evt.latlng];
         measurePointsRef.current = points;
-        const layer = measureLayerRef.current;
-        if (layer) {
-          layer.clearLayers();
-          points.forEach((point) => {
-            L.circleMarker(point, {
-              radius: 3,
-              color: "#fbd47f",
-              weight: 1.5,
-              fillColor: "#fbd47f",
-              fillOpacity: 0.9
-            }).addTo(layer);
-          });
-          if (points.length > 1) {
-            L.polyline(points, { color: "#fbd47f", weight: 2 }).addTo(layer);
-          }
-        }
-        let meters = 0;
-        for (let index = 1; index < points.length; index += 1) {
-          meters += map.distance(points[index - 1], points[index]);
-        }
-        mapService.setToolInfo(`Ruler: ${formatDistanceMeters(meters)} (${points.length} puntos)`);
+        mapToolPreviewLatLngRef.current = null;
+        renderRulerMeasure(null);
         return;
       }
       if (mode === "area") {
         const points = [...measurePointsRef.current, evt.latlng];
         measurePointsRef.current = points;
-        const layer = measureLayerRef.current;
-        if (layer) {
-          layer.clearLayers();
-          points.forEach((point) => {
-            L.circleMarker(point, {
-              radius: 3,
-              color: "#8dd8ff",
-              weight: 1.5,
-              fillColor: "#8dd8ff",
-              fillOpacity: 0.9
-            }).addTo(layer);
-          });
-          if (points.length > 2) {
-            L.polygon(points, { color: "#8dd8ff", weight: 2, fillOpacity: 0.2 }).addTo(layer);
-          } else if (points.length > 1) {
-            L.polyline(points, { color: "#8dd8ff", weight: 2 }).addTo(layer);
-          }
-        }
-        const area = geodesicArea(points);
-        mapService.setToolInfo(`Area: ${formatAreaSqMeters(area)} (${points.length} puntos)`);
+        mapToolPreviewLatLngRef.current = null;
+        renderAreaMeasure(null);
         return;
       }
     });
@@ -584,18 +509,31 @@ function LeafletMapCanvas({
     });
 
     map.on("mousemove", (evt: L.LeafletMouseEvent) => {
-      if (!goalCreateSessionRef.current.active) return;
-      const draft = goalDraftRef.current;
-      if (!draft) return;
-      const origin = L.latLng(draft.lat, draft.lon);
-      const distanceM = map.distance(origin, evt.latlng);
-      const dragYaw = distanceM > 0.35;
-      draft.dragYaw = dragYaw;
-      if (dragYaw) {
-        draft.yawDeg = yawDegFromLatLng(origin, evt.latlng);
-        goalCreateSessionRef.current.hasMoved = true;
+      if (goalCreateSessionRef.current.active) {
+        const draft = goalDraftRef.current;
+        if (!draft) return;
+        const origin = L.latLng(draft.lat, draft.lon);
+        const distanceM = map.distance(origin, evt.latlng);
+        const dragYaw = distanceM > 0.35;
+        draft.dragYaw = dragYaw;
+        if (dragYaw) {
+          draft.yawDeg = yawDegFromLatLng(origin, evt.latlng);
+          goalCreateSessionRef.current.hasMoved = true;
+        }
+        renderGoalDraft();
+        return;
       }
-      renderGoalDraft();
+      if (!interactiveRef.current) return;
+      const mode = toolModeRef.current;
+      if (mode === "ruler") {
+        mapToolPreviewLatLngRef.current = evt.latlng;
+        renderRulerMeasure(evt.latlng);
+        return;
+      }
+      if (mode === "area") {
+        mapToolPreviewLatLngRef.current = evt.latlng;
+        renderAreaMeasure(evt.latlng);
+      }
     });
 
     map.on("mouseup", () => {
@@ -606,14 +544,22 @@ function LeafletMapCanvas({
       onQueueWaypointRef.current(draft.lat, draft.lon, draft.yawDeg);
     });
 
+    map.on("mouseout", () => {
+      if (toolModeRef.current === "ruler" || toolModeRef.current === "area") {
+        clearMeasureTooltip();
+      }
+    });
+
     return () => {
       clearGoalDraft();
+      clearMeasureTooltip();
       inspectCopyHandlersRef.current.forEach((cleanup) => cleanup());
       inspectCopyHandlersRef.current = [];
       map.remove();
       mapRef.current = null;
       drawnItemsRef.current = null;
       waypointLayerRef.current = null;
+      waypointRenderKeyRef.current = "";
       draftLayerRef.current = null;
       measureLayerRef.current = null;
       robotMarkerRef.current = null;
@@ -663,6 +609,7 @@ function LeafletMapCanvas({
     if (!map) return;
     if (!state.map) return;
     if (!Number.isFinite(state.map.originLat) || !Number.isFinite(state.map.originLon)) return;
+    if (Math.abs(state.map.originLat) < 1e-9 && Math.abs(state.map.originLon) < 1e-9) return;
     const nextKey = `${state.map.mapId}:${state.map.originLat}:${state.map.originLon}`;
     if (appliedMapOriginKeyRef.current === nextKey) return;
     appliedMapOriginKeyRef.current = nextKey;
@@ -686,6 +633,7 @@ function LeafletMapCanvas({
       ) as L.Polygon & { zoneId?: string };
       layer.zoneId = zone.id;
       layer.on("click", () => {
+        if (toolModeRef.current !== "idle") return;
         mapService.toggleZoneEnabled(zone.id);
       });
       drawnItems.addLayer(layer);
@@ -695,8 +643,13 @@ function LeafletMapCanvas({
   useEffect(() => {
     const layer = waypointLayerRef.current;
     if (!layer) return;
-    layer.clearLayers();
-    if (!Array.isArray(waypoints) || waypoints.length === 0) return;
+    if (!Array.isArray(waypoints) || waypoints.length === 0) {
+      if (waypointRenderKeyRef.current !== "__empty__") {
+        layer.clearLayers();
+        waypointRenderKeyRef.current = "__empty__";
+      }
+      return;
+    }
     const points = waypoints
       .map((waypoint, index) => ({
         index,
@@ -706,6 +659,19 @@ function LeafletMapCanvas({
         selected: selectedWaypointIndexes.includes(index)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
+    const renderKey =
+      points.length === 0
+        ? "__empty__"
+        : points
+            .map(
+              (entry) =>
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.yawDeg.toFixed(2)}:${entry.selected ? 1 : 0}`
+            )
+            .join("|");
+    if (renderKey === waypointRenderKeyRef.current) return;
+    waypointRenderKeyRef.current = renderKey;
+    layer.clearLayers();
+    if (points.length === 0) return;
     if (points.length > 1) {
       L.polyline(
         points.map((entry) => [entry.lat, entry.lon]),
@@ -766,6 +732,8 @@ function LeafletMapCanvas({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !robotPose || centerRequestKey <= 0) return;
+    if (centerRequestHandledRef.current === centerRequestKey) return;
+    centerRequestHandledRef.current = centerRequestKey;
     map.setView([robotPose.lat, robotPose.lon], Math.max(map.getZoom(), 17));
   }, [centerRequestKey, robotPose]);
 
@@ -773,6 +741,8 @@ function LeafletMapCanvas({
     if (state.toolMode !== "idle") {
       clearGoalDraft();
     }
+    mapToolPreviewLatLngRef.current = null;
+    clearMeasureTooltip();
     measurePointsRef.current = [];
     measureLayerRef.current?.clearLayers();
   }, [state.toolMode]);
@@ -781,7 +751,24 @@ function LeafletMapCanvas({
     if (!goalMode) {
       clearGoalDraft();
     }
+    if (goalMode) return;
+    mapToolPreviewLatLngRef.current = null;
+    clearMeasureTooltip();
   }, [goalMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const container = map.getContainer();
+    if (state.toolMode !== "idle" || goalMode) {
+      container.classList.add("map-tool-pointer");
+    } else {
+      container.classList.remove("map-tool-pointer");
+    }
+    return () => {
+      container.classList.remove("map-tool-pointer");
+    };
+  }, [goalMode, state.toolMode]);
 
   return <div ref={hostRef} className="leaflet-host map-host-canvas" />;
 }
@@ -811,7 +798,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [frameSrc, setFrameSrc] = useState("");
   const [frameReady, setFrameReady] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
   );
@@ -821,6 +807,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
+  const wasConnectedRef = useRef(false);
+  const pendingCenterOnConnectRef = useRef(false);
 
   useEffect(() => mapService.subscribe((next) => setState(next)), [mapService]);
   useEffect(() => {
@@ -839,18 +827,64 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
   }, [telemetryService]);
   useEffect(() => {
+    const connected = connectionState?.connected === true;
+    const previous = wasConnectedRef.current;
+    wasConnectedRef.current = connected;
+    if (!connected || previous) return;
+
+    pendingCenterOnConnectRef.current = true;
+    void mapService
+      .loadZonesFromBackend()
+      .then(() => {
+        runtime.eventBus.emit("console.event", {
+          level: "info",
+          text: "No-go zones loaded",
+          timestamp: Date.now()
+        });
+      })
+      .catch((error) => {
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: `No-go zones load failed: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+  }, [connectionState?.connected, mapService, runtime.eventBus]);
+  useEffect(() => {
+    if (!pendingCenterOnConnectRef.current) return;
+    const pose = telemetrySnapshot?.robotPose;
+    if (!pose) return;
+    pendingCenterOnConnectRef.current = false;
+    setCenterRequestKey((value) => value + 1);
+    runtime.eventBus.emit("console.event", {
+      level: "info",
+      text: "Map auto-centered on robot after connect",
+      timestamp: Date.now()
+    });
+  }, [telemetrySnapshot?.robotPose, runtime.eventBus]);
+  useEffect(() => {
     return runtime.eventBus.on(NAV_EVENTS.swapWorkspaceRequest, () => {
+      if (connectionState?.preset === "sim") return;
       setMainPane((current) => (current === "map" ? "camera" : "map"));
     });
-  }, [runtime]);
+  }, [connectionState?.preset, runtime]);
 
-  const mainIsMap = mainPane === "map";
+  const isSimPreset = connectionState?.preset === "sim";
+  const cameraPaneAvailable = !isSimPreset;
+  const mainIsMap = !cameraPaneAvailable || mainPane === "map";
   const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
   const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
   const cameraStreamConnected = navigationState?.cameraStreamConnected === true;
   const controlsLocked = navigationState?.controlLocked ?? true;
   const mapInteractive = mainIsMap;
   const mapToolsEnabled = mainIsMap;
+
+  useEffect(() => {
+    if (cameraPaneAvailable) return;
+    if (mainPane === "camera") {
+      setMainPane("map");
+    }
+  }, [cameraPaneAvailable, mainPane]);
 
   useEffect(() => {
     if (!cameraStreamConnected || !cameraEnabled || !cameraUrl) {
@@ -868,16 +902,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     if (state.toolMode === "idle") return;
     mapService.setToolMode("idle");
   }, [mainIsMap, mapService, state.toolMode]);
-  useEffect(() => {
-    const graceUntil = navigationState?.unlockGraceUntilMs ?? 0;
-    if (graceUntil <= Date.now()) return;
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 250);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [navigationState?.unlockGraceUntilMs]);
   const cameraOverlayText = !cameraEnabled
     ? connectionState?.preset === "sim"
       ? "camera disabled in sim"
@@ -887,8 +911,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       : frameReady
         ? ""
         : "camera connecting";
-  const unlockGraceRemainingMs = Math.max(0, (navigationState?.unlockGraceUntilMs ?? 0) - nowMs);
-  const unlockGraceSeconds = (unlockGraceRemainingMs / 1000).toFixed(1);
   const lockReasonText = formatControlLockReason(navigationState?.controlLockReason ?? "");
 
   const selectTool = (tool: MapToolMode, infoLabel: string): void => {
@@ -1039,12 +1061,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 <button
                   type="button"
                   onClick={() => {
-                    mapService.setDatumFromRobot();
-                    runtime.eventBus.emit("console.event", {
-                      level: "info",
-                      text: "Datum updated from robot pose",
-                      timestamp: Date.now()
-                    });
+                    void mapService
+                      .setDatumOnBackend()
+                      .then(() => {
+                        runtime.eventBus.emit("console.event", {
+                          level: "info",
+                          text: "Datum updated from robot pose",
+                          timestamp: Date.now()
+                        });
+                      })
+                      .catch((error) => {
+                        runtime.eventBus.emit("console.event", {
+                          level: "error",
+                          text: `Set datum failed: ${String(error)}`,
+                          timestamp: Date.now()
+                        });
+                      });
                   }}
                   title="Set datum"
                   aria-label="Set datum"
@@ -1065,28 +1097,33 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
             </div>
           </div>
         </section>
-        <section className={`stage-pane ${mainIsMap ? "mini" : "main"} map-camera-stage-pane`}>
-          <h4>Camera</h4>
-          <div className="camera-frame-wrap">
-            <iframe
-              className="camera-frame"
-              src={frameSrc}
-              title="Camera feed"
-              loading="lazy"
-              onLoad={() => setFrameReady(true)}
-            />
-            {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
-          </div>
-        </section>
-        <button type="button" className="swap-btn" onClick={() => setMainPane(mainIsMap ? "camera" : "map")}>
-          🔄
-        </button>
-        {controlsLocked ? (
-          <div className="view-stage-unlock-overlay">
+        {cameraPaneAvailable ? (
+          <section className={`stage-pane ${mainIsMap ? "mini" : "main"} map-camera-stage-pane`}>
+            <h4>Camera</h4>
+            <div className="camera-frame-wrap">
+              <iframe
+                className="camera-frame"
+                src={frameSrc}
+                title="Camera feed"
+                loading="lazy"
+                onLoad={() => setFrameReady(true)}
+              />
+              {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
+            </div>
+          </section>
+        ) : null}
+        <div className="stage-bottom-left-actions">
+          {cameraPaneAvailable ? (
+            <button type="button" className="swap-btn" onClick={() => setMainPane(mainIsMap ? "camera" : "map")}>
+              🔄
+            </button>
+          ) : null}
+          {controlsLocked ? (
             <button
               type="button"
               className="view-stage-unlock-btn"
               disabled={!navigationService}
+              title={lockReasonText}
               onClick={async () => {
                 if (!navigationService) return;
                 try {
@@ -1110,54 +1147,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               </span>
               <span>Desbloquear</span>
             </button>
-            <div className="view-stage-unlock-note">{lockReasonText}</div>
-          </div>
-        ) : (
-          <div className="stage-actions">
-            <button
-              type="button"
-              disabled={!navigationService || !cameraEnabled}
-              onClick={() => {
-                if (!navigationService) return;
-                const connected = navigationService.toggleCameraStream();
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: connected ? "Camera stream connected" : "Camera stream disconnected",
-                  timestamp: Date.now()
-                });
-              }}
-            >
-              {cameraStreamConnected ? "Disconnect camera" : "Connect camera"}
-            </button>
-            <button
-              type="button"
-              disabled={!navigationService}
-              onClick={async () => {
-                if (!navigationService) return;
-                try {
-                  await navigationService.lockControls();
-                  runtime.eventBus.emit("console.event", {
-                    level: "info",
-                    text: "Controls locked",
-                    timestamp: Date.now()
-                  });
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Lock failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-            >
-              Lock controls
-            </button>
-            {unlockGraceRemainingMs > 0 ? (
-              <div className="stage-unlock-grace">Unlock grace: {unlockGraceSeconds}s</div>
-            ) : null}
-          </div>
-        )}
-        {mainIsMap ? null : <div className="stage-gps-mini-badge">Map minimapa</div>}
+          ) : null}
+        </div>
+        {cameraPaneAvailable && !mainIsMap ? <div className="stage-gps-mini-badge">Map minimapa</div> : null}
       </div>
     </div>
   );
@@ -1181,13 +1173,6 @@ export function createMapModule(): CockpitModule {
         id: SERVICE_ID,
         order: 30,
         service
-      });
-
-      ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
-        id: "sidebar.zones",
-        label: "Zones",
-        order: 20,
-        render: (runtime) => <ZonesSidebarPanel runtime={runtime} />
       });
 
       ctx.registries.workspaceViewRegistry.registerWorkspaceView({

@@ -1,6 +1,6 @@
 import type { EnvConfig } from "../../core/config/envConfig";
 import type { EventBus } from "../../core/events/eventBus";
-import type { TransportManager } from "../../transport/manager/TransportManager";
+import type { TransportManager, TransportTrafficStats } from "../../transport/manager/TransportManager";
 
 export type ConnectionPreset = "real" | "sim";
 
@@ -11,6 +11,8 @@ export interface ConnectionState {
   connecting: boolean;
   connected: boolean;
   lastError: string;
+  txBytes: number;
+  rxBytes: number;
 }
 
 type ConnectionListener = (state: ConnectionState) => void;
@@ -66,14 +68,20 @@ export class ConnectionService {
     const parsed = parseWsUrl(env.wsUrl);
     this.presetValues = this.readPresetStorage(parsed);
     this.initialPreset = this.readStoredPreset();
+    const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
       preset: this.initialPreset,
       host: this.presetValues[this.initialPreset].host,
       port: this.presetValues[this.initialPreset].port,
       connecting: false,
       connected: false,
-      lastError: ""
+      lastError: "",
+      txBytes: initialTraffic.txBytes,
+      rxBytes: initialTraffic.rxBytes
     };
+    this.transportManager.subscribeTraffic(this.transportId, (stats) => {
+      this.applyTraffic(stats);
+    });
   }
 
   getState(): ConnectionState {
@@ -221,6 +229,16 @@ export class ConnectionService {
   private emit(): void {
     const snapshot = this.getState();
     this.listeners.forEach((listener) => listener(snapshot));
+  }
+
+  private applyTraffic(stats: TransportTrafficStats): void {
+    if (this.state.txBytes === stats.txBytes && this.state.rxBytes === stats.rxBytes) return;
+    this.state = {
+      ...this.state,
+      txBytes: stats.txBytes,
+      rxBytes: stats.rxBytes
+    };
+    this.emit();
   }
 
   private readPresetStorage(parsedReal: { host: string; port: string }): Record<ConnectionPreset, { host: string; port: string }> {
