@@ -16,13 +16,11 @@ export interface RosbagStatus {
 export class MissionDispatcher extends DispatcherBase {
   constructor(id: string, transportId: string) {
     super(id, transportId, [
+      "ack",
+      "rosbag_status",
+      "nav_event",
       "mission.start",
-      "mission.start.result",
-      "mission.status.update",
-      "rosbag.start",
-      "rosbag.stop",
-      "rosbag.status.get",
-      "rosbag.status.update"
+      "mission.status.update"
     ]);
   }
 
@@ -35,22 +33,22 @@ export class MissionDispatcher extends DispatcherBase {
   }
 
   async startRosbag(profile: string): Promise<IncomingPacket> {
-    return this.request("rosbag.start", { profile } as never, { timeoutMs: 6000 });
+    return this.request("start_rosbag", { profile } as never, { timeoutMs: 6000 });
   }
 
   async stopRosbag(): Promise<IncomingPacket> {
-    return this.request("rosbag.stop", {}, { timeoutMs: 6000 });
+    return this.request("stop_rosbag", {}, { timeoutMs: 6000 });
   }
 
   async requestRosbagStatus(): Promise<IncomingPacket> {
-    return this.request("rosbag.status.get", {}, { timeoutMs: 4000 });
+    return this.request("get_rosbag_status", {}, { timeoutMs: 4000 });
   }
 
   subscribeMissionStatus(callback: (message: IncomingPacket) => void): () => void {
-    return this.subscribe("mission.status.update", callback);
+    return this.subscribe("nav_event", callback);
   }
 
   subscribeRosbagStatus(callback: (message: IncomingPacket) => void): () => void {
-    return this.subscribe("rosbag.status.update", callback);
+    return this.subscribe("rosbag_status", callback);
   }
 }

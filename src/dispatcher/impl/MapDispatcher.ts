@@ -3,7 +3,7 @@ import { DispatcherBase } from "../base/Dispatcher";
 
 export class MapDispatcher extends DispatcherBase {
   constructor(id: string, transportId: string) {
-    super(id, transportId, ["map.request", "map.loaded", "google.maps.geocode.result"]);
+    super(id, transportId, ["state", "ack", "robot_pose"]);
   }
 
   handleIncoming(message: IncomingPacket): void {
@@ -11,11 +11,14 @@ export class MapDispatcher extends DispatcherBase {
   }
 
   async requestMap(mapId: string): Promise<IncomingPacket> {
-    return this.request("map.request", { mapId }, { timeoutMs: 6000 });
+    return this.request("get_state", { map_id: mapId } as never, { timeoutMs: 6000 });
   }
 
-  async geocodeAddress(address: string): Promise<IncomingPacket> {
-    return this.request("google.maps.geocode", { address }, { timeoutMs: 5000 });
+  async setZonesGeoJson(geojson: unknown): Promise<IncomingPacket> {
+    return this.request("set_zones_geojson", { geojson } as never, { timeoutMs: 6000 });
+  }
+
+  async loadZonesFile(): Promise<IncomingPacket> {
+    return this.request("load_zones_file", {}, { timeoutMs: 6000 });
   }
 }
-

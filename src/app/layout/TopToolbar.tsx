@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { AppRuntime } from "../../core/types/module";
 import type { ToolbarMenuDefinition } from "../../core/types/ui";
 import logo from "../../../logo.png";
@@ -9,28 +10,68 @@ interface TopToolbarProps {
 }
 
 export function TopToolbar({ runtime, menus, openModal }: TopToolbarProps): JSX.Element {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!rootRef.current) return;
+      if (event.target instanceof Node && rootRef.current.contains(event.target)) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || !openMenuId) return;
+      setOpenMenuId(null);
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [openMenuId]);
+
   return (
-    <header className="top-toolbar">
+    <header ref={rootRef} className="top-toolbar">
       <div className="toolbar-left">
         <img src={logo} alt={runtime.env.appName} className="app-logo" />
         <nav className="toolbar-menus">
           {menus.map((menu) => (
-            <details key={menu.id} className="toolbar-menu">
-              <summary>{menu.label}</summary>
-              <div className="toolbar-dropdown">
-                {menu.items.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      void item.onSelect({ runtime, openModal });
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </details>
+            <div key={menu.id} className={`toolbar-menu ${openMenuId === menu.id ? "open" : ""}`}>
+              <button
+                type="button"
+                className="toolbar-menu-trigger"
+                onClick={() => {
+                  setOpenMenuId((current) => (current === menu.id ? null : menu.id));
+                }}
+              >
+                {menu.label}
+              </button>
+              {openMenuId === menu.id ? (
+                <div className="toolbar-dropdown">
+                  {menu.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setOpenMenuId(null);
+                        void item.onSelect({ runtime, openModal });
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ))}
         </nav>
       </div>

@@ -1,5 +1,6 @@
 import type { IncomingPacket, OutgoingPacket } from "../../core/types/message";
 import type { Transport, TransportContext, TransportReceiveHandler } from "../base/Transport";
+import { decodeLegacyIncoming, encodeLegacyOutgoing } from "../base/legacyCodec";
 
 export class WebSocketTransport implements Transport {
   readonly kind = "websocket";
@@ -26,7 +27,8 @@ export class WebSocketTransport implements Transport {
       };
       socket.onmessage = (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as IncomingPacket;
+          const parsed = decodeLegacyIncoming(JSON.parse(String(event.data)));
+          if (!parsed) return;
           this.handlers.forEach((handler) => handler(parsed));
         } catch {
           // Ignore malformed payloads.
@@ -46,7 +48,7 @@ export class WebSocketTransport implements Transport {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error(`WebSocket transport '${this.id}' is disconnected (${this.connectedUrl || "unknown url"})`);
     }
-    this.ws.send(JSON.stringify(packet));
+    this.ws.send(JSON.stringify(encodeLegacyOutgoing(packet)));
   }
 
   recv(handler: TransportReceiveHandler): () => void {
@@ -54,4 +56,3 @@ export class WebSocketTransport implements Transport {
     return () => this.handlers.delete(handler);
   }
 }
-

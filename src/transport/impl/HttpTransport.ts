@@ -1,5 +1,6 @@
 import type { IncomingPacket, OutgoingPacket } from "../../core/types/message";
 import type { Transport, TransportContext, TransportReceiveHandler } from "../base/Transport";
+import { decodeLegacyIncoming, encodeLegacyOutgoing } from "../base/legacyCodec";
 
 export class HttpTransport implements Transport {
   readonly kind = "http";
@@ -24,9 +25,10 @@ export class HttpTransport implements Transport {
     const response = await fetch(`${this.baseUrl}/dispatch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(packet)
+      body: JSON.stringify(encodeLegacyOutgoing(packet))
     });
-    const incoming = (await response.json()) as IncomingPacket;
+    const incoming = decodeLegacyIncoming(await response.json());
+    if (!incoming) return;
     this.handlers.forEach((handler) => handler(incoming));
   }
 
@@ -35,4 +37,3 @@ export class HttpTransport implements Transport {
     return () => this.handlers.delete(handler);
   }
 }
-

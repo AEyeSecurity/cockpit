@@ -57,11 +57,14 @@ export class MissionService {
 
   private parseRosbagStatus(payload: unknown): RosbagStatus {
     const value = (payload ?? {}) as Record<string, unknown>;
+    const source = (value.rosbag && typeof value.rosbag === "object"
+      ? (value.rosbag as Record<string, unknown>)
+      : value) as Record<string, unknown>;
     return {
-      active: value.active === true,
-      profile: String(value.profile ?? "core"),
-      outputPath: String(value.outputPath ?? "n/a"),
-      logPath: String(value.logPath ?? "n/a")
+      active: source.active === true,
+      profile: String(source.profile ?? "core"),
+      outputPath: String(source.output_path ?? source.outputPath ?? "n/a"),
+      logPath: String(source.log_path ?? source.logPath ?? "n/a")
     };
   }
 }

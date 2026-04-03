@@ -3,7 +3,8 @@ import { NAV_EVENTS } from "../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../core/types/module";
 import { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import { notify } from "../../platform/tauri/notifications";
-import { ConnectionService, type ConnectionState } from "../../services/impl/ConnectionService";
+import { ConnectionService } from "../../services/impl/ConnectionService";
+import { SensorInfoService, type SensorInfoTab } from "../../services/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../services/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../../services/impl/NavigationService";
 import { WebSocketTransport } from "../../transport/impl/WebSocketTransport";
@@ -13,12 +14,7 @@ const DISPATCHER_ID = "dispatcher.robot";
 const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
 const TELEMETRY_SERVICE_ID = "service.telemetry";
-
-interface WaypointDraft {
-  x: string;
-  y: string;
-  yawDeg: string;
-}
+const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
 
 interface TelemetryServiceLike {
   getSnapshot: () => TelemetrySnapshot;
@@ -95,20 +91,10 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  const [draft, setDraft] = useState<WaypointDraft>({ x: "1.0", y: "2.0", yawDeg: "90" });
   const [state, setState] = useState<NavigationState>(service.getState());
   const selectedCount = state.selectedWaypointIndexes.length;
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
-
-  const parseDraft = (value: WaypointDraft): { x: number; y: number; yawDeg: number } | null => {
-    const parsed = {
-      x: Number(value.x),
-      y: Number(value.y),
-      yawDeg: Number(value.yawDeg)
-    };
-    return Number.isFinite(parsed.x) && Number.isFinite(parsed.y) && Number.isFinite(parsed.yawDeg) ? parsed : null;
-  };
 
   const emitInfo = (text: string): void => {
     runtime.eventBus.emit("console.event", {
@@ -122,77 +108,64 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     <div className="stack">
       <div className="panel-card">
         <h3>Navigation</h3>
-        <p className="muted">Goals + route loop (traslado del flujo de navegación).</p>
-        <div className="input-grid">
-          <input
-            value={draft.x}
-            onChange={(event) => setDraft((prev) => ({ ...prev, x: event.target.value }))}
-            placeholder="X"
-          />
-          <input
-            value={draft.y}
-            onChange={(event) => setDraft((prev) => ({ ...prev, y: event.target.value }))}
-            placeholder="Y"
-          />
-        </div>
-        <input
-          value={draft.yawDeg}
-          onChange={(event) => setDraft((prev) => ({ ...prev, yawDeg: event.target.value }))}
-          placeholder="Yaw (deg)"
-        />
-        <div className="action-grid">
+        <p className="muted">Controles rápidos de navegación.</p>
+        <div className="nav-legacy-row nav-legacy-top">
           <button
             type="button"
+            className={state.goalMode ? "active" : ""}
             onClick={() => {
               const enabled = service.toggleGoalMode();
               emitInfo(enabled ? "Goal mode enabled" : "Goal mode disabled");
             }}
+            title="Goal mode"
           >
-            Goal mode: {state.goalMode ? "ON" : "OFF"}
+            📌
           </button>
           <button
             type="button"
             onClick={() => {
-              const parsed = parseDraft(draft);
-              if (!parsed) {
-                runtime.eventBus.emit("console.event", {
-                  level: "warn",
-                  text: "Invalid waypoint payload",
-                  timestamp: Date.now()
-                });
-                return;
-              }
-              service.queueWaypoint(parsed);
-              emitInfo("Waypoint added");
+              service.removeLastWaypoint();
+              emitInfo("Last waypoint removed");
             }}
+            disabled={state.waypoints.length === 0}
+            title="Undo"
           >
-            Add waypoint
+            ↩
           </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            service.removeLastWaypoint();
-          }}
-          disabled={state.waypoints.length === 0}
-        >
-          Undo
-        </button>
-        <div className="action-grid">
           <button
             type="button"
-            onClick={async () => {
-              const first = parseDraft(draft);
-              if (!first) {
-                runtime.eventBus.emit("console.event", {
-                  level: "warn",
-                  text: "Invalid goal payload",
-                  timestamp: Date.now()
-                });
-                return;
+            className="danger-btn"
+            onClick={() => {
+              service.clearWaypoints();
+              emitInfo("Waypoints cleared");
+            }}
+            disabled={state.waypoints.length === 0}
+            title="Clear waypoints"
+          >
+            🗑
+          </button>
+          <button
+            type="button"
+            className="danger-btn"
+            onClick={() => {
+              const removed = service.removeSelectedWaypoints();
+              if (removed > 0) {
+                emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
               }
+            }}
+            disabled={selectedCount === 0}
+            title="Remove selected"
+          >
+            🧹
+          </button>
+        </div>
+        <div className="nav-legacy-row nav-legacy-primary">
+          <button
+            type="button"
+            className="nav-legacy-send"
+            onClick={async () => {
               try {
-                const sent = await service.sendQueuedGoal(first);
+                const sent = await service.sendQueuedGoal();
                 const sentCount = sent.sentCount;
                 emitInfo(`Goal dispatch sent (${sentCount} waypoint${sentCount > 1 ? "s" : ""})`);
               } catch (error) {
@@ -203,11 +176,13 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 });
               }
             }}
+            disabled={state.waypoints.length === 0}
           >
-            Send
+            ➤ Send
           </button>
           <button
             type="button"
+            className="danger-btn nav-legacy-cancel"
             onClick={async () => {
               try {
                 await service.cancelGoal();
@@ -221,18 +196,19 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }
             }}
           >
-            Cancel
+            ⊗ Cancel
           </button>
         </div>
-        <div className="action-grid">
+        <div className="nav-legacy-row nav-legacy-bottom">
           <button
             type="button"
             onClick={() => {
               const count = service.saveWaypoints();
               emitInfo(`Saved ${count} waypoints`);
             }}
+            title="Save route"
           >
-            Save route
+            💾
           </button>
           <button
             type="button"
@@ -248,19 +224,20 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 });
               }
             }}
+            title="Load route"
           >
-            Load route
+            📂
           </button>
-        </div>
-        <div className="row">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={state.loopRoute}
-              onChange={(event) => service.setLoopRoute(event.target.checked)}
-            />
-            Loop route
-          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const connected = service.toggleCameraStream();
+              emitInfo(connected ? "Camera stream connected" : "Camera stream disconnected");
+            }}
+            title="Camera stream"
+          >
+            📸
+          </button>
           <button
             type="button"
             onClick={async () => {
@@ -276,64 +253,23 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 });
               }
             }}
+            title="Manual mode"
           >
-            Manual: {state.manualMode ? "ON" : "OFF"}
+            {state.manualMode ? "ON" : "OFF"}
           </button>
         </div>
+        <p className="nav-legacy-text">Queued: {state.waypoints.length}</p>
+        <p className="nav-legacy-text">Selected: {selectedCount}</p>
+        <p className="nav-legacy-text">Loop: {state.loopRoute ? "ON" : "OFF"}</p>
         <button
           type="button"
-          className="danger-btn"
-          onClick={() => service.clearWaypoints()}
-          disabled={state.waypoints.length === 0}
+          className="nav-legacy-toggle"
+          onClick={() => service.setLoopRoute(!state.loopRoute)}
+          title="Toggle loop route"
         >
-          Clear waypoints
+          Loop route: {state.loopRoute ? "ON" : "OFF"}
         </button>
-        <div className="action-grid">
-          <button type="button" onClick={() => service.selectAllWaypoints()} disabled={state.waypoints.length === 0}>
-            Select all
-          </button>
-          <button type="button" onClick={() => service.clearWaypointSelection()} disabled={selectedCount === 0}>
-            Clear selection
-          </button>
-        </div>
-        <button
-          type="button"
-          className="danger-btn"
-          onClick={() => {
-            const removed = service.removeSelectedWaypoints();
-            if (removed > 0) {
-              emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
-            }
-          }}
-          disabled={selectedCount === 0}
-        >
-          Remove selected ({selectedCount})
-        </button>
-        <div className="waypoint-list-wrap">
-          {state.waypoints.length === 0 ? (
-            <p className="muted">No queued waypoints.</p>
-          ) : (
-            <ul className="waypoint-list">
-              {state.waypoints.map((waypoint, index) => {
-                const checked = state.selectedWaypointIndexes.includes(index);
-                return (
-                  <li key={`${index}-${waypoint.x}-${waypoint.y}-${waypoint.yawDeg}`}>
-                    <label className="check-row">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => service.toggleWaypointSelection(index)}
-                      />
-                      #{index + 1} · x={waypoint.x.toFixed(2)} y={waypoint.y.toFixed(2)} yaw={waypoint.yawDeg.toFixed(1)}
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-        <div className="status-pill">{state.lastStatus}</div>
-        <p className="muted">Queued waypoints: {state.waypoints.length}</p>
+        <p className="nav-legacy-text">{state.lastStatus}</p>
       </div>
       <ManualControlSidebarPanel runtime={runtime} />
       <CameraSidebarPanel runtime={runtime} />
@@ -342,36 +278,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 }
 
 function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  const [navigation, setNavigation] = useState<NavigationState>(service.getState());
+  void runtime;
   const [linearSpeed, setLinearSpeed] = useState(1.2);
   const [angularSpeed, setAngularSpeed] = useState(0.4);
-  const [status, setStatus] = useState("Manual mode OFF");
-
-  useEffect(() => service.subscribe((next) => setNavigation(next)), [service]);
-
-  const send = async (linearX: number, angularZ: number, brake = false): Promise<void> => {
-    try {
-      await service.sendManualCommand({ linearX, angularZ, brake });
-      const label = `vx=${linearX.toFixed(2)} wz=${angularZ.toFixed(2)}${brake ? " brake" : ""}`;
-      setStatus(label);
-      runtime.eventBus.emit("console.event", {
-        level: "info",
-        text: `Manual cmd ${label}`,
-        timestamp: Date.now()
-      });
-    } catch (error) {
-      setStatus(`Manual cmd failed: ${String(error)}`);
-    }
-  };
 
   return (
     <div className="stack">
       <div className="panel-card">
-        <h3>Manual Control</h3>
-        <p className="muted">Sliders + cmd_vel controls (W/A/S/D equivalente).</p>
+        <h3>Sliders</h3>
         <label className="range-row">
-          Linear speed (m/s): <strong>{linearSpeed.toFixed(2)}</strong>
+          Linear speed (m/s): {linearSpeed.toFixed(2)}
           <input
             type="range"
             min={1.0}
@@ -382,7 +298,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
           />
         </label>
         <label className="range-row">
-          Angular speed (rad/s): <strong>{angularSpeed.toFixed(2)}</strong>
+          Angular speed (rad/s): {angularSpeed.toFixed(2)}
           <input
             type="range"
             min={0.1}
@@ -392,40 +308,6 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
             onChange={(event) => setAngularSpeed(Number(event.target.value))}
           />
         </label>
-        <div className="action-grid">
-          <button
-            type="button"
-            onClick={async () => {
-              const next = !navigation.manualMode;
-              try {
-                await service.setManualMode(next);
-                setStatus(next ? "Manual mode ON" : "Manual mode OFF");
-              } catch (error) {
-                setStatus(`Manual mode failed: ${String(error)}`);
-              }
-            }}
-          >
-            Manual: {navigation.manualMode ? "ON" : "OFF"}
-          </button>
-          <button type="button" onClick={() => void send(0, 0, true)}>
-            Brake
-          </button>
-        </div>
-        <div className="control-pad">
-          <button type="button" onMouseDown={() => void send(linearSpeed, 0)}>
-            W
-          </button>
-          <button type="button" onMouseDown={() => void send(0, -angularSpeed)}>
-            A
-          </button>
-          <button type="button" onMouseDown={() => void send(-linearSpeed, 0)}>
-            S
-          </button>
-          <button type="button" onMouseDown={() => void send(0, angularSpeed)}>
-            D
-          </button>
-        </div>
-        <div className="status-pill">{status}</div>
       </div>
     </div>
   );
@@ -433,25 +315,17 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
 
 function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  const [navigation, setNavigation] = useState<NavigationState>(service.getState());
-  const [cameraStatus, setCameraStatus] = useState("camera: disconnected");
-
-  useEffect(() => service.subscribe((next) => setNavigation(next)), [service]);
 
   const pan = async (angleDeg: number): Promise<void> => {
     try {
       await service.panCamera(angleDeg);
-      setCameraStatus(`camera pan=${angleDeg}`);
-    } catch (error) {
-      setCameraStatus(`pan failed: ${String(error)}`);
-    }
+    } catch {}
   };
 
   return (
     <div className="stack">
       <div className="panel-card">
         <h3>Camera PTZ</h3>
-        <p className="muted">Controles PTZ migrados de la interfaz anterior.</p>
         <div className="ptz-grid">
           <button type="button" onClick={() => void pan(45)}>
             ⇖
@@ -470,10 +344,7 @@ function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Elemen
             onClick={async () => {
               try {
                 await service.toggleCameraZoom();
-                setCameraStatus("camera zoom toggled");
-              } catch (error) {
-                setCameraStatus(`zoom failed: ${String(error)}`);
-              }
+              } catch {}
             }}
           >
             🔍
@@ -490,164 +361,6 @@ function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Elemen
           <button type="button" onClick={() => void pan(-135)}>
             ⇘
           </button>
-        </div>
-        <div className="action-grid">
-          <button
-            type="button"
-            onClick={() => {
-              const connected = service.toggleCameraStream();
-              setCameraStatus(connected ? "camera: connected" : "camera: disconnected");
-            }}
-          >
-            {navigation.cameraStreamConnected ? "Disconnect stream" : "Connect stream"}
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const status = await service.readCameraStatus();
-                setCameraStatus(
-                  status.ok
-                    ? `camera ok · last=${status.lastCommand} · zoom=${status.zoomIn ? "in" : "out"}`
-                    : `camera error: ${status.error}`
-                );
-              } catch (error) {
-                setCameraStatus(`status failed: ${String(error)}`);
-              }
-            }}
-          >
-            Read status
-          </button>
-        </div>
-        <div className={`status-pill ${navigation.cameraStreamConnected ? "ok" : "bad"}`}>{cameraStatus}</div>
-      </div>
-    </div>
-  );
-}
-
-function CameraGpsWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const navigationService = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  let connectionService: ConnectionService | null = null;
-  try {
-    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-  } catch {
-    connectionService = null;
-  }
-  const [mainPane, setMainPane] = useState<"camera" | "gps">("camera");
-  const [controlsLocked, setControlsLocked] = useState(true);
-  const [frameSrc, setFrameSrc] = useState("");
-  const [frameReady, setFrameReady] = useState(false);
-  const [navigationState, setNavigationState] = useState<NavigationState>(navigationService.getState());
-  const [connectionState, setConnectionState] = useState<ConnectionState | null>(
-    connectionService ? connectionService.getState() : null
-  );
-  const mainIsCamera = mainPane === "camera";
-  const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
-  const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
-
-  useEffect(() => {
-    return runtime.eventBus.on(NAV_EVENTS.swapWorkspaceRequest, () => {
-      setMainPane((current) => (current === "camera" ? "gps" : "camera"));
-    });
-  }, [runtime]);
-
-  useEffect(() => navigationService.subscribe((next) => setNavigationState(next)), [navigationService]);
-  useEffect(() => {
-    if (!connectionService) return;
-    return connectionService.subscribe((next) => setConnectionState(next));
-  }, [connectionService]);
-
-  useEffect(() => {
-    if (!navigationState.cameraStreamConnected || !cameraEnabled || !cameraUrl) {
-      setFrameSrc("");
-      setFrameReady(false);
-      return;
-    }
-    const separator = cameraUrl.includes("?") ? "&" : "?";
-    setFrameSrc(`${cameraUrl}${separator}_ts=${Date.now()}`);
-    setFrameReady(false);
-  }, [navigationState.cameraStreamConnected, cameraEnabled, cameraUrl]);
-
-  const cameraOverlayText = !cameraEnabled
-    ? connectionState?.preset === "sim"
-      ? "camera disabled in sim"
-      : "camera unavailable"
-    : !navigationState.cameraStreamConnected
-      ? "camara desconectada"
-      : frameReady
-        ? ""
-        : "camera connecting";
-
-  return (
-    <div className="stack">
-      <div className="panel-card">
-        <h3>Camera / GPS Workspace</h3>
-        <p className="muted">Stage central con swap de vistas (patrón del monolito).</p>
-        <div className={`stage ${mainIsCamera ? "mode-camera-main" : "mode-gps-main"}`}>
-          <section className={`stage-pane ${mainIsCamera ? "main" : "mini"}`}>
-            <h4>Camera</h4>
-            <div className="camera-frame-wrap">
-              <iframe
-                className="camera-frame"
-                src={frameSrc}
-                title="Camera feed"
-                loading="lazy"
-                onLoad={() => setFrameReady(true)}
-              />
-              {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
-            </div>
-          </section>
-          <section className={`stage-pane ${mainIsCamera ? "mini" : "main"}`}>
-            <h4>GPS Map</h4>
-            <div className="map-canvas">
-              <div className="pane-placeholder">Map canvas host</div>
-            </div>
-          </section>
-          <button type="button" className="swap-btn" onClick={() => setMainPane(mainIsCamera ? "gps" : "camera")}>
-            🔄
-          </button>
-          {controlsLocked ? (
-            <div className="view-stage-unlock-overlay">
-              <button type="button" className="view-stage-unlock-btn" onClick={() => setControlsLocked(false)}>
-                <span className="view-stage-unlock-icon" aria-hidden="true">
-                  🔒
-                </span>
-                <span>Desbloquear</span>
-              </button>
-            </div>
-          ) : (
-            <div className="stage-actions">
-              <button
-                type="button"
-                disabled={!cameraEnabled}
-                onClick={() => {
-                  const connected = navigationService.toggleCameraStream();
-                  runtime.eventBus.emit("console.event", {
-                    level: "info",
-                    text: connected ? "Camera stream connected" : "Camera stream disconnected",
-                    timestamp: Date.now()
-                  });
-                }}
-              >
-                {navigationState.cameraStreamConnected ? "Disconnect camera" : "Connect camera"}
-              </button>
-              <button type="button" onClick={() => setControlsLocked(true)}>
-                Lock controls
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  runtime.eventBus.emit("console.event", {
-                    level: "info",
-                    text: `Workspace main view: ${mainIsCamera ? "camera" : "gps"}`,
-                    timestamp: Date.now()
-                  });
-                }}
-              >
-                Publish state
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -742,103 +455,170 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
 function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const telemetryService = getTelemetryService(runtime);
-  const [activeTab, setActiveTab] = useState<"general" | "topics" | "pixhawk_gps" | "lidar" | "camera">("general");
-  const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(
+  const sensorInfoService = runtime.registries.serviceRegistry.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  const [state, setState] = useState(sensorInfoService.getState());
+  const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
 
+  useEffect(() => sensorInfoService.subscribe((next) => setState(next)), [sensorInfoService]);
   useEffect(() => {
     if (!telemetryService) return;
-    return telemetryService.subscribeTelemetry((next) => setSnapshot(next));
+    return telemetryService.subscribeTelemetry((next) => setTelemetry(next));
   }, [telemetryService]);
+
+  useEffect(() => {
+    void sensorInfoService.open();
+    return () => {
+      void sensorInfoService.close();
+    };
+  }, [sensorInfoService]);
+
+  const changeTab = (tab: SensorInfoTab): void => {
+    void sensorInfoService.setActiveTab(tab);
+  };
+
+  const activePayload = state.payloads[state.activeTab] as Record<string, unknown> | undefined;
+  const activeSnapshot = (activePayload?.snapshot ?? {}) as Record<string, unknown>;
+  const activeError = state.errors[state.activeTab];
+  const activeInterval = state.intervals[state.activeTab];
+  const activeLoading = state.loading[state.activeTab];
+  const topicRows = state.topics.catalog.filter((entry) =>
+    entry.name.toLowerCase().includes(state.topics.search.trim().toLowerCase())
+  );
 
   return (
     <div className="stack">
       <div className="modal-tabs">
-        <button
-          type="button"
-          className={`modal-tab ${activeTab === "general" ? "active" : ""}`}
-          onClick={() => setActiveTab("general")}
-        >
-          General
-        </button>
-        <button
-          type="button"
-          className={`modal-tab ${activeTab === "topics" ? "active" : ""}`}
-          onClick={() => setActiveTab("topics")}
-        >
-          Topics
-        </button>
-        <button
-          type="button"
-          className={`modal-tab ${activeTab === "pixhawk_gps" ? "active" : ""}`}
-          onClick={() => setActiveTab("pixhawk_gps")}
-        >
-          Pixhawk/GPS
-        </button>
-        <button
-          type="button"
-          className={`modal-tab ${activeTab === "lidar" ? "active" : ""}`}
-          onClick={() => setActiveTab("lidar")}
-        >
-          LiDAR
-        </button>
-        <button
-          type="button"
-          className={`modal-tab ${activeTab === "camera" ? "active" : ""}`}
-          onClick={() => setActiveTab("camera")}
-        >
-          Camera
-        </button>
+        {(["general", "topics", "pixhawk_gps", "lidar", "camera"] as SensorInfoTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`modal-tab ${state.activeTab === tab ? "active" : ""}`}
+            onClick={() => changeTab(tab)}
+          >
+            {tab === "pixhawk_gps" ? "Pixhawk/GPS" : tab[0].toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
       </div>
-      {activeTab === "general" ? (
+      <div className="row">
+        <label className="grow">
+          Refresh (s)
+          <input
+            type="number"
+            min={0.1}
+            max={5}
+            step={0.1}
+            value={activeInterval.toFixed(1)}
+            onChange={(event) => {
+              void sensorInfoService.setInterval(state.activeTab, Number(event.target.value));
+            }}
+          />
+        </label>
+      </div>
+      {activeError ? <div className="status-pill bad">Error: {activeError}</div> : null}
+      {activeLoading ? <div className="status-pill">Loading...</div> : null}
+      {state.activeTab === "general" ? (
         <div className="info-grid-ui">
           <div className="panel-card">
             <strong>Robot mode</strong>
-            <p className="muted">{snapshot?.robotStatus.mode ?? "unknown"}</p>
+            <p className="muted">{telemetry?.robotStatus.mode ?? "unknown"}</p>
           </div>
           <div className="panel-card">
             <strong>Battery</strong>
-            <p className="muted">
-              {snapshot ? `${Number(snapshot.robotStatus.batteryPct).toFixed(1)}%` : "n/a"}
-            </p>
+            <p className="muted">{telemetry ? `${Number(telemetry.robotStatus.batteryPct).toFixed(1)}%` : "n/a"}</p>
           </div>
           <div className="panel-card">
-            <strong>Alerts</strong>
-            <p className="muted">{snapshot?.alerts.length ?? 0} active</p>
+            <strong>RTK Source</strong>
+            <p className="muted">
+              {String(
+                (activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a"
+              )}
+            </p>
           </div>
         </div>
       ) : null}
-      {activeTab === "topics" ? (
-        <div className="panel-card">
-          <strong>ROS topics catalog</strong>
-          <p className="muted">Subscribed topics and latest payload preview.</p>
-          <pre className="code-block">/robot/status{"\n"}/robot/pose{"\n"}/navigation/goal{"\n"}/camera/status</pre>
+      {state.activeTab === "topics" ? (
+        <div className="stack">
+          <input
+            value={state.topics.search}
+            onChange={(event) => sensorInfoService.setTopicSearch(event.target.value)}
+            placeholder="Buscar topic..."
+          />
+          <div className="feed-grid">
+            <ul className="feed-list">
+              {topicRows.map((entry) => (
+                <li key={entry.name} className="feed-item">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void sensorInfoService.selectTopic(entry.name);
+                    }}
+                  >
+                    {entry.name}
+                  </button>
+                  <div className="muted">
+                    pub={entry.publisherCount} · sub={entry.subscriberCount}
+                  </div>
+                </li>
+              ))}
+              {topicRows.length === 0 ? <li className="feed-item muted">No hay topics.</li> : null}
+            </ul>
+            <div className="panel-card">
+              <strong>{state.topics.selectedTopic || "Topics stream"}</strong>
+              <pre className="code-block">{state.topics.historyText || "Selecciona un topic."}</pre>
+              <div className="row">
+                <button
+                  type="button"
+                  disabled={!state.topics.historyText}
+                  onClick={async () => {
+                    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+                    await navigator.clipboard.writeText(state.topics.historyText);
+                    runtime.eventBus.emit("console.event", {
+                      level: "info",
+                      text: "Topic history copied",
+                      timestamp: Date.now()
+                    });
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
-      {activeTab === "pixhawk_gps" ? (
+      {state.activeTab === "pixhawk_gps" ? (
         <div className="panel-card">
           <strong>Pixhawk/GPS</strong>
           <div className="key-value-grid">
             <span>Fix</span>
-            <span>3D</span>
+            <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.fix_type_name ?? "n/a")}</span>
             <span>Satellites</span>
-            <span>12</span>
-            <span>HDOP</span>
-            <span>0.8</span>
+            <span>
+              {String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.satellites_visible ?? "n/a")}
+            </span>
+            <span>RTK status</span>
+            <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.rtk_status ?? "n/a")}</span>
           </div>
         </div>
       ) : null}
-      {activeTab === "lidar" ? (
+      {state.activeTab === "lidar" ? (
         <div className="panel-card">
           <strong>LiDAR</strong>
-          <p className="muted">No LiDAR stream attached in this environment.</p>
+          <p className="muted">
+            {state.implemented.lidar ? "LiDAR telemetry available" : "No LiDAR stream attached in this environment."}
+          </p>
         </div>
       ) : null}
-      {activeTab === "camera" ? (
+      {state.activeTab === "camera" ? (
         <div className="panel-card">
           <strong>Camera</strong>
-          <p className="muted">PTZ control path: service.navigation → dispatcher.robot → transport.ws.core</p>
+          <p className="muted">
+            {state.implemented.camera
+              ? "Camera telemetry stream enabled via set_sensor_info_view."
+              : "PTZ control path: service.navigation → dispatcher.robot → transport.ws.core"}
+          </p>
         </div>
       ) : null}
     </div>
@@ -879,6 +659,13 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     service: connectionService
   });
 
+  const sensorInfoService = new SensorInfoService(dispatcher);
+  ctx.registries.serviceRegistry.registerService({
+    id: SENSOR_INFO_SERVICE_ID,
+    order: 12,
+    service: sensorInfoService
+  });
+
   return navigationService;
 }
 
@@ -894,15 +681,6 @@ function registerSidebarPanels(ctx: ModuleContext): void {
     label: "Navigation",
     order: 6,
     render: (runtime) => <NavigationSidebarPanel runtime={runtime} />
-  });
-}
-
-function registerWorkspaceViews(ctx: ModuleContext): void {
-  ctx.registries.workspaceViewRegistry.registerWorkspaceView({
-    id: "workspace.camera-gps",
-    label: "Camera/GPS",
-    order: 5,
-    render: (runtime) => <CameraGpsWorkspaceView runtime={runtime} />
   });
 }
 
@@ -1001,7 +779,6 @@ export function createNavigationModule(): CockpitModule {
       const dispatcher = registerDispatcher(ctx);
       const navigationService = registerServices(ctx, dispatcher);
       registerSidebarPanels(ctx);
-      registerWorkspaceViews(ctx);
       registerModals(ctx);
       registerToolbarMenu(ctx, navigationService);
     }

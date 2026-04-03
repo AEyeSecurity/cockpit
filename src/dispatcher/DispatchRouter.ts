@@ -3,6 +3,8 @@ import type { Dispatcher, RequestOptions } from "./base/Dispatcher";
 import type { TransportManager } from "../transport/manager/TransportManager";
 
 interface PendingRequest {
+  requestId: string;
+  request: string;
   resolve: (message: IncomingPacket) => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
@@ -12,6 +14,7 @@ export class DispatchRouter {
   private readonly dispatchers = new Map<string, Dispatcher>();
   private readonly byOp = new Map<string, Set<Dispatcher>>();
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly pendingByRequest = new Map<string, string[]>();
   private readonly transportBindings = new Map<string, () => void>();
   private requestSequence = 0;
 
@@ -53,29 +56,44 @@ export class DispatchRouter {
 
     return new Promise<IncomingPacket>((resolve, reject) => {
       const timeoutHandle = setTimeout(() => {
-        this.pending.delete(requestId);
+        this.removePending(requestId);
         reject(new Error(`Request timeout for op '${op}'`));
       }, timeoutMs);
 
-      this.pending.set(requestId, { resolve, reject, timeoutHandle });
+      const pending: PendingRequest = { requestId, request: op, resolve, reject, timeoutHandle };
+      this.pending.set(requestId, pending);
+      const queue = this.pendingByRequest.get(op) ?? [];
+      queue.push(requestId);
+      this.pendingByRequest.set(op, queue);
 
       void this.transportManager
-        .send(transportId, { op, requestId, payload })
+        .send(transportId, {
+          op,
+          request: op,
+          requestId,
+          clientReqId: requestId,
+          payload
+        })
         .catch((error) => {
-          clearTimeout(timeoutHandle);
-          this.pending.delete(requestId);
+          this.removePending(requestId);
           reject(error instanceof Error ? error : new Error(String(error)));
         });
     });
   }
 
   private handleIncoming(transportId: string, message: IncomingPacket): void {
-    const inbound: IncomingPacket = { ...message, transportId };
-    if (inbound.requestId && this.pending.has(inbound.requestId)) {
-      const pending = this.pending.get(inbound.requestId)!;
-      clearTimeout(pending.timeoutHandle);
-      this.pending.delete(inbound.requestId);
-      pending.resolve(inbound);
+    const inbound: IncomingPacket = {
+      ...message,
+      transportId,
+      requestId: String(message.requestId ?? message.clientReqId ?? message.client_req_id ?? "")
+        || undefined,
+      clientReqId: String(message.clientReqId ?? message.client_req_id ?? message.requestId ?? "")
+        || undefined
+    };
+
+    const correlatedPending = this.resolvePendingByMessage(inbound);
+    if (correlatedPending) {
+      correlatedPending.resolve(inbound);
     }
 
     const direct = this.byOp.get(inbound.op) ?? new Set<Dispatcher>();
@@ -89,9 +107,50 @@ export class DispatchRouter {
     });
   }
 
+  private resolvePendingByMessage(message: IncomingPacket): PendingRequest | null {
+    const directId = message.requestId ?? message.clientReqId;
+    if (directId && this.pending.has(directId)) {
+      return this.removePending(directId);
+    }
+
+    const requestName = typeof message.request === "string" ? message.request : "";
+    if (!requestName) return null;
+    const queue = this.pendingByRequest.get(requestName);
+    if (!queue || queue.length === 0) return null;
+
+    while (queue.length > 0) {
+      const requestId = queue.shift()!;
+      if (!this.pending.has(requestId)) continue;
+      if (queue.length === 0) {
+        this.pendingByRequest.delete(requestName);
+      } else {
+        this.pendingByRequest.set(requestName, queue);
+      }
+      return this.removePending(requestId);
+    }
+    this.pendingByRequest.delete(requestName);
+    return null;
+  }
+
+  private removePending(requestId: string): PendingRequest | null {
+    const pending = this.pending.get(requestId);
+    if (!pending) return null;
+    clearTimeout(pending.timeoutHandle);
+    this.pending.delete(requestId);
+    const queue = this.pendingByRequest.get(pending.request);
+    if (queue) {
+      const filtered = queue.filter((entry) => entry !== requestId);
+      if (filtered.length === 0) {
+        this.pendingByRequest.delete(pending.request);
+      } else {
+        this.pendingByRequest.set(pending.request, filtered);
+      }
+    }
+    return pending;
+  }
+
   private nextRequestId(op: string): string {
     this.requestSequence += 1;
     return `${op}.${Date.now()}.${this.requestSequence}`;
   }
 }
-

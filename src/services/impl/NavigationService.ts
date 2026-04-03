@@ -89,6 +89,19 @@ function sanitizeSelection(selection: number[], max: number): number[] {
   return Array.from(new Set(next)).sort((a, b) => a - b);
 }
 
+function parseSnapshotStamp(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && Number.isFinite(Number(raw))) return Number(raw);
+  if (typeof raw === "object" && raw !== null) {
+    const sec = Number((raw as { sec?: unknown }).sec ?? 0);
+    const nanosec = Number((raw as { nanosec?: unknown }).nanosec ?? 0);
+    if (Number.isFinite(sec) && Number.isFinite(nanosec)) {
+      return sec * 1000 + Math.floor(nanosec / 1_000_000);
+    }
+  }
+  return Date.now();
+}
+
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private state: NavigationState = {
@@ -261,12 +274,25 @@ export class NavigationService {
   }
 
   async sendQueuedGoal(fallback?: GoalInput): Promise<{ sentCount: number; loopRoute: boolean }> {
-    const source = this.state.waypoints.length > 0 ? this.state.waypoints[0] : fallback;
-    if (!source) {
+    const queued = this.state.waypoints.length > 0 ? this.state.waypoints : fallback ? [fallback] : [];
+    if (queued.length === 0) {
       throw new Error("No waypoint queued");
     }
-    await this.sendGoal(source);
-    const sentCount = this.state.waypoints.length > 0 ? this.state.waypoints.length : 1;
+
+    const waypoints = queued.map((entry) => parseGoal(entry)).map((entry) => ({
+      lat: entry.x,
+      lon: entry.y,
+      yaw_deg: entry.yawDeg
+    }));
+    const response = await this.robotDispatcher.requestGoal({
+      waypoints,
+      loop: this.state.loopRoute
+    } as never);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Goal dispatch failed"));
+    }
+
+    const sentCount = waypoints.length;
     this.state = {
       ...this.state,
       lastStatus:
@@ -286,9 +312,14 @@ export class NavigationService {
   async sendGoal(input: GoalInput): Promise<void> {
     const validated = parseGoal(input);
     const payload: MessagePayload = {
-      x: validated.x,
-      y: validated.y,
-      yawDeg: validated.yawDeg
+      waypoints: [
+        {
+          lat: validated.x,
+          lon: validated.y,
+          yaw_deg: validated.yawDeg
+        }
+      ],
+      loop: this.state.loopRoute
     } as never;
 
     const response = await this.robotDispatcher.requestGoal(payload);
@@ -341,11 +372,11 @@ export class NavigationService {
     if (response.ok === false) {
       throw new Error(response.error ?? "Snapshot request failed");
     }
-    const payload = (response.payload ?? {}) as Record<string, unknown>;
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
     const snapshot: SnapshotData = {
       mime: String(payload.mime ?? "image/png"),
-      imageBase64: String(payload.imageBase64 ?? ""),
-      stamp: Number(payload.stamp ?? Date.now())
+      imageBase64: String(payload.image_b64 ?? payload.imageBase64 ?? ""),
+      stamp: Number(payload.stamp_ms ?? 0) || parseSnapshotStamp(payload.stamp)
     };
     this.state = {
       ...this.state,
@@ -377,12 +408,12 @@ export class NavigationService {
     if (response.ok === false) {
       throw new Error(response.error ?? "Camera status failed");
     }
-    const payload = (response.payload ?? {}) as Record<string, unknown>;
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
     return {
-      ok: payload.ok === true,
+      ok: payload.ok === true || payload.error == null,
       error: String(payload.error ?? ""),
-      zoomIn: payload.zoomIn === true,
-      lastCommand: String(payload.lastCommand ?? "none")
+      zoomIn: payload.zoom_in === true || payload.zoomIn === true,
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none")
     };
   }
 

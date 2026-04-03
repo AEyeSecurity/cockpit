@@ -14,6 +14,8 @@ export interface ZoneEntry {
   name: string;
   vertices: number;
   updatedAt: number;
+  enabled?: boolean;
+  polygon?: Array<{ lat: number; lon: number }>;
 }
 
 export interface MapWorkspaceState {
@@ -72,13 +74,46 @@ export class MapService {
       throw new Error(response.error ?? "Map request failed");
     }
 
-    const payload = (response.payload ?? {}) as Record<string, unknown>;
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
     const loaded: MapData = {
-      mapId: String(payload.mapId ?? mapId),
-      title: String(payload.title ?? mapId),
-      originLat: Number(payload.originLat ?? 0),
-      originLon: Number(payload.originLon ?? 0)
+      mapId: String(payload.frame_id ?? payload.mapId ?? mapId),
+      title: String(payload.title ?? payload.frame_id ?? mapId),
+      originLat: Number(payload.origin_lat ?? payload.originLat ?? 0),
+      originLon: Number(payload.origin_lon ?? payload.originLon ?? 0)
     };
+
+    if (Array.isArray(payload.zones)) {
+      const incoming = payload.zones
+        .map((zone, index): ZoneEntry | null => {
+          if (!zone || typeof zone !== "object") return null;
+          const value = zone as Record<string, unknown>;
+          const polygon = Array.isArray(value.polygon)
+            ? value.polygon
+                .map((entry) => {
+                  if (!entry || typeof entry !== "object") return null;
+                  const point = entry as Record<string, unknown>;
+                  const lat = Number(point.lat);
+                  const lon = Number(point.lon);
+                  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+                  return { lat, lon };
+                })
+                .filter((entry): entry is { lat: number; lon: number } => entry !== null)
+            : [];
+          return {
+            id: String(value.id ?? `zone.${index + 1}`),
+            name: String(value.id ?? `Zone ${index + 1}`),
+            vertices: polygon.length,
+            enabled: value.enabled !== false,
+            polygon,
+            updatedAt: Date.now()
+          };
+        })
+        .filter((entry): entry is ZoneEntry => entry !== null);
+      this.state = {
+        ...this.state,
+        zones: incoming
+      };
+    }
 
     this.state = {
       ...this.state,
@@ -135,6 +170,8 @@ export class MapService {
       id: `zone.${Date.now()}.${Math.floor(Math.random() * 10_000)}`,
       name: name?.trim() ? name.trim() : `Zone ${this.state.zones.length + 1}`,
       vertices: 4,
+      enabled: true,
+      polygon: [],
       updatedAt: Date.now()
     };
     this.state = {
@@ -151,6 +188,45 @@ export class MapService {
       zones: this.state.zones.filter((zone) => zone.id !== zoneId)
     };
     this.emit();
+  }
+
+  toggleZoneEnabled(zoneId: string): void {
+    this.state = {
+      ...this.state,
+      zones: this.state.zones.map((zone) =>
+        zone.id === zoneId
+          ? {
+              ...zone,
+              enabled: zone.enabled === false ? true : false,
+              updatedAt: Date.now()
+            }
+          : zone
+      )
+    };
+    this.emit();
+  }
+
+  setZonePolygon(zoneId: string, polygon: Array<{ lat: number; lon: number }>): void {
+    this.state = {
+      ...this.state,
+      zones: this.state.zones.map((zone) =>
+        zone.id === zoneId
+          ? {
+              ...zone,
+              polygon: polygon.map((entry) => ({ ...entry })),
+              vertices: polygon.length,
+              updatedAt: Date.now()
+            }
+          : zone
+      )
+    };
+    this.emit();
+  }
+
+  addZoneFromPolygon(polygon: Array<{ lat: number; lon: number }>, name?: string): ZoneEntry {
+    const zone = this.addZone(name);
+    this.setZonePolygon(zone.id, polygon);
+    return this.getState().zones.find((entry) => entry.id === zone.id) ?? zone;
   }
 
   clearZones(): void {
@@ -196,6 +272,23 @@ export class MapService {
     this.emit();
   }
 
+  async pushZonesToBackend(): Promise<void> {
+    const geojson = this.buildGeoJsonFromState();
+    const response = await this.mapDispatcher.setZonesGeoJson(geojson);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "set_zones_geojson failed"));
+    }
+  }
+
+  async loadZonesFromBackend(): Promise<number> {
+    const response = await this.mapDispatcher.loadZonesFile();
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "load_zones_file failed"));
+    }
+    await this.loadMap(String((response as Record<string, unknown>).frame_id ?? "map"));
+    return this.state.zones.length;
+  }
+
   persistZonesToStorage(): number {
     const payload = this.saveZones();
     getStorageAdapter().setItem(this.zoneStorageKey, payload);
@@ -238,5 +331,37 @@ export class MapService {
   private emit(): void {
     const state = this.getState();
     this.listeners.forEach((listener) => listener(state));
+  }
+
+  private buildGeoJsonFromState(): Record<string, unknown> {
+    const features = this.state.zones
+      .map((zone) => {
+        const polygon = Array.isArray(zone.polygon) ? zone.polygon : [];
+        if (polygon.length < 3) return null;
+        const ring = polygon.map((entry) => [entry.lon, entry.lat]);
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (!first || !last) return null;
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          ring.push([first[0], first[1]]);
+        }
+        return {
+          type: "Feature",
+          properties: {
+            id: zone.id,
+            type: "no_go",
+            enabled: zone.enabled !== false
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [ring]
+          }
+        };
+      })
+      .filter((entry) => entry !== null);
+    return {
+      type: "FeatureCollection",
+      features
+    };
   }
 }

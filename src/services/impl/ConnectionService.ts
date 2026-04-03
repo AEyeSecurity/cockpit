@@ -19,6 +19,25 @@ const PRESET_DEFAULTS: Record<ConnectionPreset, { host: string; port: string }> 
   real: { host: "127.0.0.1", port: "8766" },
   sim: { host: "localhost", port: "8766" }
 };
+const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v1";
+
+function getStorageAdapter(): {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+} {
+  if (
+    typeof window !== "undefined" &&
+    window.localStorage &&
+    typeof window.localStorage.getItem === "function" &&
+    typeof window.localStorage.setItem === "function"
+  ) {
+    return window.localStorage;
+  }
+  return {
+    getItem: () => null,
+    setItem: () => undefined
+  };
+}
 
 function parseWsUrl(url: string): { host: string; port: string } {
   try {
@@ -34,6 +53,8 @@ function parseWsUrl(url: string): { host: string; port: string } {
 
 export class ConnectionService {
   private readonly listeners = new Set<ConnectionListener>();
+  private presetValues: Record<ConnectionPreset, { host: string; port: string }>;
+  private initialPreset: ConnectionPreset = "real";
   private state: ConnectionState;
 
   constructor(
@@ -43,10 +64,12 @@ export class ConnectionService {
     private readonly eventBus: EventBus
   ) {
     const parsed = parseWsUrl(env.wsUrl);
+    this.presetValues = this.readPresetStorage(parsed);
+    this.initialPreset = this.readStoredPreset();
     this.state = {
-      preset: "real",
-      host: parsed.host,
-      port: parsed.port,
+      preset: this.initialPreset,
+      host: this.presetValues[this.initialPreset].host,
+      port: this.presetValues[this.initialPreset].port,
       connecting: false,
       connected: false,
       lastError: ""
@@ -66,7 +89,11 @@ export class ConnectionService {
   }
 
   setPreset(preset: ConnectionPreset): void {
-    const defaults = PRESET_DEFAULTS[preset];
+    this.presetValues[this.state.preset] = {
+      host: this.state.host,
+      port: this.state.port
+    };
+    const defaults = this.presetValues[preset];
     this.state = {
       ...this.state,
       preset,
@@ -74,24 +101,35 @@ export class ConnectionService {
       port: defaults.port,
       lastError: ""
     };
+    this.persistPresetStorage();
     this.emit();
   }
 
   setHost(host: string): void {
+    this.presetValues[this.state.preset] = {
+      ...this.presetValues[this.state.preset],
+      host
+    };
     this.state = {
       ...this.state,
       host,
       lastError: ""
     };
+    this.persistPresetStorage();
     this.emit();
   }
 
   setPort(port: string): void {
+    this.presetValues[this.state.preset] = {
+      ...this.presetValues[this.state.preset],
+      port
+    };
     this.state = {
       ...this.state,
       port,
       lastError: ""
     };
+    this.persistPresetStorage();
     this.emit();
   }
 
@@ -183,5 +221,56 @@ export class ConnectionService {
   private emit(): void {
     const snapshot = this.getState();
     this.listeners.forEach((listener) => listener(snapshot));
+  }
+
+  private readPresetStorage(parsedReal: { host: string; port: string }): Record<ConnectionPreset, { host: string; port: string }> {
+    const defaults: Record<ConnectionPreset, { host: string; port: string }> = {
+      real: {
+        host: parsedReal.host || PRESET_DEFAULTS.real.host,
+        port: parsedReal.port || PRESET_DEFAULTS.real.port
+      },
+      sim: { ...PRESET_DEFAULTS.sim }
+    };
+    const raw = getStorageAdapter().getItem(CONNECTION_PRESET_STORAGE_KEY);
+    if (!raw) return defaults;
+    try {
+      const parsed = JSON.parse(raw) as {
+        presets?: Record<string, { host?: string; port?: string }>;
+      };
+      const presets = parsed.presets ?? {};
+      return {
+        real: {
+          host: String(presets.real?.host ?? defaults.real.host),
+          port: String(presets.real?.port ?? defaults.real.port)
+        },
+        sim: {
+          host: String(presets.sim?.host ?? defaults.sim.host),
+          port: String(presets.sim?.port ?? defaults.sim.port)
+        }
+      };
+    } catch {
+      return defaults;
+    }
+  }
+
+  private persistPresetStorage(): void {
+    getStorageAdapter().setItem(
+      CONNECTION_PRESET_STORAGE_KEY,
+      JSON.stringify({
+        preset: this.state.preset,
+        presets: this.presetValues
+      })
+    );
+  }
+
+  private readStoredPreset(): ConnectionPreset {
+    const raw = getStorageAdapter().getItem(CONNECTION_PRESET_STORAGE_KEY);
+    if (!raw) return "real";
+    try {
+      const parsed = JSON.parse(raw) as { preset?: string };
+      return parsed.preset === "sim" ? "sim" : "real";
+    } catch {
+      return "real";
+    }
   }
 }

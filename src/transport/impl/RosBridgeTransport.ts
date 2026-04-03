@@ -1,5 +1,6 @@
 import type { IncomingPacket, OutgoingPacket } from "../../core/types/message";
 import type { Transport, TransportContext, TransportReceiveHandler } from "../base/Transport";
+import { decodeLegacyIncoming, encodeLegacyOutgoing } from "../base/legacyCodec";
 
 export class RosBridgeTransport implements Transport {
   readonly kind = "rosbridge";
@@ -24,7 +25,8 @@ export class RosBridgeTransport implements Transport {
       };
       socket.onmessage = (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as IncomingPacket;
+          const parsed = decodeLegacyIncoming(JSON.parse(String(event.data)));
+          if (!parsed) return;
           this.handlers.forEach((handler) => handler(parsed));
         } catch {
           // Ignore malformed payloads.
@@ -44,7 +46,7 @@ export class RosBridgeTransport implements Transport {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error(`RosBridge transport '${this.id}' is disconnected`);
     }
-    this.ws.send(JSON.stringify(packet));
+    this.ws.send(JSON.stringify(encodeLegacyOutgoing(packet)));
   }
 
   recv(handler: TransportReceiveHandler): () => void {
@@ -52,4 +54,3 @@ export class RosBridgeTransport implements Transport {
     return () => this.handlers.delete(handler);
   }
 }
-

@@ -55,16 +55,22 @@ describe("transport contracts", () => {
   it("WebSocketTransport connect/send/recv/disconnect", async () => {
     const transport = new WebSocketTransport("ws", () => "ws://localhost:1234");
     const received: string[] = [];
+    const receivedRequestIds: string[] = [];
     transport.recv((message) => {
       received.push(message.op);
+      if (message.requestId) {
+        receivedRequestIds.push(message.requestId);
+      }
     });
 
     await transport.connect({ env: {} as never });
-    await transport.send({ op: "hello" } as OutgoingPacket);
+    await transport.send({ op: "hello", requestId: "abc-123" } as OutgoingPacket);
 
     const socket = (transport as unknown as { ws: FakeWebSocket }).ws;
-    socket?.emitJson({ op: "hello.result", ok: true });
+    expect(socket?.sent[0]).toContain("\"client_req_id\":\"abc-123\"");
+    socket?.emitJson({ op: "hello.result", ok: true, client_req_id: "abc-123" });
     expect(received).toEqual(["hello.result"]);
+    expect(receivedRequestIds).toEqual(["abc-123"]);
 
     await transport.disconnect();
   });
@@ -102,4 +108,3 @@ describe("transport contracts", () => {
     vi.stubGlobal("WebSocket", originalWebSocket as unknown as typeof WebSocket);
   });
 });
-

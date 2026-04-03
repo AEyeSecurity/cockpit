@@ -92,5 +92,17 @@ describe("DispatchRouter", () => {
       router.request(transport.id, "never.responds", {} as never, { timeoutMs: 15 })
     ).rejects.toThrow("timeout");
   });
-});
 
+  it("resolves request using legacy ack.request fallback", async () => {
+    const requestPromise = router.request(transport.id, "set_manual_mode", { enabled: true } as never, {
+      timeoutMs: 1500
+    });
+    transport.emit({
+      op: "ack",
+      request: "set_manual_mode",
+      ok: true,
+      enabled: true
+    });
+    await expect(requestPromise).resolves.toMatchObject({ op: "ack", ok: true, request: "set_manual_mode" });
+  });
+});

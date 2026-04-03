@@ -89,6 +89,12 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
         return;
       }
 
+      if (event.code === "KeyI" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        setActiveModalId("modal.info");
+        event.preventDefault();
+        return;
+      }
+
       if (event.code === "KeyE") {
         runtime.eventBus.emit(NAV_EVENTS.swapWorkspaceRequest, {});
         event.preventDefault();
@@ -125,6 +131,27 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
             });
           });
         event.preventDefault();
+      }
+
+      if ((event.code === "Minus" || event.code === "NumpadSubtract") && navigationService) {
+        void navigationService.toggleCameraZoom();
+        event.preventDefault();
+        return;
+      }
+
+      if (navigationService) {
+        const cameraArrowByCode: Record<string, number> = {
+          ArrowUp: 0,
+          ArrowDown: 180,
+          ArrowLeft: 90,
+          ArrowRight: -90
+        };
+        const angle = cameraArrowByCode[event.code];
+        if (typeof angle === "number") {
+          void navigationService.panCamera(angle);
+          event.preventDefault();
+          return;
+        }
       }
     };
 
@@ -170,6 +197,9 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
   const activeSidebarPanel = sidebarPanels.find((panel) => panel.id === activeSidebarId) ?? null;
   const activeWorkspace = workspaceViews.find((view) => view.id === activeWorkspaceId) ?? null;
+  const shellBodyColumns = sidebarCollapsed
+    ? "52px minmax(0, 1fr)"
+    : `52px ${sidebarWidth}px 4px minmax(0, 1fr)`;
 
   return (
     <div className="shell">
@@ -177,7 +207,7 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       <div
         className="shell-body"
         style={{
-          gridTemplateColumns: `52px ${sidebarCollapsed ? 0 : sidebarWidth}px ${sidebarCollapsed ? 0 : 4}px minmax(0, 1fr)`
+          gridTemplateColumns: shellBodyColumns
         }}
       >
         <div className="sidebar-selector">
@@ -186,7 +216,10 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
               key={panel.id}
               type="button"
               className={panel.id === activeSidebarId ? "active" : ""}
-              onClick={() => setActiveSidebarId(panel.id)}
+              onClick={() => {
+                setActiveSidebarId(panel.id);
+                setSidebarCollapsed(false);
+              }}
               title={panel.label}
               aria-label={panel.label}
             >
@@ -203,13 +236,15 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
             {sidebarCollapsed ? "▶" : "◀"}
           </button>
         </div>
-        <SidebarHost runtime={runtime} panel={sidebarCollapsed ? null : activeSidebarPanel} />
-        <div
-          className={`splitter-vertical ${sidebarCollapsed ? "collapsed" : ""}`}
-          onMouseDown={startSidebarResize}
-          role="separator"
-          aria-orientation="vertical"
-        />
+        {!sidebarCollapsed ? <SidebarHost runtime={runtime} panel={activeSidebarPanel} /> : null}
+        {!sidebarCollapsed ? (
+          <div
+            className="splitter-vertical"
+            onMouseDown={startSidebarResize}
+            role="separator"
+            aria-orientation="vertical"
+          />
+        ) : null}
         <main className="workspace-column">
           <section className="workspace-selector">
             {workspaceViews.map((view) => (
@@ -239,6 +274,17 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
             height={consoleCollapsed ? 36 : consoleHeight}
             onToggleCollapse={() => setConsoleCollapsed((prev) => !prev)}
           />
+          {consoleCollapsed ? (
+            <button
+              type="button"
+              className="console-restore-floating"
+              onClick={() => setConsoleCollapsed(false)}
+              title="Expand console"
+              aria-label="Expand console"
+            >
+              ▲
+            </button>
+          ) : null}
         </main>
       </div>
       <ModalHost runtime={runtime} dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
