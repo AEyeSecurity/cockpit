@@ -797,6 +797,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [mainPane, setMainPane] = useState<"map" | "camera">("map");
   const [frameSrc, setFrameSrc] = useState("");
   const [frameReady, setFrameReady] = useState(false);
+  const [cameraStreamPending, setCameraStreamPending] = useState<"idle" | "connecting">("idle");
+  const [cameraConnectError, setCameraConnectError] = useState("");
   const [centerRequestKey, setCenterRequestKey] = useState(0);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
@@ -809,6 +811,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   );
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
+  const cameraStreamSeqRef = useRef(0);
+  const cameraLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => mapService.subscribe((next) => setState(next)), [mapService]);
   useEffect(() => {
@@ -874,10 +878,18 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const mainIsMap = !cameraPaneAvailable || mainPane === "map";
   const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
   const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
+  const cameraProbeTimeoutMs = Math.max(500, Number(runtime.env.cameraProbeTimeoutMs ?? 3000));
+  const cameraLoadTimeoutMs = Math.max(1000, Number(runtime.env.cameraLoadTimeoutMs ?? 7000));
   const cameraStreamConnected = navigationState?.cameraStreamConnected === true;
   const controlsLocked = navigationState?.controlLocked ?? true;
   const mapInteractive = mainIsMap;
   const mapToolsEnabled = mainIsMap;
+
+  const clearCameraLoadTimer = (): void => {
+    if (!cameraLoadTimerRef.current) return;
+    clearTimeout(cameraLoadTimerRef.current);
+    cameraLoadTimerRef.current = null;
+  };
 
   useEffect(() => {
     if (cameraPaneAvailable) return;
@@ -887,15 +899,99 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }, [cameraPaneAvailable, mainPane]);
 
   useEffect(() => {
-    if (!cameraStreamConnected || !cameraEnabled || !cameraUrl) {
+    cameraStreamSeqRef.current += 1;
+    clearCameraLoadTimer();
+    setCameraConnectError("");
+
+    if (!cameraStreamConnected || !cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
       setFrameSrc("");
       setFrameReady(false);
+      setCameraStreamPending("idle");
+      if (!cameraEnabled && cameraStreamConnected) {
+        navigationService?.setCameraStreamConnected(false);
+      }
       return;
     }
-    const separator = cameraUrl.includes("?") ? "&" : "?";
-    setFrameSrc(`${cameraUrl}${separator}_ts=${Date.now()}`);
+
+    const sequence = cameraStreamSeqRef.current;
+    let cancelled = false;
+    setCameraStreamPending("connecting");
     setFrameReady(false);
-  }, [cameraEnabled, cameraStreamConnected, cameraUrl]);
+
+    const connectStream = async (): Promise<void> => {
+      let probeOk = true;
+      let probeError = "";
+      let controller: AbortController | null = null;
+      let probeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      try {
+        if (typeof AbortController !== "undefined") {
+          controller = new AbortController();
+          probeTimeoutId = setTimeout(() => {
+            controller?.abort();
+          }, cameraProbeTimeoutMs);
+        }
+        await fetch(cameraUrl, {
+          method: "GET",
+          mode: "no-cors",
+          cache: "no-store",
+          signal: controller?.signal
+        });
+      } catch (error) {
+        probeOk = false;
+        probeError = error instanceof Error && error.name === "AbortError" ? "probe timeout" : "probe failed";
+      } finally {
+        if (probeTimeoutId) {
+          clearTimeout(probeTimeoutId);
+        }
+      }
+
+      if (cancelled || sequence !== cameraStreamSeqRef.current) return;
+      if (!probeOk) {
+        setCameraConnectError(probeError);
+        setCameraStreamPending("idle");
+        setFrameSrc("");
+        setFrameReady(false);
+        navigationService?.setCameraStreamConnected(false);
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: `Camera connection failed (${probeError})`,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      const separator = cameraUrl.includes("?") ? "&" : "?";
+      setFrameSrc(`${cameraUrl}${separator}_ts=${Date.now()}`);
+      cameraLoadTimerRef.current = setTimeout(() => {
+        if (sequence !== cameraStreamSeqRef.current) return;
+        setCameraConnectError("stream timeout");
+        setCameraStreamPending("idle");
+        setFrameSrc("");
+        setFrameReady(false);
+        navigationService?.setCameraStreamConnected(false);
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: "Camera stream timeout",
+          timestamp: Date.now()
+        });
+      }, cameraLoadTimeoutMs);
+    };
+
+    void connectStream();
+    return () => {
+      cancelled = true;
+      clearCameraLoadTimer();
+    };
+  }, [
+    cameraEnabled,
+    cameraPaneAvailable,
+    cameraStreamConnected,
+    cameraUrl,
+    cameraLoadTimeoutMs,
+    cameraProbeTimeoutMs,
+    navigationService,
+    runtime.eventBus
+  ]);
 
   useEffect(() => {
     if (mainIsMap) return;
@@ -908,7 +1004,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       : "camera unavailable"
     : !cameraStreamConnected
       ? "camara desconectada"
-      : frameReady
+      : cameraStreamPending === "connecting"
+        ? "camera connecting"
+        : cameraConnectError
+          ? `camera ${cameraConnectError}`
+          : frameReady
         ? ""
         : "camera connecting";
   const lockReasonText = formatControlLockReason(navigationState?.controlLockReason ?? "");
@@ -1106,7 +1206,25 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 src={frameSrc}
                 title="Camera feed"
                 loading="lazy"
-                onLoad={() => setFrameReady(true)}
+                onLoad={() => {
+                  if (!(navigationService?.getState().cameraStreamConnected === true)) return;
+                  clearCameraLoadTimer();
+                  setFrameReady(true);
+                  setCameraConnectError("");
+                  setCameraStreamPending("idle");
+                }}
+                onError={() => {
+                  clearCameraLoadTimer();
+                  setFrameReady(false);
+                  setCameraConnectError("load error");
+                  setCameraStreamPending("idle");
+                  navigationService?.setCameraStreamConnected(false);
+                  runtime.eventBus.emit("console.event", {
+                    level: "warn",
+                    text: "Camera frame load error",
+                    timestamp: Date.now()
+                  });
+                }}
               />
               {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
             </div>

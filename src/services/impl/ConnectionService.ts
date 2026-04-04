@@ -17,10 +17,6 @@ export interface ConnectionState {
 
 type ConnectionListener = (state: ConnectionState) => void;
 
-const PRESET_DEFAULTS: Record<ConnectionPreset, { host: string; port: string }> = {
-  real: { host: "127.0.0.1", port: "8766" },
-  sim: { host: "localhost", port: "8766" }
-};
 const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v1";
 
 function getStorageAdapter(): {
@@ -41,15 +37,15 @@ function getStorageAdapter(): {
   };
 }
 
-function parseWsUrl(url: string): { host: string; port: string } {
+function parseWsUrl(url: string, fallbackHost: string, fallbackPort: string): { host: string; port: string } {
   try {
     const parsed = new URL(url);
     return {
-      host: parsed.hostname || PRESET_DEFAULTS.real.host,
-      port: parsed.port || PRESET_DEFAULTS.real.port
+      host: parsed.hostname || fallbackHost,
+      port: parsed.port || fallbackPort
     };
   } catch {
-    return PRESET_DEFAULTS.real;
+    return { host: fallbackHost, port: fallbackPort };
   }
 }
 
@@ -65,8 +61,23 @@ export class ConnectionService {
     private readonly transportId: string,
     private readonly eventBus: EventBus
   ) {
-    const parsed = parseWsUrl(env.wsUrl);
-    this.presetValues = this.readPresetStorage(parsed);
+    const wsRealHost = env.wsRealHost ?? "100.111.4.7";
+    const wsSimHost = env.wsSimHost ?? "localhost";
+    const wsDefaultPort = env.wsDefaultPort ?? "8766";
+    const parsed = parseWsUrl(env.wsUrl, wsRealHost, wsDefaultPort);
+    const realHost = wsRealHost || parsed.host;
+    const realPort = wsDefaultPort || parsed.port;
+    const defaults: Record<ConnectionPreset, { host: string; port: string }> = {
+      real: {
+        host: realHost,
+        port: realPort
+      },
+      sim: {
+        host: wsSimHost,
+        port: wsDefaultPort
+      }
+    };
+    this.presetValues = this.readPresetStorage(defaults);
     this.initialPreset = this.readStoredPreset();
     const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
@@ -241,14 +252,7 @@ export class ConnectionService {
     this.emit();
   }
 
-  private readPresetStorage(parsedReal: { host: string; port: string }): Record<ConnectionPreset, { host: string; port: string }> {
-    const defaults: Record<ConnectionPreset, { host: string; port: string }> = {
-      real: {
-        host: parsedReal.host || PRESET_DEFAULTS.real.host,
-        port: parsedReal.port || PRESET_DEFAULTS.real.port
-      },
-      sim: { ...PRESET_DEFAULTS.sim }
-    };
+  private readPresetStorage(defaults: Record<ConnectionPreset, { host: string; port: string }>): Record<ConnectionPreset, { host: string; port: string }> {
     const raw = getStorageAdapter().getItem(CONNECTION_PRESET_STORAGE_KEY);
     if (!raw) return defaults;
     try {

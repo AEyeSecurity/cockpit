@@ -143,6 +143,12 @@ function ConnectionFooterItem({ runtime }: { runtime: ModuleContext }): JSX.Elem
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  let connectionService: ConnectionService | null = null;
+  try {
+    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  } catch {
+    connectionService = null;
+  }
   const [state, setState] = useState<NavigationState>(service.getState());
   const selectedCount = state.selectedWaypointIndexes.length;
 
@@ -285,7 +291,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </button>
           <button
             type="button"
+            className={state.cameraStreamConnected ? "active" : ""}
             onClick={() => {
+              if (!connectionService?.isCameraEnabled()) {
+                runtime.eventBus.emit("console.event", {
+                  level: "warn",
+                  text: "Camera disabled in current preset",
+                  timestamp: Date.now()
+                });
+                return;
+              }
               const connected = service.toggleCameraStream();
               emitInfo(connected ? "Camera stream connected" : "Camera stream disconnected");
             }}
@@ -512,11 +527,31 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
 
 function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  let connectionService: ConnectionService | null = null;
+  try {
+    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  } catch {
+    connectionService = null;
+  }
 
   const pan = async (angleDeg: number): Promise<void> => {
+    if (!connectionService?.isCameraEnabled()) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: "Camera disabled in current preset",
+        timestamp: Date.now()
+      });
+      return;
+    }
     try {
       await service.panCamera(angleDeg);
-    } catch {}
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "error",
+        text: `Camera pan failed: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    }
   };
 
   return (
@@ -541,7 +576,13 @@ function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Elemen
             onClick={async () => {
               try {
                 await service.toggleCameraZoom();
-              } catch {}
+              } catch (error) {
+                runtime.eventBus.emit("console.event", {
+                  level: "error",
+                  text: `Camera zoom failed: ${String(error)}`,
+                  timestamp: Date.now()
+                });
+              }
             }}
           >
             🔍

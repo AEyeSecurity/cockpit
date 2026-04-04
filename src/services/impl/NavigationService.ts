@@ -403,6 +403,16 @@ export class NavigationService {
     return next;
   }
 
+  setCameraStreamConnected(connected: boolean): void {
+    const next = connected === true;
+    if (this.state.cameraStreamConnected === next) return;
+    this.state = {
+      ...this.state,
+      cameraStreamConnected: next
+    };
+    this.emit();
+  }
+
   async lockControls(): Promise<void> {
     await this.setControlLock(true);
   }
