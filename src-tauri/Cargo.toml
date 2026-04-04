@@ -9,6 +9,8 @@ edition = "2021"
 tauri-build = { version = "2.0.3", features = [] }
 
 [dependencies]
+once_cell = "1.20"
+portable-pty = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.1.1", features = [] }
@@ -16,4 +18,3 @@ tauri = { version = "2.1.1", features = [] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-

@@ -400,8 +400,12 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     event.preventDefault();
     const startX = event.clientX;
     const initial = sidebarWidth;
+    const shellBody = event.currentTarget.closest(".shell-body") as HTMLElement | null;
     const onMove = (moveEvent: MouseEvent): void => {
-      const next = Math.max(260, Math.min(560, initial + (moveEvent.clientX - startX)));
+      const maxWidthByViewport = shellBody
+        ? Math.max(260, Math.floor(shellBody.getBoundingClientRect().width) - 52 - 4)
+        : Number.POSITIVE_INFINITY;
+      const next = Math.max(260, Math.min(maxWidthByViewport, initial + (moveEvent.clientX - startX)));
       setSidebarWidth(next);
     };
     const onUp = (): void => {
@@ -417,8 +421,12 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     event.preventDefault();
     const startY = event.clientY;
     const initial = consoleHeight;
+    const workspaceColumn = event.currentTarget.closest(".workspace-column") as HTMLElement | null;
     const onMove = (moveEvent: MouseEvent): void => {
-      const next = Math.max(120, Math.min(420, initial - (moveEvent.clientY - startY)));
+      const maxHeightByWorkspace = workspaceColumn
+        ? Math.max(120, Math.floor(workspaceColumn.getBoundingClientRect().height) - 32 - 4)
+        : Number.POSITIVE_INFINITY;
+      const next = Math.max(120, Math.min(maxHeightByWorkspace, initial - (moveEvent.clientY - startY)));
       setConsoleHeight(next);
     };
     const onUp = (): void => {

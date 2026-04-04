@@ -1,0 +1,142 @@
+@import "xterm/css/xterm.css";
+
+.terminal-tab-root {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 0;
+  background: #1f1a1a;
+  border: 1px solid var(--line);
+}
+
+.terminal-main-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-xterm-host {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 6px;
+}
+
+.terminal-xterm-host .xterm {
+  height: 100%;
+}
+
+.terminal-xterm-host .xterm-viewport {
+  background: #1e1b1b !important;
+}
+
+.terminal-session-strip {
+  min-height: 30px;
+  border-top: 1px solid var(--line);
+  background: #252020;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.terminal-session-tabs {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.terminal-session-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: #2f2828;
+}
+
+.terminal-session-tab.active {
+  border-color: var(--accent);
+  background: #3f3535;
+}
+
+.terminal-session-tab-select {
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.terminal-session-tab-select:hover:not(:disabled) {
+  background: #4f4343;
+}
+
+.terminal-session-tab-close {
+  min-width: 22px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  font-size: 14px;
+}
+
+.terminal-session-tab-close:hover:not(:disabled) {
+  background: #6b3038;
+  color: #fff0f3;
+}
+
+.terminal-session-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-session-actions select {
+  min-height: 24px;
+  padding: 2px 26px 2px 8px;
+  border-radius: 2px;
+}
+
+.terminal-session-actions button {
+  min-height: 24px;
+  min-width: 24px;
+  border-radius: 2px;
+  padding: 0;
+}
+
+.terminal-strip-status {
+  min-height: 20px;
+  border-top: 1px solid var(--line);
+  background: #221d1d;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.terminal-fallback {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.terminal-muted {
+  color: var(--muted);
+}
+
+.terminal-error {
+  color: var(--bad);
+}
+

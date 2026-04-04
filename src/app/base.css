@@ -772,7 +772,6 @@ body,
   background: #2a2323;
   grid-template-rows: 32px 1fr;
   min-height: 36px;
-  max-height: 100%;
   overflow: hidden;
 }
 
