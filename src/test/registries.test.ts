@@ -4,13 +4,13 @@ import { isModuleEnabled, isPackageEnabled, isPackageModuleEnabled, type ModuleC
 import type { CockpitModule, CockpitPackage } from "../core/types/module";
 
 describe("registries", () => {
-  it("sorts entries by order and id", () => {
+  it("preserves insertion order", () => {
     const registry = new SidebarPanelRegistry();
-    registry.registerSidebarPanel({ id: "z", label: "z", order: 20, render: () => null });
-    registry.registerSidebarPanel({ id: "a", label: "a", order: 20, render: () => null });
-    registry.registerSidebarPanel({ id: "b", label: "b", order: 10, render: () => null });
+    registry.registerSidebarPanel({ id: "z", label: "z", render: () => null });
+    registry.registerSidebarPanel({ id: "a", label: "a", render: () => null });
+    registry.registerSidebarPanel({ id: "b", label: "b", render: () => null });
 
-    expect(registry.list().map((entry) => entry.id)).toEqual(["b", "a", "z"]);
+    expect(registry.list().map((entry) => entry.id)).toEqual(["z", "a", "b"]);
   });
 
   it("throws on id collision", () => {

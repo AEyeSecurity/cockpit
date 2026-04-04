@@ -3,7 +3,6 @@ import { OrderedRegistry } from "./orderedRegistry";
 
 export interface DispatcherDefinition {
   id: string;
-  order?: number;
   dispatcher: Dispatcher;
 }
 
@@ -12,4 +11,3 @@ export class DispatcherRegistry extends OrderedRegistry<DispatcherDefinition> {
     this.register(definition);
   }
 }
-

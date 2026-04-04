@@ -66,10 +66,10 @@ function createRuntime(): AppRuntime {
         settingsSchema: {
           title: "Nav2",
           fields: [
-            { key: "URL_CAMERA", label: "Camera URL", type: "string", order: 10 },
-            { key: "THEME", label: "Theme", type: "string", order: 20 },
-            { key: "fontsize", label: "Font Size", type: "number", order: 30 },
-            { key: "enabled", label: "Enabled", type: "boolean", order: 40 }
+            { key: "URL_CAMERA", label: "Camera URL", type: "string" },
+            { key: "THEME", label: "Theme", type: "string" },
+            { key: "fontsize", label: "Font Size", type: "number" },
+            { key: "enabled", label: "Enabled", type: "boolean" }
           ]
         }
       }

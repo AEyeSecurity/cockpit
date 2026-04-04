@@ -49,16 +49,8 @@ function resetSettingsUiState(): void {
   emitSettings();
 }
 
-function sortedFields(cockpitPackage: LoadedPackage): PackageSettingFieldSchema[] {
-  return [...cockpitPackage.settingsSchema.fields]
-    .map((field, index) => ({ field, index }))
-    .sort((left, right) => {
-      const leftOrder = left.field.order ?? Number.MAX_SAFE_INTEGER;
-      const rightOrder = right.field.order ?? Number.MAX_SAFE_INTEGER;
-      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-      return left.index - right.index;
-    })
-    .map((entry) => entry.field);
+function listedFields(cockpitPackage: LoadedPackage): PackageSettingFieldSchema[] {
+  return [...cockpitPackage.settingsSchema.fields];
 }
 
 function serializeFieldValue(value: unknown, field: PackageSettingFieldSchema): DraftValue {
@@ -76,7 +68,7 @@ function serializeFieldValue(value: unknown, field: PackageSettingFieldSchema): 
 
 function createEditorState(config: Record<string, unknown>, cockpitPackage: LoadedPackage): PackageEditorState {
   const drafts: Record<string, DraftValue> = {};
-  for (const field of sortedFields(cockpitPackage)) {
+  for (const field of listedFields(cockpitPackage)) {
     drafts[field.key] = serializeFieldValue(config[field.key], field);
   }
   return {
@@ -114,7 +106,7 @@ function applySchemaValidation(
 ): { nextConfig: Record<string, unknown> | null; errors: Record<string, string> } {
   const nextConfig: Record<string, unknown> = { ...currentConfig };
   const errors: Record<string, string> = {};
-  for (const field of sortedFields(cockpitPackage)) {
+  for (const field of listedFields(cockpitPackage)) {
     const parsed = parseFieldValue(drafts[field.key], field);
     if (parsed.error) {
       errors[field.key] = parsed.error;
@@ -239,7 +231,7 @@ function SettingsModalBody({ runtime }: { runtime: AppRuntime }): JSX.Element {
 
   const config = runtime.getPackageConfig<Record<string, unknown>>(activePackage.id);
   const editorState = state.editorByPackage[activePackage.id] ?? createEditorState(config, activePackage);
-  const fields = sortedFields(activePackage);
+  const fields = listedFields(activePackage);
 
   return (
     <div className="stack settings-modal-layout">
@@ -421,7 +413,6 @@ export function registerCoreSettingsUi(runtime: AppRuntime): void {
   runtime.registries.modalRegistry.registerModalDialog({
     id: "modal.settings",
     title: "Settings",
-    order: 20,
     renderHeader: ({ runtime: modalRuntime, close }) => <SettingsModalHeader runtime={modalRuntime} close={close} />,
     render: ({ runtime: modalRuntime }) => <SettingsModalBody runtime={modalRuntime} />,
     renderFooter: ({ runtime: modalRuntime }) => <SettingsModalFooter runtime={modalRuntime} />
@@ -430,7 +421,6 @@ export function registerCoreSettingsUi(runtime: AppRuntime): void {
   runtime.registries.toolbarMenuRegistry.registerToolbarMenu({
     id: "toolbar.settings",
     label: "Settings",
-    order: 50,
     onSelect: ({ openModal }) => {
       resetSettingsUiState();
       openModal("modal.settings");

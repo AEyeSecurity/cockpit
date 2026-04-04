@@ -181,21 +181,18 @@ export function createTelemetryModule(): CockpitModule {
       const telemetryService = new TelemetryService(robotDispatcher, ctx.eventBus);
       ctx.registries.serviceRegistry.registerService({
         id: SERVICE_ID,
-        order: 20,
         service: telemetryService
       });
 
       ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
         id: "sidebar.telemetry",
         label: "Telemetry",
-        order: 15,
         render: (runtime) => <TelemetrySidebarPanel runtime={runtime} />
       });
 
       ctx.registries.consoleTabRegistry.registerConsoleTab({
         id: "console.telemetry",
         label: "Telemetry",
-        order: 15,
         render: (runtime) => <TelemetryConsoleTab runtime={runtime} />
       });
     }

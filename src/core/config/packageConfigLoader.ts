@@ -16,15 +16,14 @@ function normalizeSettingsField(input: unknown): PackageSettingFieldSchema | nul
   if (!isSettingFieldType(input.type)) return null;
   if (input.description !== undefined && typeof input.description !== "string") return null;
   if (input.placeholder !== undefined && typeof input.placeholder !== "string") return null;
-  if (input.order !== undefined && (typeof input.order !== "number" || !Number.isFinite(input.order))) return null;
+  if (Object.prototype.hasOwnProperty.call(input, "order")) return null;
 
   return {
     key: input.key,
     label: input.label,
     type: input.type,
     description: input.description,
-    placeholder: input.placeholder,
-    order: input.order
+    placeholder: input.placeholder
   };
 }
 

@@ -1225,7 +1225,6 @@ function registerTransport(ctx: ModuleContext): void {
   const transport = new WebSocketTransport(TRANSPORT_ID, ({ env }) => env.wsUrl);
   ctx.registries.transportRegistry.registerTransport({
     id: transport.id,
-    order: 10,
     transport
   });
 }
@@ -1234,7 +1233,6 @@ function registerDispatcher(ctx: ModuleContext): RobotDispatcher {
   const dispatcher = new RobotDispatcher(DISPATCHER_ID, TRANSPORT_ID);
   ctx.registries.dispatcherRegistry.registerDispatcher({
     id: dispatcher.id,
-    order: 10,
     dispatcher
   });
   return dispatcher;
@@ -1249,7 +1247,6 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
   });
   ctx.registries.serviceRegistry.registerService({
     id: NAVIGATION_SERVICE_ID,
-    order: 10,
     service: navigationService
   });
 
@@ -1262,7 +1259,6 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
   );
   ctx.registries.serviceRegistry.registerService({
     id: CONNECTION_SERVICE_ID,
-    order: 11,
     service: connectionService
   });
   ctx.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
@@ -1270,12 +1266,16 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     if (packageId !== "nav2") return;
     const nextConfig = (payload.config ?? {}) as Nav2RuntimeConfig;
     connectionService.applyPresetDefaults(buildConnectionPresetDefaults(ctx, nextConfig));
+    navigationService.applyRuntimeDefaults({
+      linearSpeed: parseNumberInRange(nextConfig.manual_linear_speed_default, 1.2, 1.0, 4.0),
+      angularSpeed: parseNumberInRange(nextConfig.manual_angular_speed_default, 0.4, 0.1, 1.2),
+      loopIntervalMs: parseLoopIntervalMs(nextConfig.manual_loop_interval_ms, 50)
+    });
   });
 
   const sensorInfoService = new SensorInfoService(dispatcher);
   ctx.registries.serviceRegistry.registerService({
     id: SENSOR_INFO_SERVICE_ID,
-    order: 12,
     service: sensorInfoService
   });
 
@@ -1286,13 +1286,11 @@ function registerSidebarPanels(ctx: ModuleContext): void {
   ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
     id: "sidebar.connection",
     label: "Connection",
-    order: 5,
     render: (runtime) => <ConnectionSidebarPanel runtime={runtime} />
   });
   ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
     id: "sidebar.navigation",
     label: "Navigation",
-    order: 6,
     render: (runtime) => <NavigationSidebarPanel runtime={runtime} />
   });
 }
@@ -1301,14 +1299,12 @@ function registerModals(ctx: ModuleContext): void {
   ctx.registries.modalRegistry.registerModalDialog({
     id: "modal.snapshot",
     title: "Navigation Snapshot",
-    order: 5,
     render: ({ runtime }) => <SnapshotModal runtime={runtime} />,
     renderFooter: ({ runtime }) => <SnapshotModalFooter runtime={runtime} />
   });
   ctx.registries.modalRegistry.registerModalDialog({
     id: "modal.info",
     title: "Info",
-    order: 6,
     render: ({ runtime }) => <InfoModal runtime={runtime} />,
     renderFooter: ({ runtime }) => <InfoModalFooter runtime={runtime} />
   });
@@ -1317,7 +1313,6 @@ function registerModals(ctx: ModuleContext): void {
 function registerFooterItems(ctx: ModuleContext): void {
   ctx.registries.footerItemRegistry.registerFooterItem({
     id: "footer.connection",
-    order: 10,
     render: (runtime) => <ConnectionFooterItem runtime={runtime} />
   });
 }
@@ -1326,7 +1321,6 @@ function registerToolbarMenu(ctx: ModuleContext, navigationService: NavigationSe
   ctx.registries.toolbarMenuRegistry.registerToolbarMenu({
     id: "toolbar.navigation",
     label: "Navigation",
-    order: 20,
     items: [
       {
         id: "navigation.send-test-goal",

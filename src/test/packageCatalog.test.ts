@@ -84,4 +84,25 @@ describe("package catalog", () => {
     );
     expect(catalog).toHaveLength(0);
   });
+
+  it("ignores package when settings field includes order", () => {
+    const catalog = buildPackageCatalog(
+      {
+        "../../packages/nav2/index.tsx": {
+          createPackage: packageFactory("nav2")
+        }
+      },
+      {
+        "../../packages/nav2/config.json": {
+          default: {
+            values: { key: "value" },
+            settings: {
+              fields: [{ key: "key", label: "Key", type: "string", order: 10 }]
+            }
+          }
+        }
+      }
+    );
+    expect(catalog).toHaveLength(0);
+  });
 });

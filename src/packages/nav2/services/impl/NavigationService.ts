@@ -70,6 +70,24 @@ export interface NavigationManualDefaults {
   loopIntervalMs: number;
 }
 
+function clampManualLinearSpeed(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_MANUAL_LINEAR_SPEED;
+  return Math.min(4, Math.max(0.1, parsed));
+}
+
+function clampManualAngularSpeed(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_MANUAL_ANGULAR_SPEED;
+  return Math.min(1.2, Math.max(0.1, parsed));
+}
+
+function clampManualLoopIntervalMs(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return MANUAL_LOOP_INTERVAL_MS;
+  return Math.max(20, Math.round(parsed));
+}
+
 function getStorageAdapter(): {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
@@ -134,7 +152,7 @@ export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private manualLoopTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly manualLoopIntervalMs: number;
+  private manualLoopIntervalMs: number;
   private state: NavigationState = {
     waypoints: [],
     selectedWaypointIndexes: [],
@@ -164,13 +182,9 @@ export class NavigationService {
   };
 
   constructor(private readonly robotDispatcher: RobotDispatcher, manualDefaults?: Partial<NavigationManualDefaults>) {
-    const linearSpeed = Number(manualDefaults?.linearSpeed);
-    const angularSpeed = Number(manualDefaults?.angularSpeed);
-    const loopIntervalMs = Number(manualDefaults?.loopIntervalMs);
-    const safeLinearSpeed = Number.isFinite(linearSpeed) ? linearSpeed : DEFAULT_MANUAL_LINEAR_SPEED;
-    const safeAngularSpeed = Number.isFinite(angularSpeed) ? angularSpeed : DEFAULT_MANUAL_ANGULAR_SPEED;
-    this.manualLoopIntervalMs =
-      Number.isFinite(loopIntervalMs) && loopIntervalMs > 0 ? Math.max(20, Math.round(loopIntervalMs)) : MANUAL_LOOP_INTERVAL_MS;
+    const safeLinearSpeed = clampManualLinearSpeed(manualDefaults?.linearSpeed);
+    const safeAngularSpeed = clampManualAngularSpeed(manualDefaults?.angularSpeed);
+    this.manualLoopIntervalMs = clampManualLoopIntervalMs(manualDefaults?.loopIntervalMs);
 
     this.state = {
       ...this.state,
@@ -627,8 +641,7 @@ export class NavigationService {
   }
 
   setManualLinearSpeed(value: number): void {
-    const clamped = Math.min(4, Math.max(0.1, Number(value)));
-    if (!Number.isFinite(clamped)) return;
+    const clamped = clampManualLinearSpeed(value);
     this.state = {
       ...this.state,
       manualLinearSpeed: clamped
@@ -637,12 +650,36 @@ export class NavigationService {
   }
 
   setManualAngularSpeed(value: number): void {
-    const clamped = Math.min(1.2, Math.max(0.1, Number(value)));
-    if (!Number.isFinite(clamped)) return;
+    const clamped = clampManualAngularSpeed(value);
     this.state = {
       ...this.state,
       manualAngularSpeed: clamped
     };
+    this.emit();
+  }
+
+  applyRuntimeDefaults(defaults: Partial<NavigationManualDefaults>): void {
+    const nextLinear = defaults.linearSpeed !== undefined ? clampManualLinearSpeed(defaults.linearSpeed) : this.state.manualLinearSpeed;
+    const nextAngular =
+      defaults.angularSpeed !== undefined ? clampManualAngularSpeed(defaults.angularSpeed) : this.state.manualAngularSpeed;
+    const nextLoopInterval =
+      defaults.loopIntervalMs !== undefined ? clampManualLoopIntervalMs(defaults.loopIntervalMs) : this.manualLoopIntervalMs;
+
+    const speedChanged = nextLinear !== this.state.manualLinearSpeed || nextAngular !== this.state.manualAngularSpeed;
+    const intervalChanged = nextLoopInterval !== this.manualLoopIntervalMs;
+    if (!speedChanged && !intervalChanged) return;
+
+    this.manualLoopIntervalMs = nextLoopInterval;
+    this.state = {
+      ...this.state,
+      manualLinearSpeed: nextLinear,
+      manualAngularSpeed: nextAngular
+    };
+    if (intervalChanged && this.manualLoopTimer) {
+      clearInterval(this.manualLoopTimer);
+      this.manualLoopTimer = null;
+      this.updateManualLoopLifecycle();
+    }
     this.emit();
   }
 

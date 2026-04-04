@@ -119,7 +119,6 @@ export interface PackageSettingFieldSchema {
   label: string;
   type: PackageSettingFieldType;
   description?: string;
-  order?: number;
   placeholder?: string;
 }
 

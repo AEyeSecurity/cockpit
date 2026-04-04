@@ -14,7 +14,7 @@ describe("package config loader", () => {
       values: { ok: true },
       settings: {
         title: undefined,
-        fields: [{ key: "ok", label: "Ok", type: "boolean", description: undefined, placeholder: undefined, order: undefined }]
+        fields: [{ key: "ok", label: "Ok", type: "boolean", description: undefined, placeholder: undefined }]
       }
     });
     expect(normalizePackageConfigSchema(["x"])).toBeNull();
@@ -24,6 +24,14 @@ describe("package config loader", () => {
         values: { ok: true },
         settings: {
           fields: [{ key: "missing", label: "Missing", type: "boolean" }]
+        }
+      })
+    ).toBeNull();
+    expect(
+      normalizePackageConfigSchema({
+        values: { ok: true },
+        settings: {
+          fields: [{ key: "ok", label: "Ok", type: "boolean", order: 10 }]
         }
       })
     ).toBeNull();

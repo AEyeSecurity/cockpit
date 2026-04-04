@@ -34,6 +34,13 @@ describe("integration", () => {
       map_default_zoom: 15
     });
 
+    const rawOverride = await readConfig("packages/nav2.json");
+    expect(rawOverride).not.toBeNull();
+    const parsedOverride = JSON.parse(rawOverride ?? "{}") as Record<string, unknown>;
+    expect(parsedOverride.ws_real_host).toBe("10.0.0.1");
+    expect(parsedOverride.map_default_zoom).toBe(15);
+    expect(Object.prototype.hasOwnProperty.call(parsedOverride, "ws_sim_host")).toBe(false);
+
     const runtime2 = await bootstrapApp();
     const overridden = runtime2.getPackageConfig<Record<string, unknown>>("nav2");
     expect(overridden.ws_real_host).toBe("10.0.0.1");

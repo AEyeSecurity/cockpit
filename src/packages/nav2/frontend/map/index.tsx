@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 import "./styles.css";
-import { NAV_EVENTS } from "../../../../core/events/topics";
+import { CORE_EVENTS, NAV_EVENTS } from "../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../core/types/module";
 import { MapDispatcher } from "../../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../services/impl/ConnectionService";
@@ -786,6 +786,12 @@ function LeafletMapCanvas({
   }, [centerRequestKey, robotPose]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.setView([initialCenterLat, initialCenterLon], initialZoom);
+  }, [initialCenterLat, initialCenterLon, initialZoom]);
+
+  useEffect(() => {
     if (state.toolMode !== "idle") {
       clearGoalDraft();
     }
@@ -822,7 +828,7 @@ function LeafletMapCanvas({
 }
 
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const nav2Config = readNav2MapConfig(runtime);
+  const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
   const mapService = runtime.registries.serviceRegistry.getService<MapService>(SERVICE_ID);
   let navigationService: NavigationService | null = null;
   try {
@@ -864,6 +870,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const cameraLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => mapService.subscribe((next) => setState(next)), [mapService]);
+  useEffect(() => {
+    return runtime.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
+      const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
+      if (packageId !== "nav2") return;
+      setNav2Config(readNav2MapConfig(runtime));
+    });
+  }, [runtime]);
   useEffect(() => {
     void mapService.loadMap("default-map").catch(() => undefined);
   }, [mapService]);
@@ -1338,21 +1351,18 @@ export function createMapModule(): CockpitModule {
       const dispatcher = new MapDispatcher(DISPATCHER_ID, TRANSPORT_ID);
       ctx.registries.dispatcherRegistry.registerDispatcher({
         id: dispatcher.id,
-        order: 30,
         dispatcher
       });
 
       const service = new MapService(dispatcher);
       ctx.registries.serviceRegistry.registerService({
         id: SERVICE_ID,
-        order: 30,
         service
       });
 
       ctx.registries.workspaceViewRegistry.registerWorkspaceView({
         id: "workspace.map",
         label: "Map",
-        order: 10,
         render: (runtime) => <MapWorkspaceView runtime={runtime} />
       });
     }

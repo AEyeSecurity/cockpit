@@ -226,6 +226,32 @@ describe("services", () => {
     expect(service.getState().goalMode).toBe(true);
   });
 
+  it("applies runtime manual defaults in NavigationService", () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never, {
+      linearSpeed: 1.2,
+      angularSpeed: 0.4,
+      loopIntervalMs: 50
+    });
+    service.applyRuntimeDefaults({
+      linearSpeed: 2.4,
+      angularSpeed: 0.9,
+      loopIntervalMs: 90
+    });
+    const state = service.getState();
+    expect(state.manualLinearSpeed).toBe(2.4);
+    expect(state.manualAngularSpeed).toBe(0.9);
+  });
+
   it("persists zone state in MapService local storage adapter", () => {
     const service = new MapService({ requestMap: vi.fn() } as never);
     service.addZone("A");

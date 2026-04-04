@@ -1,71 +1,108 @@
-# Ejemplo Completo: Módulo Ficticio para IA
+# Ejemplo completo para IA: crear un paquete nuevo
 
-Este documento está pensado para que otra IA pueda implementar un módulo nuevo en este repo sin adivinar convenciones.
+Este documento está pensado para que otra IA implemente un paquete nuevo en este repo sin adivinar convenciones.
 
 ## Objetivo del ejemplo
 
-Crear un módulo ficticio llamado `diagnostics` que:
+Crear un paquete ficticio `diagnostics` que:
 
-- use el transport WS existente (`transport.ws.core`)
-- cree su propio dispatcher
-- cree su propio service
-- agregue UI mínima (sidebar + item en toolbar)
-- pueda activarse/desactivarse desde `config/modules.yaml`
+- registre frontend + service + dispatcher
+- reutilice el transport WS existente
+- exponga configuración en el modal global desde `config.json`
+- pueda habilitarse/deshabilitarse por `config/modules.yaml`
 
-## Contexto mínimo del repo
-
-- Arquitectura: `Frontend -> Services -> Dispatchers -> Transports`
-- La UI consume services, nunca dispatchers/transports directos.
-- Un módulo se define como `CockpitModule` en `src/modules/<modulo>/index.tsx`.
-- Registro dinámico vía registries (`ctx.registries.*`).
-- Catálogo central: `src/core/bootstrap/moduleCatalog.ts`.
-
-## Archivos a crear
+## 1) Archivos a crear
 
 ```text
-src/dispatcher/impl/DiagnosticsDispatcher.ts
-src/services/impl/DiagnosticsService.ts
-src/modules/diagnostics/index.tsx
-src/modules/diagnostics/styles.css
+src/packages/diagnostics/
+  index.ts
+  config.json
+  frontend/
+    diagnostics/
+      index.tsx
+      styles.css
+  services/
+    impl/
+      DiagnosticsService.ts
+  dispatcher/
+    impl/
+      DiagnosticsDispatcher.ts
 ```
 
-## Archivos a modificar
+## 2) `config.json` del paquete
 
-```text
-src/core/bootstrap/moduleCatalog.ts
-config/modules.yaml
+```json
+{
+  "values": {
+    "ping_timeout_ms": 3000,
+    "auto_refresh": true
+  },
+  "settings": {
+    "title": "Diagnostics",
+    "fields": [
+      {
+        "key": "ping_timeout_ms",
+        "label": "Ping timeout (ms)",
+        "type": "number"
+      },
+      {
+        "key": "auto_refresh",
+        "label": "Auto refresh",
+        "type": "boolean"
+      }
+    ]
+  }
+}
 ```
 
-## Paso 1: Dispatcher
+## 3) Entry point del paquete
 
-Archivo: `src/dispatcher/impl/DiagnosticsDispatcher.ts`
+Archivo: `src/packages/diagnostics/index.ts`
 
 ```ts
-import type { IncomingPacket } from "../../core/types/message";
-import { DispatcherBase } from "../base/Dispatcher";
+import type { CockpitPackage } from "../../core/types/module";
+import { createDiagnosticsModule } from "./frontend/diagnostics";
+
+export function createPackage(): CockpitPackage {
+  return {
+    id: "diagnostics",
+    version: "1.0.0",
+    enabledByDefault: true,
+    modules: [createDiagnosticsModule()]
+  };
+}
+```
+
+## 4) Dispatcher
+
+Archivo: `src/packages/diagnostics/dispatcher/impl/DiagnosticsDispatcher.ts`
+
+```ts
+import type { IncomingPacket } from "../../../../core/types/message";
+import { DispatcherBase } from "../../../../dispatcher/base/Dispatcher";
 
 export class DiagnosticsDispatcher extends DispatcherBase {
   constructor(id: string, transportId: string) {
-    super(id, transportId, ["diag_status", "ack"]);
+    super(id, transportId, ["diag.status", "ack"]);
   }
 
   handleIncoming(message: IncomingPacket): void {
     this.publish(message.op, message);
   }
 
-  async requestPing(): Promise<IncomingPacket> {
-    return this.request("diag_ping", {}, { timeoutMs: 3000 });
+  requestPing(timeoutMs: number): Promise<IncomingPacket> {
+    return this.request("diag.ping", {}, { timeoutMs });
   }
 
   subscribeStatus(callback: (message: IncomingPacket) => void): () => void {
-    return this.subscribe("diag_status", callback);
+    return this.subscribe("diag.status", callback);
   }
 }
 ```
 
-## Paso 2: Service
+## 5) Service
 
-Archivo: `src/services/impl/DiagnosticsService.ts`
+Archivo: `src/packages/diagnostics/services/impl/DiagnosticsService.ts`
 
 ```ts
 import type { DiagnosticsDispatcher } from "../../dispatcher/impl/DiagnosticsDispatcher";
@@ -107,14 +144,14 @@ export class DiagnosticsService {
     return () => this.listeners.delete(listener);
   }
 
-  async ping(): Promise<void> {
+  async ping(timeoutMs: number): Promise<void> {
     const started = Date.now();
-    const response = await this.dispatcher.requestPing();
+    const response = await this.dispatcher.requestPing(timeoutMs);
     if (response.ok === false) {
       this.state = {
         ...this.state,
         healthy: false,
-        lastError: String(response.error ?? "diag_ping failed")
+        lastError: String(response.error ?? "diag.ping failed")
       };
       this.emit();
       throw new Error(this.state.lastError);
@@ -135,30 +172,32 @@ export class DiagnosticsService {
 }
 ```
 
-## Paso 3: Módulo + UI
+## 6) Módulo frontend del paquete
 
-Archivo: `src/modules/diagnostics/index.tsx`
+Archivo: `src/packages/diagnostics/frontend/diagnostics/index.tsx`
 
 ```tsx
 import { useEffect, useState } from "react";
-import "./styles.css";
-import type { CockpitModule, ModuleContext } from "../../core/types/module";
+import { CollapsibleSection } from "../../../../app/layout/CollapsibleSection";
+import type { CockpitModule, ModuleContext } from "../../../../core/types/module";
 import { DiagnosticsDispatcher } from "../../dispatcher/impl/DiagnosticsDispatcher";
 import { DiagnosticsService } from "../../services/impl/DiagnosticsService";
+import "./styles.css";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.diagnostics";
 const SERVICE_ID = "service.diagnostics";
 
-function DiagnosticsSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+function DiagnosticsSidebar({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<DiagnosticsService>(SERVICE_ID);
   const [state, setState] = useState(service.getState());
+  const cfg = runtime.getPackageConfig<Record<string, unknown>>("diagnostics");
+  const pingTimeoutMs = Number(cfg.ping_timeout_ms ?? 3000);
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
 
   return (
-    <div className="panel-card">
-      <h3>Diagnostics</h3>
+    <CollapsibleSection title="Diagnostics">
       <div className={`status-pill ${state.healthy ? "ok" : "bad"}`}>
         {state.healthy ? "healthy" : "unhealthy"}
       </div>
@@ -167,25 +206,12 @@ function DiagnosticsSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.E
       <button
         type="button"
         onClick={async () => {
-          try {
-            await service.ping();
-            runtime.eventBus.emit("console.event", {
-              level: "info",
-              text: "Diagnostics ping OK",
-              timestamp: Date.now()
-            });
-          } catch (error) {
-            runtime.eventBus.emit("console.event", {
-              level: "error",
-              text: `Diagnostics ping failed: ${String(error)}`,
-              timestamp: Date.now()
-            });
-          }
+          await service.ping(pingTimeoutMs);
         }}
       >
         Ping
       </button>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -195,100 +221,66 @@ export function createDiagnosticsModule(): CockpitModule {
     version: "1.0.0",
     enabledByDefault: true,
     register(ctx: ModuleContext): void {
-      // Guard: si no existe transport base, no registrar este módulo.
       if (!ctx.registries.transportRegistry.has(TRANSPORT_ID)) return;
 
       const dispatcher = new DiagnosticsDispatcher(DISPATCHER_ID, TRANSPORT_ID);
       ctx.registries.dispatcherRegistry.registerDispatcher({
         id: DISPATCHER_ID,
-        order: 45,
         dispatcher
       });
 
       const service = new DiagnosticsService(dispatcher);
       ctx.registries.serviceRegistry.registerService({
         id: SERVICE_ID,
-        order: 45,
         service
       });
 
       ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
         id: "sidebar.diagnostics",
         label: "Diagnostics",
-        order: 45,
-        render: (runtime) => <DiagnosticsSidebarPanel runtime={runtime} />
-      });
-
-      ctx.registries.toolbarMenuRegistry.registerToolbarMenu({
-        id: "toolbar.diagnostics",
-        label: "Diagnostics",
-        order: 45,
-        items: [
-          {
-            id: "diagnostics.ping",
-            label: "Run ping",
-            onSelect: async ({ runtime }) => {
-              const diagnostics = runtime.registries.serviceRegistry.getService<DiagnosticsService>(SERVICE_ID);
-              await diagnostics.ping();
-            }
-          }
-        ]
+        render: (runtime) => <DiagnosticsSidebar runtime={runtime} />
       });
     }
   };
 }
 ```
 
-Archivo: `src/modules/diagnostics/styles.css` (mínimo)
+## 7) Estilos del módulo frontend
+
+Archivo: `src/packages/diagnostics/frontend/diagnostics/styles.css`
 
 ```css
-.diagnostics-root {
+.diagnostics-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 ```
 
-Nota de arquitectura CSS:
-
-- Estilos del módulo `diagnostics` viven en `src/modules/diagnostics/styles.css`.
-- `src/app/base.css` solo debe tener estilos base compartidos.
-
-## Paso 4: Registrar en catálogo
-
-Editar `src/core/bootstrap/moduleCatalog.ts`:
-
-1. Importar `createDiagnosticsModule`.
-2. Agregarlo en `getModuleCatalog()`.
-
-## Paso 5: Habilitar módulo
+## 8) Habilitación por YAML
 
 Editar `config/modules.yaml`:
 
 ```yaml
-modules:
-  diagnostics: true
+packages:
+  diagnostics:
+    enabled: true
+    modules:
+      diagnostics: true
 ```
 
-## Paso 6: Verificar
+## 9) Checklist para IA
 
-```bash
-npm run test
-npm run build
-npm run tauri:dev
-```
+- `config.json` válido (schema `values + settings.fields`)
+- `createPackage()` exportado en `src/packages/<id>/index.ts`
+- frontend consume service, no dispatcher/transport directo
+- IDs estables y sin colisiones dentro del paquete
+- sidebar colapsable con `CollapsibleSection`
+- `npm run test` y `npm run build` en verde
 
-## Checklist para IA (aceptación)
+## Errores comunes a evitar
 
-- IDs únicos (`dispatcher.*`, `service.*`, `sidebar.*`, `toolbar.*`)
-- UI consume solo `DiagnosticsService`
-- `DiagnosticsDispatcher` no contiene lógica de UI
-- módulo deshabilitable por `config/modules.yaml`
-- sin cambios en core fuera de `moduleCatalog.ts` y config
-
-## Errores típicos (que una IA debe evitar)
-
-- Instanciar transport nuevo innecesario cuando ya hay uno utilizable.
-- Llamar dispatcher desde componentes en vez de hacerlo desde service.
-- No manejar `response.ok === false` en service.
-- Olvidar emitir eventos de error/info para trazabilidad.
+- crear el paquete sin `config.json` (no carga)
+- usar rutas antiguas (`src/modules/*`, `src/services/impl/*` global) para features del paquete
+- meter lógica de negocio en componentes React
+- acoplar el frontend a formato de mensajes de transport

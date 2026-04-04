@@ -158,42 +158,36 @@ export function createDebugModule(): CockpitModule {
       const transport = new RosBridgeTransport(TRANSPORT_ID, ({ env }) => env.rosbridgeUrl);
       ctx.registries.transportRegistry.registerTransport({
         id: transport.id,
-        order: 40,
         transport
       });
 
       const dispatcher = new MissionDispatcher(DISPATCHER_ID, TRANSPORT_ID);
       ctx.registries.dispatcherRegistry.registerDispatcher({
         id: dispatcher.id,
-        order: 40,
         dispatcher
       });
 
       const service = new MissionService(dispatcher);
       ctx.registries.serviceRegistry.registerService({
         id: SERVICE_ID,
-        order: 40,
         service
       });
 
       ctx.registries.modalRegistry.registerModalDialog({
         id: "modal.debug",
         title: "Debug mission",
-        order: 10,
         render: ({ runtime, close }) => <MissionModal runtime={runtime} close={close} />
       });
 
       ctx.registries.modalRegistry.registerModalDialog({
         id: "modal.record",
         title: "Record",
-        order: 11,
         render: ({ runtime }) => <RecordModal runtime={runtime} />
       });
 
       ctx.registries.toolbarMenuRegistry.registerToolbarMenu({
         id: "toolbar.debug",
         label: "Debug",
-        order: 40,
         items: [
           {
             id: "debug.open-modal",

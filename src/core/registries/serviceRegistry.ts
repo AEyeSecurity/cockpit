@@ -2,7 +2,6 @@ import { OrderedRegistry } from "./orderedRegistry";
 
 export interface ServiceDefinition<T = unknown> {
   id: string;
-  order?: number;
   service: T;
 }
 
@@ -19,4 +18,3 @@ export class ServiceRegistry extends OrderedRegistry<ServiceDefinition> {
     return item.service as T;
   }
 }
-

@@ -3,7 +3,6 @@ import { OrderedRegistry } from "./orderedRegistry";
 
 export interface TransportDefinition {
   id: string;
-  order?: number;
   transport: Transport;
 }
 
@@ -12,4 +11,3 @@ export class TransportRegistry extends OrderedRegistry<TransportDefinition> {
     this.register(definition);
   }
 }
-

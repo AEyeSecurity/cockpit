@@ -1,6 +1,5 @@
 export interface RegistryItem {
   id: string;
-  order?: number;
 }
 
 export class OrderedRegistry<T extends RegistryItem> {
@@ -26,10 +25,6 @@ export class OrderedRegistry<T extends RegistryItem> {
   }
 
   list(): T[] {
-    return [...this.items.values()].sort((a, b) => {
-      const orderDiff = (a.order ?? 0) - (b.order ?? 0);
-      return orderDiff !== 0 ? orderDiff : a.id.localeCompare(b.id);
-    });
+    return [...this.items.values()];
   }
 }
-

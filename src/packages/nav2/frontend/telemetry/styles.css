@@ -6,8 +6,15 @@
 .telemetry-scroll-card {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  grid-template-rows: min-content minmax(0, 1fr);
+  gap: 4px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.telemetry-scroll-card > h4 {
+  margin: 0;
+  line-height: 1.1;
 }
 
 .telemetry-scroll-list {

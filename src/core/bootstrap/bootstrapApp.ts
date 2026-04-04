@@ -54,11 +54,8 @@ export async function bootstrapApp(): Promise<AppRuntime> {
 
   runtime.registries.serviceRegistry.registerService({
     id: DIALOG_SERVICE_ID,
-    order: 0,
     service: new DialogService()
   });
-
-  registerCoreSettingsUi(runtime);
 
   const packageCatalog = getPackageCatalog();
   const packageManager = new PackageManager(runtime, moduleConfig);
@@ -72,6 +69,7 @@ export async function bootstrapApp(): Promise<AppRuntime> {
   };
   const loadedPackages = await packageManager.registerPackages(packageCatalog);
   runtime.packages.splice(0, runtime.packages.length, ...loadedPackages);
+  registerCoreSettingsUi(runtime);
 
   registries.transportRegistry.list().forEach((entry) => {
     transportManager.registerTransport(entry.transport);

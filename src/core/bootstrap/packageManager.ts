@@ -32,6 +32,31 @@ function resolveLookupId(
   return id;
 }
 
+function areConfigValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (typeof left === "object" && left !== null && typeof right === "object" && right !== null) {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function computePackageConfigOverride(
+  baseConfig: Record<string, unknown>,
+  mergedConfig: Record<string, unknown>
+): Record<string, unknown> {
+  const override: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(mergedConfig)) {
+    if (!areConfigValuesEqual(value, baseConfig[key])) {
+      override[key] = value;
+    }
+  }
+  return override;
+}
+
 function createScopedRegistries(
   rootRuntime: AppRuntime,
   packageId: string,
@@ -325,11 +350,17 @@ export class PackageManager {
     if (!base) {
       throw new Error(`Unknown package '${packageId}'`);
     }
-    this.packageConfigById.set(packageId, { ...config });
-    await savePackageConfigOverride(packageId, config);
+    const mergedConfig = mergePackageConfig(base, config);
+    const override = computePackageConfigOverride(base, mergedConfig);
+    this.packageConfigById.set(packageId, mergedConfig);
+    if (Object.keys(override).length > 0) {
+      await savePackageConfigOverride(packageId, override);
+    } else {
+      await resetPackageConfigOverride(packageId);
+    }
     this.runtime.eventBus.emit(CORE_EVENTS.packageConfigUpdated, {
       packageId,
-      config: { ...config }
+      config: { ...mergedConfig }
     });
   }
 
