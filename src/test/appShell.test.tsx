@@ -45,6 +45,7 @@ function createRuntime(): AppRuntime {
   const transportManager = new TransportManager();
   const router = new DispatchRouter(transportManager);
   return {
+    packageId: "core",
     env: {
       appName: "Cockpit Test",
       wsUrl: "",
@@ -53,13 +54,15 @@ function createRuntime(): AppRuntime {
       googleMapsApiKey: "",
       cameraIframeUrl: ""
     },
-    moduleConfig: { modules: {}, source: "default" },
+    moduleConfig: { modules: {}, packages: {}, source: "default" },
     container: createContainer(),
     eventBus: createEventBus(),
     transportManager,
     router,
     registries,
-    getService: () => undefined as never
+    packages: [],
+    getService: () => undefined as never,
+    getPackageConfig: <T extends Record<string, unknown>>() => ({}) as T
   };
 }
 

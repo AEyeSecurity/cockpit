@@ -1,6 +1,6 @@
 import type { RobotStatus } from "../../dispatcher/impl/RobotDispatcher";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
-import type { EventBus } from "../../core/events/eventBus";
+import type { EventBus } from "../../../../core/events/eventBus";
 
 export interface TelemetryEvent {
   level: string;

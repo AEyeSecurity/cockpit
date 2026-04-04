@@ -1,7 +1,9 @@
-modules:
-  navigation: true
-  telemetry: true
-  map: true
-  debug: true
-  settings: true
-
+packages:
+  nav2:
+    enabled: true
+    modules:
+      navigation: true
+      telemetry: true
+      map: true
+      debug: true
+      settings: true

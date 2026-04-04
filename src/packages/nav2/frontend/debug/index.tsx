@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import "./styles.css";
-import type { CockpitModule, ModuleContext } from "../../core/types/module";
+import type { CockpitModule, ModuleContext } from "../../../../core/types/module";
 import { MissionDispatcher } from "../../dispatcher/impl/MissionDispatcher";
-import { notify } from "../../platform/tauri/notifications";
-import { openWindow } from "../../platform/tauri/windows";
+import { notify } from "../../../../platform/tauri/notifications";
+import { openWindow } from "../../../../platform/tauri/windows";
 import { MissionService } from "../../services/impl/MissionService";
 import type { RosbagStatus } from "../../dispatcher/impl/MissionDispatcher";
 import { RosBridgeTransport } from "../../transport/impl/RosBridgeTransport";

@@ -1,5 +1,5 @@
-import type { IncomingPacket, MessagePayload } from "../../core/types/message";
-import { DispatcherBase } from "../base/Dispatcher";
+import type { IncomingPacket, MessagePayload } from "../../../../core/types/message";
+import { DispatcherBase } from "../../../../dispatcher/base/Dispatcher";
 
 export interface RobotStatus {
   batteryPct: number;

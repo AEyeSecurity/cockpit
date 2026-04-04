@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./styles.css";
-import { NAV_EVENTS } from "../../core/events/topics";
-import type { CockpitModule, ModuleContext } from "../../core/types/module";
+import { NAV_EVENTS } from "../../../../core/events/topics";
+import type { CockpitModule, ModuleContext } from "../../../../core/types/module";
 import { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
-import { notify } from "../../platform/tauri/notifications";
+import { notify } from "../../../../platform/tauri/notifications";
 import { ConnectionService, type ConnectionState } from "../../services/impl/ConnectionService";
-import { DIALOG_SERVICE_ID, type DialogService } from "../../services/impl/DialogService";
+import { DIALOG_SERVICE_ID, type DialogService } from "../../../../services/impl/DialogService";
 import { MapService, type MapWorkspaceState } from "../../services/impl/MapService";
 import { SensorInfoService, type SensorInfoTab } from "../../services/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../services/impl/TelemetryService";

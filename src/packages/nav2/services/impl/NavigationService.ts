@@ -1,4 +1,4 @@
-import type { MessagePayload } from "../../core/types/message";
+import type { MessagePayload } from "../../../../core/types/message";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 
 export interface GoalInput {

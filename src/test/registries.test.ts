@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SidebarPanelRegistry } from "../core/registries/sidebarPanelRegistry";
-import { isModuleEnabled, type ModuleConfig } from "../core/config/moduleConfigLoader";
-import type { CockpitModule } from "../core/types/module";
+import { isModuleEnabled, isPackageEnabled, isPackageModuleEnabled, type ModuleConfig } from "../core/config/moduleConfigLoader";
+import type { CockpitModule, CockpitPackage } from "../core/types/module";
 
 describe("registries", () => {
   it("sorts entries by order and id", () => {
@@ -39,7 +39,8 @@ describe("module toggle", () => {
     };
     const config: ModuleConfig = {
       source: "public-config",
-      modules: { debug: false }
+      modules: { debug: false },
+      packages: {}
     };
     expect(isModuleEnabled(module, config)).toBe(false);
   });
@@ -53,9 +54,55 @@ describe("module toggle", () => {
     };
     const config: ModuleConfig = {
       source: "default",
-      modules: {}
+      modules: {},
+      packages: {}
     };
     expect(isModuleEnabled(module, config)).toBe(false);
   });
-});
 
+  it("reads package enabled flag from packages config", () => {
+    const cockpitPackage: CockpitPackage = {
+      id: "nav2",
+      version: "1",
+      enabledByDefault: true,
+      modules: []
+    };
+    const config: ModuleConfig = {
+      source: "public-config",
+      modules: {},
+      packages: {
+        nav2: {
+          enabled: false,
+          modules: {}
+        }
+      }
+    };
+    expect(isPackageEnabled(cockpitPackage, config)).toBe(false);
+  });
+
+  it("reads module toggle inside package config", () => {
+    const cockpitPackage: CockpitPackage = {
+      id: "nav2",
+      version: "1",
+      enabledByDefault: true,
+      modules: []
+    };
+    const module: CockpitModule = {
+      id: "map",
+      version: "1",
+      enabledByDefault: true,
+      register: () => undefined
+    };
+    const config: ModuleConfig = {
+      source: "public-config",
+      modules: {},
+      packages: {
+        nav2: {
+          enabled: true,
+          modules: { map: false }
+        }
+      }
+    };
+    expect(isPackageModuleEnabled(cockpitPackage, module, config)).toBe(false);
+  });
+});

@@ -1,5 +1,5 @@
-import type { IncomingPacket } from "../../core/types/message";
-import { DispatcherBase } from "../base/Dispatcher";
+import type { IncomingPacket } from "../../../../core/types/message";
+import { DispatcherBase } from "../../../../dispatcher/base/Dispatcher";
 
 export class MapDispatcher extends DispatcherBase {
   constructor(id: string, transportId: string) {

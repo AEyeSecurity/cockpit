@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HttpTransport } from "../transport/impl/HttpTransport";
-import { RosBridgeTransport } from "../transport/impl/RosBridgeTransport";
-import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
+import { HttpTransport } from "../packages/nav2/transport/impl/HttpTransport";
+import { RosBridgeTransport } from "../packages/nav2/transport/impl/RosBridgeTransport";
+import { WebSocketTransport } from "../packages/nav2/transport/impl/WebSocketTransport";
 import type { OutgoingPacket } from "../core/types/message";
 
 class FakeWebSocket {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { MapService } from "../services/impl/MapService";
-import { MissionService } from "../services/impl/MissionService";
-import { NavigationService } from "../services/impl/NavigationService";
+import { MapService } from "../packages/nav2/services/impl/MapService";
+import { MissionService } from "../packages/nav2/services/impl/MissionService";
+import { NavigationService } from "../packages/nav2/services/impl/NavigationService";
 import type { IncomingPacket } from "../core/types/message";
 
 describe("services", () => {

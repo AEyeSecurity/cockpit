@@ -8,12 +8,26 @@ import { TopToolbar } from "./layout/TopToolbar";
 import { WorkspaceHost } from "./layout/WorkspaceHost";
 import type { AppRuntime } from "../core/types/module";
 import { NAV_EVENTS } from "../core/events/topics";
-import type { ConnectionService } from "../services/impl/ConnectionService";
-import type { NavigationService } from "../services/impl/NavigationService";
 import { DIALOG_SERVICE_ID, type DialogService } from "../services/impl/DialogService";
 
 interface AppShellProps {
   runtime: AppRuntime;
+}
+
+interface ConnectionServiceLike {
+  getState(): { connected: boolean; lastError: string };
+  subscribe(listener: (state: { connected: boolean; lastError: string }) => void): () => void;
+}
+
+interface NavigationServiceLike {
+  getState(): { goalMode: boolean; manualMode: boolean };
+  toggleGoalMode(): boolean;
+  requestSnapshot(): Promise<unknown>;
+  setManualMode(enabled: boolean): Promise<unknown>;
+  toggleCameraZoom(): Promise<unknown>;
+  setManualKeyState(key: "w" | "a" | "s" | "d", pressed: boolean): void;
+  setManualBrakeHeld(pressed: boolean): void;
+  panCamera(angleDeg: number): Promise<unknown>;
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -81,11 +95,11 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
   }, [activeConsoleId, consoleTabs]);
 
   useEffect(() => {
-    let connectionService: ConnectionService | null = null;
+    let connectionService: ConnectionServiceLike | null = null;
     let dialogService: DialogService | null = null;
     try {
-      connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-      dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+      connectionService = runtime.getService<ConnectionServiceLike>(CONNECTION_SERVICE_ID);
+      dialogService = runtime.getService<DialogService>(DIALOG_SERVICE_ID);
     } catch {
       connectionService = null;
       dialogService = null;
@@ -166,7 +180,7 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
       let dialogService: DialogService | null = null;
       try {
-        dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+        dialogService = runtime.getService<DialogService>(DIALOG_SERVICE_ID);
       } catch {
         dialogService = null;
       }
@@ -178,9 +192,9 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
         return;
       }
 
-      let navigationService: NavigationService | null = null;
+      let navigationService: NavigationServiceLike | null = null;
       try {
-        navigationService = runtime.registries.serviceRegistry.getService<NavigationService>("service.navigation");
+        navigationService = runtime.getService<NavigationServiceLike>("service.navigation");
       } catch {
         navigationService = null;
       }
@@ -322,9 +336,9 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
     const onKeyUp = (event: KeyboardEvent): void => {
       if (isEditingTarget(event.target)) return;
-      let navigationService: NavigationService | null = null;
+      let navigationService: NavigationServiceLike | null = null;
       try {
-        navigationService = runtime.registries.serviceRegistry.getService<NavigationService>("service.navigation");
+        navigationService = runtime.getService<NavigationServiceLike>("service.navigation");
       } catch {
         navigationService = null;
       }

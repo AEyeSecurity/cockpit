@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "./styles.css";
-import type { CockpitModule, ModuleContext } from "../../core/types/module";
+import type { CockpitModule, ModuleContext } from "../../../../core/types/module";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { ConnectionState, ConnectionService } from "../../services/impl/ConnectionService";
 import type { NavigationService, NavigationState } from "../../services/impl/NavigationService";

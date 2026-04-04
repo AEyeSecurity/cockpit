@@ -1,4 +1,4 @@
-import type { IncomingPacket } from "../../core/types/message";
+import type { IncomingPacket } from "../../../../core/types/message";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 
 export type SensorInfoTab = "general" | "topics" | "pixhawk_gps" | "lidar" | "camera";
