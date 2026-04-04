@@ -6,5 +6,6 @@ export const NAV_EVENTS = {
 } as const;
 
 export const CORE_EVENTS = {
-  packageConfigUpdated: "core.package-config.updated"
+  packageConfigUpdated: "core.package-config.updated",
+  globalNotificationSettingsUpdated: "core.global-notification-settings.updated"
 } as const;

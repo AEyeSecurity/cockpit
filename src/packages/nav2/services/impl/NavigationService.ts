@@ -168,6 +168,84 @@ function parseSnapshotStamp(raw: unknown): number {
   return Date.now();
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function messageCandidates(message: Record<string, unknown>): Record<string, unknown>[] {
+  const direct = message;
+  const payload = asRecord(message.payload);
+  const directState = asRecord(message.state);
+  const directTelemetry = asRecord(message.nav_telemetry);
+  const payloadState = payload ? asRecord(payload.state) : null;
+  const payloadTelemetry = payload ? asRecord(payload.nav_telemetry) : null;
+  return [direct, payload, directState, directTelemetry, payloadState, payloadTelemetry].filter(
+    (entry): entry is Record<string, unknown> => entry !== null
+  );
+}
+
+function isLegacyLockAliasMessage(message: Record<string, unknown>): boolean {
+  if (String(message.op ?? "") !== "ack") return false;
+  const request = String(message.request ?? "").trim();
+  return request === "set_control_lock" || request === "control_heartbeat";
+}
+
+function extractControlLockData(message: Record<string, unknown>): { locked?: boolean; reason?: string } {
+  const allowLegacyAlias = isLegacyLockAliasMessage(message);
+  for (const candidate of messageCandidates(message)) {
+    const lockedValue =
+      typeof candidate.control_locked === "boolean"
+        ? candidate.control_locked
+        : allowLegacyAlias && typeof candidate.locked === "boolean"
+          ? candidate.locked
+          : undefined;
+    const reasonValue =
+      typeof candidate.control_lock_reason === "string"
+        ? candidate.control_lock_reason
+        : allowLegacyAlias && typeof candidate.lock_reason === "string"
+          ? candidate.lock_reason
+          : undefined;
+    const hasLocked = typeof lockedValue === "boolean";
+    const hasReason = typeof reasonValue === "string";
+    if (!hasLocked && !hasReason) continue;
+    return {
+      locked: hasLocked ? lockedValue === true : undefined,
+      reason: hasReason ? String(reasonValue ?? "") : undefined
+    };
+  }
+  return {};
+}
+
+function extractControlLockFromNavEvent(message: Record<string, unknown>): { locked?: boolean; reason?: string } {
+  const event = asRecord(message.event);
+  if (!event) return {};
+  const code = String(event.code ?? "").trim();
+  if (!code) return {};
+  const details = asRecord(event.details);
+  const detailReason = details && details.reason != null ? String(details.reason ?? "").trim() : "";
+
+  if (code === "CONTROL_LOCK_RELEASED") {
+    return {
+      locked: false,
+      reason: detailReason
+    };
+  }
+  if (code === "CONTROL_LOCK_ENGAGED") {
+    return {
+      locked: true,
+      reason: detailReason || "UI_LOCK_REQUEST"
+    };
+  }
+  if (code === "UI_HEARTBEAT_TIMEOUT") {
+    return {
+      locked: true,
+      reason: detailReason || "UI_HEARTBEAT_TIMEOUT"
+    };
+  }
+  return {};
+}
+
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -253,6 +331,8 @@ export class NavigationService {
     const dispatcher = this.robotDispatcher as unknown as {
       subscribeState?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeNavTelemetry?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribeAck?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribeNavEvent?: (callback: (message: Record<string, unknown>) => void) => () => void;
     };
     dispatcher.subscribeState?.((message) => {
       this.applyControlLockPayload(message);
@@ -261,6 +341,19 @@ export class NavigationService {
     dispatcher.subscribeNavTelemetry?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+    });
+    dispatcher.subscribeAck?.((message) => {
+      const request = String(message.request ?? "").trim();
+      const isSetControlLockAck = String(message.op ?? "") === "ack" && request === "set_control_lock";
+      this.applyControlLockPayload(message, {
+        overrideGrace: isSetControlLockAck,
+        startUnlockGrace: isSetControlLockAck
+      });
+      this.applyManualControlPayload(message);
+    });
+    dispatcher.subscribeNavEvent?.((message) => {
+      const fromEvent = extractControlLockFromNavEvent(message);
+      this.applyControlLockUpdate(fromEvent);
     });
   }
 
@@ -856,18 +949,57 @@ export class NavigationService {
     this.emit();
   }
 
-  private applyControlLockPayload(message: Record<string, unknown>): void {
-    const hasLocked = typeof message.control_locked === "boolean";
-    const hasReason = typeof message.control_lock_reason === "string";
+  private applyControlLockPayload(
+    message: Record<string, unknown>,
+    options?: { overrideGrace?: boolean; startUnlockGrace?: boolean; graceMs?: number }
+  ): void {
+    const controlLock = extractControlLockData(message);
+    this.applyControlLockUpdate(controlLock, options);
+  }
+
+  private applyControlLockUpdate(
+    controlLock: { locked?: boolean; reason?: string },
+    options?: { overrideGrace?: boolean; startUnlockGrace?: boolean; graceMs?: number }
+  ): void {
+    const hasLocked = typeof controlLock.locked === "boolean";
+    const hasReason = typeof controlLock.reason === "string";
     if (!hasLocked && !hasReason) return;
 
-    const nextLocked = hasLocked ? message.control_locked === true : this.state.controlLocked;
-    const nextReason = hasReason ? String(message.control_lock_reason ?? "") : this.state.controlLockReason;
+    const prevLocked = this.state.controlLocked;
+    const nextLocked = hasLocked ? controlLock.locked === true : this.state.controlLocked;
+    const nextReason = hasReason ? String(controlLock.reason ?? "") : this.state.controlLockReason;
+    const nowMs = Date.now();
+    const unlockGraceUntilMs = Number(this.state.unlockGraceUntilMs || 0);
+    const ignoreStaleRelock =
+      !prevLocked &&
+      nextLocked &&
+      nowMs < unlockGraceUntilMs &&
+      options?.overrideGrace !== true;
+    if (ignoreStaleRelock) {
+      return;
+    }
+
+    let nextUnlockGraceUntilMs = unlockGraceUntilMs;
+    if (nextLocked) {
+      nextUnlockGraceUntilMs = 0;
+    } else if (options?.startUnlockGrace === true) {
+      const graceMs = Math.max(0, Math.round(Number(options.graceMs ?? 2000)));
+      nextUnlockGraceUntilMs = nowMs + graceMs;
+    } else if (unlockGraceUntilMs <= nowMs) {
+      nextUnlockGraceUntilMs = 0;
+    }
+
+    const changed =
+      nextLocked !== this.state.controlLocked ||
+      nextReason !== this.state.controlLockReason ||
+      nextUnlockGraceUntilMs !== this.state.unlockGraceUntilMs;
+    if (!changed) return;
+
     this.state = {
       ...this.state,
       controlLocked: nextLocked,
       controlLockReason: nextReason,
-      unlockGraceUntilMs: nextLocked ? 0 : this.state.unlockGraceUntilMs
+      unlockGraceUntilMs: nextUnlockGraceUntilMs
     };
     if (nextLocked) {
       this.state = {
@@ -878,15 +1010,18 @@ export class NavigationService {
       this.clearManualIntent();
       this.updateManualLoopLifecycle();
       this.stopControlHeartbeat();
+    } else if (!this.heartbeatTimer) {
+      this.startControlHeartbeat();
     }
     this.emit();
   }
 
   private applyManualControlPayload(message: Record<string, unknown>): void {
     if (!message || typeof message !== "object") return;
-    const manualRaw = message.manual_control;
-    if (!manualRaw || typeof manualRaw !== "object") return;
-    const manual = manualRaw as Record<string, unknown>;
+    const manual = messageCandidates(message)
+      .map((candidate) => asRecord(candidate.manual_control))
+      .find((value): value is Record<string, unknown> => value !== null);
+    if (!manual) return;
     const enabledFromServer = manual.enabled === true;
     if (this.state.manualDisablePending && enabledFromServer) {
       return;

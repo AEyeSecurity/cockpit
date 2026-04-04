@@ -4,6 +4,7 @@ import type { EventBus } from "../../../../core/events/eventBus";
 
 export interface TelemetryEvent {
   level: string;
+  code?: string;
   text: string;
   timestamp: number;
 }
@@ -17,10 +18,66 @@ export interface TelemetrySnapshot {
   } | null;
   cmdVelSafe: string;
   goalActive: boolean;
+  navResultStatus: number;
+  navResultText: string;
+  navResultEventId: number;
   controlLocked: boolean;
   controlLockReason: string;
   recentEvents: TelemetryEvent[];
   alerts: TelemetryEvent[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function messageCandidates(message: Record<string, unknown>): Record<string, unknown>[] {
+  const direct = message;
+  const payload = asRecord(message.payload);
+  const directState = asRecord(message.state);
+  const directTelemetry = asRecord(message.nav_telemetry);
+  const payloadState = payload ? asRecord(payload.state) : null;
+  const payloadTelemetry = payload ? asRecord(payload.nav_telemetry) : null;
+  return [direct, payload, directState, directTelemetry, payloadState, payloadTelemetry].filter(
+    (entry): entry is Record<string, unknown> => entry !== null
+  );
+}
+
+function isLegacyLockAliasMessage(message: Record<string, unknown>): boolean {
+  if (String(message.op ?? "") !== "ack") return false;
+  const request = String(message.request ?? "").trim();
+  return request === "set_control_lock" || request === "control_heartbeat";
+}
+
+function resolveNavTelemetryPayload(raw: Record<string, unknown>): Record<string, unknown> {
+  const allowLegacyAlias = isLegacyLockAliasMessage(raw);
+  const hasTelemetryField = (candidate: Record<string, unknown>): boolean =>
+    candidate.mode !== undefined ||
+    candidate.battery_pct !== undefined ||
+    candidate.batteryPct !== undefined ||
+    candidate.cmd_vel_safe !== undefined ||
+    candidate.goal_active !== undefined ||
+    candidate.control_locked !== undefined ||
+    (allowLegacyAlias && candidate.locked !== undefined) ||
+    candidate.control_lock_reason !== undefined ||
+    (allowLegacyAlias && candidate.lock_reason !== undefined) ||
+    candidate.connected !== undefined;
+
+  for (const candidate of messageCandidates(raw)) {
+    if (hasTelemetryField(candidate)) return candidate;
+  }
+  return raw;
+}
+
+function resolvePosePayload(raw: Record<string, unknown>): Record<string, unknown> | null {
+  for (const candidate of messageCandidates(raw)) {
+    const robotPose = asRecord(candidate.robot_pose);
+    if (robotPose) return robotPose;
+    const pose = asRecord(candidate.pose);
+    if (pose) return pose;
+  }
+  return null;
 }
 
 export class TelemetryService {
@@ -34,6 +91,9 @@ export class TelemetryService {
     robotPose: null,
     cmdVelSafe: "n/a",
     goalActive: false,
+    navResultStatus: 0,
+    navResultText: "idle",
+    navResultEventId: 0,
     controlLocked: false,
     controlLockReason: "",
     recentEvents: [],
@@ -51,7 +111,7 @@ export class TelemetryService {
 
     this.robotDispatcher.subscribeState((message) => {
       this.applyNavTelemetryPayload(message);
-      this.applyPosePayload(message.robot_pose as Record<string, unknown> | null);
+      this.applyPosePayload(resolvePosePayload(message));
       if (Array.isArray(message.alerts)) {
         this.setAlerts(
           message.alerts
@@ -91,7 +151,12 @@ export class TelemetryService {
     });
 
     this.robotDispatcher.subscribeRobotPose((message) => {
-      this.applyPosePayload(message.pose as Record<string, unknown> | null);
+      this.applyPosePayload(resolvePosePayload(message));
+      this.emit();
+    });
+
+    this.robotDispatcher.subscribeAck((message) => {
+      this.applyNavTelemetryPayload(message);
       this.emit();
     });
 
@@ -114,6 +179,9 @@ export class TelemetryService {
       robotPose: this.snapshot.robotPose ? { ...this.snapshot.robotPose } : null,
       cmdVelSafe: this.snapshot.cmdVelSafe,
       goalActive: this.snapshot.goalActive,
+      navResultStatus: this.snapshot.navResultStatus,
+      navResultText: this.snapshot.navResultText,
+      navResultEventId: this.snapshot.navResultEventId,
       controlLocked: this.snapshot.controlLocked,
       controlLockReason: this.snapshot.controlLockReason,
       recentEvents: [...this.snapshot.recentEvents],
@@ -163,6 +231,7 @@ export class TelemetryService {
     if (!text) return null;
     return {
       level: String(value.level ?? value.severity ?? "info").toLowerCase(),
+      code: value.code != null ? String(value.code) : undefined,
       text,
       timestamp: Number(value.timestamp ?? value.stamp_ms ?? Date.now())
     };
@@ -184,9 +253,11 @@ export class TelemetryService {
   }
 
   private applyNavTelemetryPayload(raw: Record<string, unknown>): void {
-    const mode = String(raw.mode ?? this.snapshot.robotStatus.mode);
-    const battery = Number(raw.battery_pct ?? raw.batteryPct ?? this.snapshot.robotStatus.batteryPct);
-    const connected = raw.connected === true || this.snapshot.robotStatus.connected;
+    const payload = resolveNavTelemetryPayload(raw);
+    const allowLegacyAlias = isLegacyLockAliasMessage(raw);
+    const mode = String(payload.mode ?? this.snapshot.robotStatus.mode);
+    const battery = Number(payload.battery_pct ?? payload.batteryPct ?? this.snapshot.robotStatus.batteryPct);
+    const connected = payload.connected === true || this.snapshot.robotStatus.connected;
     this.snapshot = {
       ...this.snapshot,
       robotStatus: {
@@ -194,11 +265,28 @@ export class TelemetryService {
         batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
         connected
       },
-      cmdVelSafe: String(raw.cmd_vel_safe ?? this.snapshot.cmdVelSafe),
-      goalActive: raw.goal_active === true ? true : raw.goal_active === false ? false : this.snapshot.goalActive,
+      cmdVelSafe: String(payload.cmd_vel_safe ?? this.snapshot.cmdVelSafe),
+      goalActive: payload.goal_active === true ? true : payload.goal_active === false ? false : this.snapshot.goalActive,
+      navResultStatus: Number.isFinite(Number(payload.nav_result_status))
+        ? Number(payload.nav_result_status)
+        : this.snapshot.navResultStatus,
+      navResultText: String(payload.nav_result_text ?? this.snapshot.navResultText),
+      navResultEventId: Number.isFinite(Number(payload.nav_result_event_id))
+        ? Number(payload.nav_result_event_id)
+        : this.snapshot.navResultEventId,
       controlLocked:
-        raw.control_locked === true ? true : raw.control_locked === false ? false : this.snapshot.controlLocked,
-      controlLockReason: String(raw.control_lock_reason ?? this.snapshot.controlLockReason)
+        payload.control_locked === true
+          ? true
+          : payload.control_locked === false
+            ? false
+            : allowLegacyAlias && payload.locked === true
+              ? true
+              : allowLegacyAlias && payload.locked === false
+                ? false
+                : this.snapshot.controlLocked,
+      controlLockReason: String(
+        payload.control_lock_reason ?? (allowLegacyAlias ? payload.lock_reason : undefined) ?? this.snapshot.controlLockReason
+      )
     };
   }
 
@@ -211,12 +299,14 @@ export class TelemetryService {
     const keyed = new Map<string, TelemetryEvent>();
     [...incoming, ...existing].forEach((entry) => {
       const level = String(entry.level ?? "info").toLowerCase();
+      const code = entry.code ? String(entry.code) : "";
       const text = String(entry.text ?? "");
       const timestamp = Number(entry.timestamp ?? 0);
-      const key = `${timestamp}|${level}|${text}`;
+      const key = `${timestamp}|${level}|${code}|${text}`;
       if (!keyed.has(key)) {
         keyed.set(key, {
           level,
+          code: code || undefined,
           text,
           timestamp
         });

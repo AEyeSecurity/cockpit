@@ -100,7 +100,7 @@ describe("settings modal", () => {
     render(<AppShell runtime={runtime} />);
 
     fireEvent.click(screen.getByText("Settings"));
-    expect(await screen.findByText("No implementado aún.")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Notifications Enabled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Global" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "nav2" })).toBeInTheDocument();
   });
@@ -125,15 +125,17 @@ describe("settings modal", () => {
     expect(setConfigSpy).toHaveBeenCalled();
   });
 
-  it("shows no-op notice for global tab actions", async () => {
+  it("saves global settings without calling package config APIs", async () => {
     const runtime = createRuntime();
     const setConfigSpy = vi.spyOn(runtime, "setPackageConfig");
     render(<AppShell runtime={runtime} />);
 
     fireEvent.click(screen.getByText("Settings"));
+    const enabledInput = await screen.findByLabelText("Notifications Enabled");
+    fireEvent.click(enabledInput);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByText("Global configuration is not implemented yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
     expect(setConfigSpy).not.toHaveBeenCalled();
   });
 });

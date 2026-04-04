@@ -8,6 +8,7 @@ import type { ConsoleTabDefinition, FooterItemDefinition, ModalDialogDefinition,
 import type { DispatcherDefinition } from "../registries/dispatcherRegistry";
 import type { ServiceDefinition } from "../registries/serviceRegistry";
 import type { TransportDefinition } from "../registries/transportRegistry";
+export type { CoreNotificationSettings } from "./settings";
 
 export interface ToolbarMenuRegistryLike {
   registerToolbarMenu(definition: ToolbarMenuDefinition): void;

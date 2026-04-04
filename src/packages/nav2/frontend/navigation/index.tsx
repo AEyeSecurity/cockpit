@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import { CollapsibleSection } from "../../../../app/layout/CollapsibleSection";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../core/events/topics";
@@ -420,12 +420,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           />
           Loop route
         </label>
-        <p className="nav-legacy-text">
-          Manual: {state.manualDisablePending ? "DISABLING" : state.manualMode ? "ON" : "OFF"} · keys=
-          {service.getManualKeysSummary()} · vx={state.manualCommand.linearX.toFixed(2)} · wz=
-          {state.manualCommand.angularZ.toFixed(2)}
-        </p>
-        <p className="nav-legacy-text">{state.lastStatus}</p>
       </CollapsibleSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
@@ -689,6 +683,10 @@ function snapshotExtFromMime(mime: string): string {
   return "png";
 }
 
+function isCameraDisabledPresetError(text: string): boolean {
+  return text.toLowerCase().includes("camera disabled in current preset");
+}
+
 function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const [navigation, setNavigation] = useState<NavigationState>(service.getState());
@@ -706,9 +704,18 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       const next = await service.requestSnapshot();
       setSnapshot(next);
     } catch (error) {
+      const message = String(error);
+      if (isCameraDisabledPresetError(message)) {
+        runtime.eventBus.emit("console.event", {
+          level: "info",
+          text: "Snapshot no disponible para el preset de conexión actual.",
+          timestamp: Date.now()
+        });
+        return;
+      }
       runtime.eventBus.emit("console.event", {
         level: "error",
-        text: `Snapshot capture failed: ${String(error)}`,
+        text: `Snapshot capture failed: ${message}`,
         timestamp: Date.now()
       });
     } finally {
@@ -864,26 +871,6 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [connectionState, setConnectionState] = useState<ConnectionState | null>(
     connectionService ? connectionService.getState() : null
   );
-  const topicsSearchRef = useRef<HTMLInputElement | null>(null);
-  const topicsCopyRef = useRef<HTMLButtonElement | null>(null);
-  const topicsListRef = useRef<HTMLUListElement | null>(null);
-  const topicsStreamRef = useRef<HTMLPreElement | null>(null);
-  const topicButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const topicsUiStateRef = useRef<{
-    activeRole: "" | "search" | "copy" | "topic";
-    activeTopicName: string;
-    selectionStart: number | null;
-    selectionEnd: number | null;
-    listScrollTop: number;
-    streamScrollTop: number;
-  }>({
-    activeRole: "",
-    activeTopicName: "",
-    selectionStart: null,
-    selectionEnd: null,
-    listScrollTop: 0,
-    streamScrollTop: 0
-  });
 
   useEffect(() => sensorInfoService.subscribe((next) => setState(next)), [sensorInfoService]);
   useEffect(() => {
@@ -918,34 +905,6 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const topicsSnapshotError = String(topicsSnapshot.error ?? "").trim();
   const connected = connectionState ? connectionState.connected : true;
   const showDisconnected = !connected && state.implemented[state.activeTab];
-
-  useLayoutEffect(() => {
-    if (state.activeTab !== "topics") return;
-    const ui = topicsUiStateRef.current;
-    if (topicsListRef.current) {
-      topicsListRef.current.scrollTop = ui.listScrollTop;
-    }
-    if (topicsStreamRef.current) {
-      topicsStreamRef.current.scrollTop = ui.streamScrollTop;
-    }
-    if (!state.open) return;
-    if (ui.activeRole === "search" && topicsSearchRef.current) {
-      topicsSearchRef.current.focus({ preventScroll: true });
-      if (ui.selectionStart != null) {
-        const selectionEnd = ui.selectionEnd != null ? ui.selectionEnd : ui.selectionStart;
-        topicsSearchRef.current.setSelectionRange(ui.selectionStart, selectionEnd);
-      }
-      return;
-    }
-    if (ui.activeRole === "copy" && topicsCopyRef.current) {
-      topicsCopyRef.current.focus({ preventScroll: true });
-      return;
-    }
-    if (ui.activeRole === "topic" && ui.activeTopicName) {
-      const topicButton = topicButtonRefs.current.get(ui.activeTopicName);
-      topicButton?.focus({ preventScroll: true });
-    }
-  }, [state.activeTab, state.open, state.topics.catalog, state.topics.historyText, state.topics.search, state.topics.selectedTopic]);
 
   return (
     <div className="stack info-modal-root">
@@ -1036,50 +995,18 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           <div className="info-topics-layout">
             <div className="info-topics-sidebar">
               <input
-                ref={topicsSearchRef}
                 value={state.topics.search}
-                onFocus={(event) => {
-                  topicsUiStateRef.current.activeRole = "search";
-                  topicsUiStateRef.current.selectionStart = event.target.selectionStart;
-                  topicsUiStateRef.current.selectionEnd = event.target.selectionEnd;
-                }}
-                onSelect={(event) => {
-                  const target = event.target as HTMLInputElement;
-                  topicsUiStateRef.current.selectionStart = target.selectionStart;
-                  topicsUiStateRef.current.selectionEnd = target.selectionEnd;
-                }}
                 onChange={(event) => {
-                  const target = event.target;
-                  topicsUiStateRef.current.activeRole = "search";
-                  topicsUiStateRef.current.selectionStart = target.selectionStart;
-                  topicsUiStateRef.current.selectionEnd = target.selectionEnd;
-                  sensorInfoService.setTopicSearch(target.value);
+                  sensorInfoService.setTopicSearch(event.target.value);
                 }}
                 placeholder="Buscar topic..."
               />
-              <ul
-                ref={topicsListRef}
-                className="info-topics-list"
-                onScroll={(event) => {
-                  topicsUiStateRef.current.listScrollTop = event.currentTarget.scrollTop;
-                }}
-              >
+              <ul className="info-topics-list">
               {topicRows.map((entry) => (
                 <li key={entry.name} className="feed-item">
                   <button
-                    ref={(button) => {
-                      if (button) {
-                        topicButtonRefs.current.set(entry.name, button);
-                      } else {
-                        topicButtonRefs.current.delete(entry.name);
-                      }
-                    }}
                     type="button"
                     className={entry.name === state.topics.selectedTopic ? "active" : ""}
-                    onFocus={() => {
-                      topicsUiStateRef.current.activeRole = "topic";
-                      topicsUiStateRef.current.activeTopicName = entry.name;
-                    }}
                     onClick={() => {
                       void sensorInfoService.selectTopic(entry.name);
                     }}
@@ -1108,23 +1035,13 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                   </span>
                 </div>
               </div>
-              <pre
-                ref={topicsStreamRef}
-                className="code-block info-topics-stream"
-                onScroll={(event) => {
-                  topicsUiStateRef.current.streamScrollTop = event.currentTarget.scrollTop;
-                }}
-              >
+              <pre className="code-block info-topics-stream">
                 {state.topics.historyText || "Selecciona un topic para ver su stream en tiempo real."}
               </pre>
               <div className="row">
                 <button
-                  ref={topicsCopyRef}
                   type="button"
                   disabled={!state.topics.historyText}
-                  onFocus={() => {
-                    topicsUiStateRef.current.activeRole = "copy";
-                  }}
                   onClick={async () => {
                     if (typeof navigator === "undefined" || !navigator.clipboard) return;
                     await navigator.clipboard.writeText(state.topics.historyText);
@@ -1143,7 +1060,7 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         </div>
       ) : null}
       {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "pixhawk_gps" ? (
-        <div className="info-card-grid">
+        <div className="info-card-grid info-card-grid-pixhawk selectable">
           <div className="panel-card">
             <h4>IMU (EKF)</h4>
             <div className="key-value-grid">

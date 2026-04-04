@@ -62,9 +62,10 @@ pre {
 }
 
 .check-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
+  margin: 8px 0;
 }
 
 .check-row input[type="checkbox"] {
@@ -263,9 +264,16 @@ pre {
   text-align: right;
 }
 
-.modal-card.modal-card-modal-snapshot {
+.modal-card.modal-card-modal-snapshot,
+.modal-card.modal-card-nav2-modal-snapshot {
   width: min(1400px, 98vw);
   max-height: 96vh;
+}
+
+.modal-card.modal-card-modal-info,
+.modal-card.modal-card-nav2-modal-info {
+  height: min(940px, 94vh);
+  max-height: 94vh;
 }
 
 .modal-card.modal-card-modal-snapshot .modal-body {
@@ -400,6 +408,27 @@ pre {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.info-card-grid-pixhawk,
+.info-card-grid-pixhawk * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.info-card-grid-pixhawk .panel-card {
+  min-height: max-content;
+  overflow: hidden;
+}
+
+.info-card-grid-pixhawk .key-value-grid {
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
+}
+
+.info-card-grid-pixhawk .key-value-grid > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .info-modal-topics {

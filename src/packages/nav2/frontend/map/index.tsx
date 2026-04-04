@@ -496,7 +496,9 @@ function LeafletMapCanvas({
         mapService.setInspectCoords(evt.latlng.lat, evt.latlng.lng);
         const coordsText = `${evt.latlng.lat.toFixed(6)}, ${evt.latlng.lng.toFixed(6)}`;
         const buttonId = `inspect-copy-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
-        const popup = L.popup()
+        const popup = L.popup({
+          className: "map-inspect-leaflet-popup"
+        })
           .setLatLng(evt.latlng)
           .setContent(
             `<div class="map-inspect-popup"><div class="coords">${coordsText}</div><button type="button" id="${buttonId}" class="map-inspect-copy">Copy</button></div>`
@@ -899,22 +901,36 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     if (!connected || previous) return;
 
     pendingCenterOnConnectRef.current = true;
-    void mapService
-      .loadZonesFromBackend()
-      .then(() => {
+    void (async () => {
+      try {
+        const count = await mapService.loadZonesFromBackend();
         runtime.eventBus.emit("console.event", {
           level: "info",
-          text: "No-go zones loaded",
+          text: `No-go zones loaded (${count})`,
           timestamp: Date.now()
         });
-      })
-      .catch((error) => {
+        return;
+      } catch (error) {
+        // Legacy backend can timeout on load_zones_file right after connect.
+        // Fallback to get_state avoids false negative on first connection.
+      }
+
+      try {
+        const loaded = await mapService.loadMap("map");
+        const count = mapService.getState().zones.length;
+        runtime.eventBus.emit("console.event", {
+          level: "info",
+          text: `No-go zones loaded (${count}) from ${loaded.mapId}`,
+          timestamp: Date.now()
+        });
+      } catch (fallbackError) {
         runtime.eventBus.emit("console.event", {
           level: "warn",
-          text: `No-go zones load failed: ${String(error)}`,
+          text: `No-go zones load failed: ${String(fallbackError)}`,
           timestamp: Date.now()
         });
-      });
+      }
+    })();
   }, [connectionState?.connected, mapService, runtime.eventBus]);
   useEffect(() => {
     if (!pendingCenterOnConnectRef.current) return;

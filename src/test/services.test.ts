@@ -355,4 +355,140 @@ describe("services", () => {
     expect(state.manualLinearSpeed).toBe(2.4);
     expect(state.manualAngularSpeed).toBe(0.9);
   });
+
+  it("updates lock state from ack payloads", () => {
+    const subscribers: {
+      ack?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeAck: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.ack = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.ack?.({
+      op: "ack",
+      payload: {
+        control_locked: false,
+        control_lock_reason: "REMOTE_UNLOCK"
+      }
+    });
+
+    const state = service.getState();
+    expect(state.controlLocked).toBe(false);
+    expect(state.controlLockReason).toBe("REMOTE_UNLOCK");
+  });
+
+  it("updates lock state from legacy locked alias in ack payloads", () => {
+    const subscribers: {
+      ack?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeAck: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.ack = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.ack?.({
+      op: "ack",
+      request: "set_control_lock",
+      payload: {
+        locked: false,
+        lock_reason: "REMOTE_UNLOCK"
+      }
+    });
+
+    const state = service.getState();
+    expect(state.controlLocked).toBe(false);
+    expect(state.controlLockReason).toBe("REMOTE_UNLOCK");
+  });
+
+  it("ignores legacy locked alias on unrelated ack requests", () => {
+    const subscribers: {
+      ack?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeAck: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.ack = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.ack?.({
+      op: "ack",
+      request: "set_manual_mode",
+      payload: {
+        locked: false,
+        lock_reason: "SHOULD_BE_IGNORED"
+      }
+    });
+
+    const state = service.getState();
+    expect(state.controlLocked).toBe(true);
+    expect(state.controlLockReason).toBe("locked");
+  });
+
+  it("updates lock state from nav_event control lock codes", () => {
+    const subscribers: {
+      navEvent?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeNavEvent: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.navEvent = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.navEvent?.({
+      op: "nav_event",
+      event: {
+        code: "CONTROL_LOCK_RELEASED",
+        details: {
+          reason: "REMOTE_UNLOCK"
+        }
+      }
+    });
+
+    const state = service.getState();
+    expect(state.controlLocked).toBe(false);
+    expect(state.controlLockReason).toBe("REMOTE_UNLOCK");
+  });
 });

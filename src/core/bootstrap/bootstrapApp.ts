@@ -1,5 +1,6 @@
 import { DispatchRouter } from "../../dispatcher/DispatchRouter";
 import { DIALOG_SERVICE_ID, DialogService } from "../../services/impl/DialogService";
+import { SYSTEM_NOTIFICATION_SERVICE_ID, SystemNotificationService } from "../../services/impl/SystemNotificationService";
 import { TransportManager } from "../../transport/manager/TransportManager";
 import { loadEnvConfig } from "../config/envConfig";
 import { loadModuleConfig } from "../config/moduleConfigLoader";
@@ -56,6 +57,10 @@ export async function bootstrapApp(): Promise<AppRuntime> {
     id: DIALOG_SERVICE_ID,
     service: new DialogService()
   });
+  runtime.registries.serviceRegistry.registerService({
+    id: SYSTEM_NOTIFICATION_SERVICE_ID,
+    service: new SystemNotificationService()
+  });
 
   const packageCatalog = getPackageCatalog();
   const packageManager = new PackageManager(runtime, moduleConfig);
@@ -79,8 +84,6 @@ export async function bootstrapApp(): Promise<AppRuntime> {
   registries.dispatcherRegistry.list().forEach((entry) => {
     router.registerDispatcher(entry.dispatcher);
   });
-
-  await transportManager.connectAll({ env });
 
   return runtime;
 }

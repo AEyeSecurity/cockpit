@@ -690,7 +690,7 @@ body,
   border-right: 1px solid var(--line);
   border-radius: 0;
   background: var(--panel);
-  padding: 5px;
+  padding: 0 5px 5px;
   min-height: 0;
   overflow: auto;
 }
@@ -858,6 +858,9 @@ pre {
 }
 
 .collapsible-section {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
   padding: 0;
 }
 

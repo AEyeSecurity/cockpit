@@ -9,6 +9,7 @@ import { WorkspaceHost } from "./layout/WorkspaceHost";
 import type { AppRuntime } from "../core/types/module";
 import { NAV_EVENTS } from "../core/events/topics";
 import { DIALOG_SERVICE_ID, type DialogService } from "../services/impl/DialogService";
+import { SYSTEM_NOTIFICATION_SERVICE_ID, type SystemNotificationService } from "../services/impl/SystemNotificationService";
 
 interface AppShellProps {
   runtime: AppRuntime;
@@ -77,6 +78,10 @@ function isDisconnectedErrorText(text: string): boolean {
   );
 }
 
+function isCameraDisabledPresetError(text: string): boolean {
+  return text.toLowerCase().includes("camera disabled in current preset");
+}
+
 const CONNECTION_SERVICE_ID = "service.connection";
 
 export function AppShell({ runtime }: AppShellProps): JSX.Element {
@@ -122,6 +127,20 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     if (activeConsoleId && consoleTabs.some((tab) => tab.id === activeConsoleId)) return;
     setActiveConsoleId(consoleTabs[0]?.id ?? "");
   }, [activeConsoleId, consoleTabs]);
+
+  useEffect(() => {
+    let notificationService: SystemNotificationService | null = null;
+    try {
+      notificationService = runtime.getService<SystemNotificationService>(SYSTEM_NOTIFICATION_SERVICE_ID);
+    } catch {
+      notificationService = null;
+    }
+    if (!notificationService) return;
+    const stop = notificationService.start({ runtime });
+    return () => {
+      stop();
+    };
+  }, [runtime]);
 
   useEffect(() => {
     let connectionService: ConnectionServiceLike | null = null;
@@ -262,9 +281,18 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
               });
             })
             .catch((error) => {
+              const message = String(error);
+              if (isCameraDisabledPresetError(message)) {
+                runtime.eventBus.emit("console.event", {
+                  level: "info",
+                  text: "Snapshot no disponible para el preset de conexión actual.",
+                  timestamp: Date.now()
+                });
+                return;
+              }
               runtime.eventBus.emit("console.event", {
                 level: "error",
-                text: `Snapshot capture failed: ${String(error)}`,
+                text: `Snapshot capture failed: ${message}`,
                 timestamp: Date.now()
               });
             });
@@ -455,6 +483,10 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
               type="button"
               className={panel.id === activeSidebarId ? "active" : ""}
               onClick={() => {
+                if (panel.id === activeSidebarId) {
+                  setSidebarCollapsed((prev) => !prev);
+                  return;
+                }
                 setActiveSidebarId(panel.id);
                 setSidebarCollapsed(false);
               }}

@@ -1,5 +1,13 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { AppRuntime, LoadedPackage, PackageSettingFieldSchema } from "../types/module";
+import { CORE_EVENTS } from "../events/topics";
+import {
+  DEFAULT_CORE_NOTIFICATION_SETTINGS,
+  loadCoreNotificationSettings,
+  resetCoreNotificationSettings,
+  saveCoreNotificationSettings
+} from "../config/globalNotificationConfig";
+import type { CoreNotificationSettings } from "../types/settings";
 
 type SettingsTabId = "global" | `package:${string}`;
 type DraftValue = string | boolean;
@@ -11,6 +19,9 @@ interface PackageEditorState {
 
 interface SettingsUiState {
   activeTab: SettingsTabId;
+  globalConfig: CoreNotificationSettings | null;
+  globalEditor: PackageEditorState | null;
+  globalLoading: boolean;
   editorByPackage: Record<string, PackageEditorState>;
   footerNotice: string;
 }
@@ -18,6 +29,9 @@ interface SettingsUiState {
 const settingsListeners = new Set<() => void>();
 let settingsUiState: SettingsUiState = {
   activeTab: "global",
+  globalConfig: null,
+  globalEditor: null,
+  globalLoading: false,
   editorByPackage: {},
   footerNotice: ""
 };
@@ -43,11 +57,46 @@ function updateSettingsUiState(updater: (current: SettingsUiState) => SettingsUi
 function resetSettingsUiState(): void {
   settingsUiState = {
     activeTab: "global",
+    globalConfig: null,
+    globalEditor: null,
+    globalLoading: false,
     editorByPackage: {},
     footerNotice: ""
   };
   emitSettings();
 }
+
+const GLOBAL_SETTINGS_FIELDS: PackageSettingFieldSchema[] = [
+  { key: "notifications_enabled", label: "Notifications Enabled", type: "boolean" },
+  { key: "notify_on_route_complete", label: "Notify Route Complete", type: "boolean" },
+  { key: "notify_on_obstacle", label: "Notify Obstacle", type: "boolean" },
+  { key: "notify_on_connection_lost", label: "Notify Connection Lost", type: "boolean" },
+  { key: "connected_reminder_enabled", label: "Connected Reminder Enabled", type: "boolean" },
+  {
+    key: "connected_reminder_interval_ms",
+    label: "Connected Reminder Interval (ms)",
+    type: "number",
+    placeholder: "180000"
+  },
+  { key: "notification_cooldown_ms", label: "Notification Cooldown (ms)", type: "number", placeholder: "30000" },
+  {
+    key: "obstacle_keywords",
+    label: "Obstacle Keywords (JSON array)",
+    type: "json",
+    placeholder: "[\"obstacle\",\"blocked\",\"collision\",\"stuck\",\"path_blocked\"]"
+  }
+];
+
+const GLOBAL_SETTINGS_PACKAGE: LoadedPackage = {
+  id: "core.notifications",
+  version: "1.0.0",
+  enabled: true,
+  moduleIds: [],
+  settingsSchema: {
+    title: "Global Notifications",
+    fields: GLOBAL_SETTINGS_FIELDS
+  }
+};
 
 function listedFields(cockpitPackage: LoadedPackage): PackageSettingFieldSchema[] {
   return [...cockpitPackage.settingsSchema.fields];
@@ -156,10 +205,34 @@ function ensureSettingsState(runtime: AppRuntime): void {
   }));
 }
 
+let globalSettingsLoadInFlight = false;
+
+async function ensureGlobalSettingsState(): Promise<void> {
+  const current = getSettingsUiState();
+  if (current.globalConfig || current.globalLoading || globalSettingsLoadInFlight) return;
+  globalSettingsLoadInFlight = true;
+  updateSettingsUiState((state) => ({
+    ...state,
+    globalLoading: true
+  }));
+  try {
+    const loaded = await loadCoreNotificationSettings();
+    updateSettingsUiState((state) => ({
+      ...state,
+      globalConfig: loaded,
+      globalEditor: createEditorState(loaded, GLOBAL_SETTINGS_PACKAGE),
+      globalLoading: false
+    }));
+  } finally {
+    globalSettingsLoadInFlight = false;
+  }
+}
+
 function useSettingsUi(runtime: AppRuntime): SettingsUiState {
   const snapshot = useSyncExternalStore(subscribeSettings, getSettingsUiState, getSettingsUiState);
   useEffect(() => {
     ensureSettingsState(runtime);
+    void ensureGlobalSettingsState();
   }, [runtime]);
   return snapshot;
 }
@@ -214,16 +287,128 @@ function SettingsModalHeader({ runtime, close }: { runtime: AppRuntime; close: (
 }
 
 function SettingsModalBody({ runtime }: { runtime: AppRuntime }): JSX.Element {
-  const source = runtime.moduleConfig.source;
   const state = useSettingsUi(runtime);
   const activePackage = resolveActivePackage(runtime, state.activeTab);
 
   if (!activePackage) {
+    if (state.globalLoading || !state.globalConfig || !state.globalEditor) {
+      return (
+        <div className="stack settings-modal-layout">
+          <div className="panel-card">
+            <p className="muted">Loading global settings...</p>
+          </div>
+        </div>
+      );
+    }
+    const globalValidation = applySchemaValidation(
+      state.globalEditor.drafts,
+      state.globalConfig,
+      GLOBAL_SETTINGS_PACKAGE
+    );
     return (
       <div className="stack settings-modal-layout">
         <div className="panel-card">
-          <p className="muted">No implementado aún.</p>
-          <p className="muted">Config source: {source}</p>
+          <div className="settings-table">
+            {listedFields(GLOBAL_SETTINGS_PACKAGE).map((field) => (
+              <div key={field.key} className="settings-row">
+                <label htmlFor={`global-${field.key}`} className="settings-key">
+                  {field.label}
+                </label>
+                <div className="settings-value-column">
+                  {field.type === "boolean" ? (
+                    <label className="settings-boolean-toggle" htmlFor={`global-${field.key}`}>
+                      <input
+                        id={`global-${field.key}`}
+                        type="checkbox"
+                        checked={state.globalEditor!.drafts[field.key] === true}
+                        onChange={(event) => {
+                          const nextDrafts = {
+                            ...state.globalEditor!.drafts,
+                            [field.key]: event.target.checked
+                          };
+                          const validation = applySchemaValidation(
+                            nextDrafts,
+                            state.globalConfig!,
+                            GLOBAL_SETTINGS_PACKAGE
+                          );
+                          updateSettingsUiState((current) => ({
+                            ...current,
+                            footerNotice: "",
+                            globalEditor: {
+                              drafts: nextDrafts,
+                              errors: validation.errors
+                            }
+                          }));
+                        }}
+                      />
+                      <span>{state.globalEditor!.drafts[field.key] === true ? "true" : "false"}</span>
+                    </label>
+                  ) : field.type === "json" ? (
+                    <textarea
+                      id={`global-${field.key}`}
+                      className={state.globalEditor!.errors[field.key] ? "input-error" : ""}
+                      value={String(state.globalEditor!.drafts[field.key] ?? "")}
+                      placeholder={field.placeholder}
+                      rows={3}
+                      spellCheck={false}
+                      onChange={(event) => {
+                        const nextDrafts = {
+                          ...state.globalEditor!.drafts,
+                          [field.key]: event.target.value
+                        };
+                        const validation = applySchemaValidation(
+                          nextDrafts,
+                          state.globalConfig!,
+                          GLOBAL_SETTINGS_PACKAGE
+                        );
+                        updateSettingsUiState((current) => ({
+                          ...current,
+                          footerNotice: "",
+                          globalEditor: {
+                            drafts: nextDrafts,
+                            errors: validation.errors
+                          }
+                        }));
+                      }}
+                    />
+                  ) : (
+                    <input
+                      id={`global-${field.key}`}
+                      className={state.globalEditor!.errors[field.key] ? "input-error" : ""}
+                      value={String(state.globalEditor!.drafts[field.key] ?? "")}
+                      placeholder={field.placeholder}
+                      onChange={(event) => {
+                        const nextDrafts = {
+                          ...state.globalEditor!.drafts,
+                          [field.key]: event.target.value
+                        };
+                        const validation = applySchemaValidation(
+                          nextDrafts,
+                          state.globalConfig!,
+                          GLOBAL_SETTINGS_PACKAGE
+                        );
+                        updateSettingsUiState((current) => ({
+                          ...current,
+                          footerNotice: "",
+                          globalEditor: {
+                            drafts: nextDrafts,
+                            errors: validation.errors
+                          }
+                        }));
+                      }}
+                    />
+                  )}
+                  {field.description ? <p className="muted settings-description">{field.description}</p> : null}
+                  {state.globalEditor!.errors[field.key] ? (
+                    <p className="muted settings-error">{state.globalEditor!.errors[field.key]}</p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+          {Object.keys(globalValidation.errors).length > 0 ? (
+            <p className="muted settings-error">Fix validation errors before saving.</p>
+          ) : null}
         </div>
       </div>
     );
@@ -328,7 +513,7 @@ function SettingsModalBody({ runtime }: { runtime: AppRuntime }): JSX.Element {
 function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element {
   const state = useSettingsUi(runtime);
   const activePackage = resolveActivePackage(runtime, state.activeTab);
-  const editorState = activePackage ? state.editorByPackage[activePackage.id] : null;
+  const editorState = activePackage ? state.editorByPackage[activePackage.id] : state.globalEditor;
   const hasErrors = editorState ? Object.keys(editorState.errors).length > 0 : false;
 
   return (
@@ -338,10 +523,33 @@ function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element 
         disabled={activePackage ? hasErrors : false}
         onClick={async () => {
           if (!activePackage) {
+            if (!state.globalConfig || !state.globalEditor) return;
+            const validation = applySchemaValidation(
+              state.globalEditor.drafts,
+              state.globalConfig,
+              GLOBAL_SETTINGS_PACKAGE
+            );
+            if (!validation.nextConfig) {
+              updateSettingsUiState((current) => ({
+                ...current,
+                globalEditor: {
+                  drafts: state.globalEditor!.drafts,
+                  errors: validation.errors
+                },
+                footerNotice: ""
+              }));
+              return;
+            }
+            const saved = await saveCoreNotificationSettings(validation.nextConfig);
             updateSettingsUiState((current) => ({
               ...current,
-              footerNotice: "Global configuration is not implemented yet."
+              globalConfig: saved,
+              globalEditor: createEditorState(saved, GLOBAL_SETTINGS_PACKAGE),
+              footerNotice: "Saved"
             }));
+            runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
+              settings: saved
+            });
             return;
           }
 
@@ -383,10 +591,16 @@ function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element 
         type="button"
         onClick={async () => {
           if (!activePackage) {
+            const defaults = await resetCoreNotificationSettings();
             updateSettingsUiState((current) => ({
               ...current,
-              footerNotice: "Global configuration is not implemented yet."
+              globalConfig: defaults,
+              globalEditor: createEditorState(defaults, GLOBAL_SETTINGS_PACKAGE),
+              footerNotice: "Reset to defaults"
             }));
+            runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
+              settings: defaults
+            });
             return;
           }
 
