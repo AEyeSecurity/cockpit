@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./styles.css";
-import { PanelCollapsibleSection } from "../../../../core";
+import { PanelCollapsibleSection, PanelSection } from "../../../../core";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { RobotDispatcher } from "../dispatcher/impl/RobotDispatcher";
@@ -151,7 +151,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 
   return (
     <div className="stack">
-      <PanelCollapsibleSection title="Connection">
+      <PanelSection title="Connection">
         <div className="stack">
           <select
             value={state.preset}
@@ -193,7 +193,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </div>
           {state.lastError ? <p className="muted">Error: {state.lastError}</p> : null}
         </div>
-      </PanelCollapsibleSection>
+      </PanelSection>
     </div>
   );
 }
@@ -234,7 +234,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 
   return (
     <div className="stack">
-      <PanelCollapsibleSection title="Navigation">
+      <PanelSection title="Navigation">
         <div className="nav-legacy-grid">
           <button
             type="button"
@@ -407,7 +407,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           />
           Loop route
         </label>
-      </PanelCollapsibleSection>
+      </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
       <CameraSidebarPanel runtime={runtime} />
@@ -423,7 +423,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
 
   return (
     <div className="stack">
-      <PanelCollapsibleSection title="Speed limits">
+      <PanelSection title="Speed limits">
         <label className="range-row">
           Linear speed (m/s): {state.manualLinearSpeed.toFixed(2)}
           <input
@@ -446,7 +446,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
             onChange={(event) => service.setManualAngularSpeed(Number(event.target.value))}
           />
         </label>
-      </PanelCollapsibleSection>
+      </PanelSection>
     </div>
   );
 }
