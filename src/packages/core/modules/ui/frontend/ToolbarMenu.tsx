@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import type { ToolbarContribution } from "../../../../../core/contributions/types";
 import type { AppRuntime } from "../../../../../core/types/module";
-import type { ToolbarMenuDefinition } from "../../../../../core/types/ui";
-import { ToolbarMenuItem } from "./ToolbarMenuItem";
 import logo from "../../../../../../logo-app.png";
+import { ToolbarMenuItem } from "./ToolbarMenuItem";
 
 interface ToolbarMenuProps {
   runtime: AppRuntime;
-  menus: ToolbarMenuDefinition[];
-  openModal: (modalId: string) => void;
+  menus: ToolbarContribution[];
 }
 
-export function ToolbarMenu({ runtime, menus, openModal }: ToolbarMenuProps): JSX.Element {
+export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
 
@@ -50,10 +49,10 @@ export function ToolbarMenu({ runtime, menus, openModal }: ToolbarMenuProps): JS
               <button
                 type="button"
                 className="toolbar-menu-trigger"
-                onClick={async () => {
-                  if (menu.onSelect) {
+                onClick={() => {
+                  if (menu.commandId) {
                     setOpenMenuId(null);
-                    await menu.onSelect({ runtime, openModal });
+                    void runtime.commands.execute(menu.commandId);
                     return;
                   }
                   setOpenMenuId((current) => (current === menu.id ? null : menu.id));
@@ -67,8 +66,9 @@ export function ToolbarMenu({ runtime, menus, openModal }: ToolbarMenuProps): JS
                     <ToolbarMenuItem
                       key={item.id}
                       item={item}
-                      runtime={runtime}
-                      openModal={openModal}
+                      onExecute={(commandId) => {
+                        void runtime.commands.execute(commandId);
+                      }}
                       onClose={() => setOpenMenuId(null)}
                     />
                   ))}

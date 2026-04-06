@@ -1,62 +1,16 @@
 import type { DispatchRouter } from "../../packages/core/modules/runtime/dispatcher/DispatchRouter";
 import type { TransportManager } from "../../packages/core/modules/runtime/transport/manager/TransportManager";
+import type { CommandRegistry } from "../commands/types";
 import type { EnvConfig } from "../config/envConfig";
 import type { ModuleConfig } from "../config/moduleConfigLoader";
+import type { ContributionRegistry } from "../contributions/types";
 import type { Container } from "../di/container";
 import type { EventBus } from "../events/eventBus";
-import type { ConsoleTabDefinition, FooterItemDefinition, ModalDialogDefinition, SidebarPanelDefinition, ToolbarMenuDefinition, WorkspaceViewDefinition } from "./ui";
+import type { KeybindingRegistry } from "../keybindings/types";
 import type { DispatcherDefinition } from "../registries/dispatcherRegistry";
 import type { ServiceDefinition } from "../registries/serviceRegistry";
 import type { TransportDefinition } from "../registries/transportRegistry";
 export type { CoreNotificationSettings } from "./settings";
-
-export interface ToolbarMenuRegistryLike {
-  registerToolbarMenu(definition: ToolbarMenuDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): ToolbarMenuDefinition | undefined;
-  list(): ToolbarMenuDefinition[];
-}
-
-export interface SidebarPanelRegistryLike {
-  registerSidebarPanel(definition: SidebarPanelDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): SidebarPanelDefinition | undefined;
-  list(): SidebarPanelDefinition[];
-}
-
-export interface WorkspaceViewRegistryLike {
-  registerWorkspaceView(definition: WorkspaceViewDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): WorkspaceViewDefinition | undefined;
-  list(): WorkspaceViewDefinition[];
-}
-
-export interface ConsoleTabRegistryLike {
-  registerConsoleTab(definition: ConsoleTabDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): ConsoleTabDefinition | undefined;
-  list(): ConsoleTabDefinition[];
-}
-
-export interface FooterItemRegistryLike {
-  registerFooterItem(definition: FooterItemDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): FooterItemDefinition | undefined;
-  list(): FooterItemDefinition[];
-}
-
-export interface ModalRegistryLike {
-  registerModalDialog(definition: ModalDialogDefinition): void;
-  unregister(id: string): void;
-  has(id: string): boolean;
-  get(id: string): ModalDialogDefinition | undefined;
-  list(): ModalDialogDefinition[];
-}
 
 export interface ServiceRegistryLike {
   registerService<T>(definition: ServiceDefinition<T>): void;
@@ -83,18 +37,6 @@ export interface TransportRegistryLike {
   list(): TransportDefinition[];
 }
 
-export interface RegistryBundle {
-  toolbarMenuRegistry: ToolbarMenuRegistryLike;
-  sidebarPanelRegistry: SidebarPanelRegistryLike;
-  workspaceViewRegistry: WorkspaceViewRegistryLike;
-  consoleTabRegistry: ConsoleTabRegistryLike;
-  footerItemRegistry: FooterItemRegistryLike;
-  modalRegistry: ModalRegistryLike;
-  serviceRegistry: ServiceRegistryLike;
-  dispatcherRegistry: DispatcherRegistryLike;
-  transportRegistry: TransportRegistryLike;
-}
-
 export interface ModuleContext {
   packageId: string;
   env: EnvConfig;
@@ -103,7 +45,15 @@ export interface ModuleContext {
   eventBus: EventBus;
   router: DispatchRouter;
   transportManager: TransportManager;
-  registries: RegistryBundle;
+
+  commands: CommandRegistry;
+  contributions: ContributionRegistry;
+  keybindings: KeybindingRegistry;
+
+  services: ServiceRegistryLike;
+  dispatchers: DispatcherRegistryLike;
+  transports: TransportRegistryLike;
+
   packages: LoadedPackage[];
   getService<T>(serviceId: string): T;
   getPackageConfig<T extends Record<string, unknown>>(packageId: string): T;

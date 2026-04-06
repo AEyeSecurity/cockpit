@@ -1,19 +1,17 @@
-import type { AppRuntime } from "../../core/types/module";
-import type { ModalDialogDefinition } from "../../core/types/ui";
+import type { ModalContribution } from "../../core/contributions/types";
 
 interface ModalHostProps {
-  runtime: AppRuntime;
-  dialogs: ModalDialogDefinition[];
+  dialogs: ModalContribution[];
   modalId: string | null;
   closeModal: () => void;
 }
 
-export function ModalHost({ runtime, dialogs, modalId, closeModal }: ModalHostProps): JSX.Element | null {
+export function ModalHost({ dialogs, modalId, closeModal }: ModalHostProps): JSX.Element | null {
   if (!modalId) return null;
   const dialog = dialogs.find((entry) => entry.id === modalId);
   if (!dialog) return null;
-  const headerContent = dialog.renderHeader ? dialog.renderHeader({ runtime, close: closeModal }) : null;
-  const footerContent = dialog.renderFooter ? dialog.renderFooter({ runtime, close: closeModal }) : null;
+  const headerContent = dialog.renderHeader ? dialog.renderHeader({ close: closeModal }) : null;
+  const footerContent = dialog.renderFooter ? dialog.renderFooter({ close: closeModal }) : null;
   const dialogClassName = `modal-card modal-card-${dialog.id.replace(/\./g, "-")}`;
 
   return (
@@ -24,12 +22,12 @@ export function ModalHost({ runtime, dialogs, modalId, closeModal }: ModalHostPr
         ) : (
           <div className="modal-header">
             <strong>{dialog.title}</strong>
-            <button type="button" onClick={closeModal}>
-              X
+            <button type="button" className="modal-close-btn" onClick={closeModal} aria-label="Cerrar">
+              ⛌
             </button>
           </div>
         )}
-        <div className="modal-body">{dialog.render({ runtime, close: closeModal })}</div>
+        <div className="modal-body">{dialog.render({ close: closeModal })}</div>
         {footerContent ? <div className="modal-footer">{footerContent}</div> : null}
       </div>
     </div>

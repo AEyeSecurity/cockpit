@@ -26,7 +26,20 @@
 .feed-item.alert-recent {
   background: rgba(251, 180, 94, 0.22);
   border-color: rgba(251, 180, 94, 0.6);
-  transition: background-color 220ms ease, border-color 220ms ease;
+  animation: telemetry-alert-recent-fade 5s linear forwards;
+}
+
+@keyframes telemetry-alert-recent-fade {
+  0%,
+  70% {
+    background: rgba(251, 180, 94, 0.22);
+    border-color: rgba(251, 180, 94, 0.6);
+  }
+
+  100% {
+    background: #352d2d;
+    border-color: var(--line);
+  }
 }
 
 .status-board {
@@ -64,5 +77,6 @@
 }
 .console-tab-content .telemetry-console-grid {
   min-height: 0;
+  gap: 4px;
   height: 100%;
 }

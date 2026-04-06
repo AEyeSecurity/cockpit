@@ -69,7 +69,7 @@ function terminalDebug(message: string, details?: unknown): void {
 }
 
 function TerminalConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<TerminalService>(TERMINAL_SERVICE_ID);
+  const service = runtime.services.getService<TerminalService>(TERMINAL_SERVICE_ID);
   const [state, setState] = useState<TerminalState>(service.getState());
   const [hostSelection, setHostSelection] = useState(state.selectedHost);
   const hostSelectionRef = useRef(hostSelection);
@@ -340,15 +340,16 @@ export function createTerminalModule(): CockpitModule {
         scrollback: runtimeConfig.scrollback
       });
 
-      ctx.registries.serviceRegistry.registerService({
+      ctx.services.registerService({
         id: TERMINAL_SERVICE_ID,
         service: terminalService
       });
 
-      ctx.registries.consoleTabRegistry.registerConsoleTab({
+      ctx.contributions.register({
         id: "console.terminal",
+        slot: "console",
         label: "Terminal",
-        render: (runtime) => <TerminalConsoleTab runtime={runtime} />
+        render: () => <TerminalConsoleTab runtime={ctx} />
       });
 
       ctx.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {

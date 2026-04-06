@@ -15,16 +15,16 @@ describe("integration", () => {
       "packages:\n  nav2:\n    enabled: true\n    modules:\n      map: false\n      debug: false\n      navigation: true\n      telemetry: true\n"
     );
     const runtime = await bootstrapApp();
-    expect(runtime.registries.workspaceViewRegistry.has("nav2.workspace.map")).toBe(false);
-    expect(runtime.registries.toolbarMenuRegistry.has("nav2.toolbar.debug")).toBe(false);
+    expect(runtime.contributions.has("nav2.workspace.map")).toBe(false);
+    expect(runtime.contributions.has("nav2.toolbar.debug")).toBe(false);
     await removeConfig("modules.yaml");
   });
 
   it("registers global metrics footer in core and nav2 connection status badge footer", async () => {
     const runtime = await bootstrapApp();
-    expect(runtime.registries.footerItemRegistry.has("core.footer.metrics")).toBe(true);
-    expect(runtime.registries.footerItemRegistry.has("nav2.footer.connection")).toBe(false);
-    expect(runtime.registries.footerItemRegistry.has("nav2.footer.connection-status")).toBe(true);
+    expect(runtime.contributions.has("core.footer.metrics")).toBe(true);
+    expect(runtime.contributions.has("nav2.footer.connection")).toBe(false);
+    expect(runtime.contributions.has("nav2.footer.connection-status")).toBe(true);
   });
 
   it("loads package config from config.json and persists local overrides", async () => {

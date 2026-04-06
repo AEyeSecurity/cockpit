@@ -1,23 +1,14 @@
-import type { AppRuntime } from "../../../../../core/types/module";
-import type { ConsoleTabDefinition } from "../../../../../core/types/ui";
+import type { ConsoleContribution } from "../../../../../core/contributions/types";
 
 interface ConsolePanelProps {
-  runtime: AppRuntime;
-  tabs: ConsoleTabDefinition[];
+  tabs: ConsoleContribution[];
   activeTabId: string;
   onSelectTab: (tabId: string) => void;
   collapsed: boolean;
   height: number;
 }
 
-export function ConsolePanel({
-  runtime,
-  tabs,
-  activeTabId,
-  onSelectTab,
-  collapsed,
-  height
-}: ConsolePanelProps): JSX.Element {
+export function ConsolePanel({ tabs, activeTabId, onSelectTab, collapsed, height }: ConsolePanelProps): JSX.Element {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
 
   return (
@@ -35,7 +26,7 @@ export function ConsolePanel({
         ))}
       </div>
       <div className="console-tab-content">
-        {activeTab ? activeTab.render(runtime) : "No console tabs registered."}
+        {activeTab ? activeTab.render() : "No console tabs registered."}
       </div>
     </section>
   );

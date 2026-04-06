@@ -2,11 +2,16 @@ import { DispatchRouter } from "../../packages/core/modules/runtime/dispatcher/D
 import { DIALOG_SERVICE_ID, DialogService } from "../../packages/core/modules/runtime/service/impl/DialogService";
 import { SYSTEM_NOTIFICATION_SERVICE_ID, SystemNotificationService } from "../../packages/core/modules/runtime/service/impl/SystemNotificationService";
 import { TransportManager } from "../../packages/core/modules/runtime/transport/manager/TransportManager";
+import { createCommandRegistry } from "../commands/commandRegistry";
 import { loadEnvConfig } from "../config/envConfig";
 import { loadModuleConfig } from "../config/moduleConfigLoader";
+import { createContributionRegistry } from "../contributions/contributionRegistry";
 import { createContainer } from "../di/container";
 import { createEventBus } from "../events/eventBus";
-import { createRegistries } from "../registries/createRegistries";
+import { createKeybindingRegistry } from "../keybindings/keybindingRegistry";
+import { DispatcherRegistry } from "../registries/dispatcherRegistry";
+import { ServiceRegistry } from "../registries/serviceRegistry";
+import { TransportRegistry } from "../registries/transportRegistry";
 import type { AppRuntime } from "../types/module";
 import { getPackageCatalog } from "./packageCatalog";
 import { PackageManager } from "./packageManager";
@@ -17,7 +22,12 @@ export async function bootstrapApp(): Promise<AppRuntime> {
   const moduleConfig = await loadModuleConfig();
   const container = createContainer();
   const eventBus = createEventBus();
-  const registries = createRegistries();
+  const commands = createCommandRegistry();
+  const contributions = createContributionRegistry();
+  const keybindings = createKeybindingRegistry();
+  const services = new ServiceRegistry();
+  const dispatchers = new DispatcherRegistry();
+  const transports = new TransportRegistry();
   const transportManager = new TransportManager();
   const router = new DispatchRouter(transportManager);
 
@@ -29,14 +39,19 @@ export async function bootstrapApp(): Promise<AppRuntime> {
     eventBus,
     router,
     transportManager,
-    registries,
+    commands,
+    contributions,
+    keybindings,
+    services,
+    dispatchers,
+    transports,
     packages: [],
     getService<T>(serviceId: string): T {
-      if (registries.serviceRegistry.has(serviceId)) {
-        return registries.serviceRegistry.getService<T>(serviceId);
+      if (services.has(serviceId)) {
+        return services.getService<T>(serviceId);
       }
       const suffix = `.${serviceId}`;
-      const matches = registries.serviceRegistry.list().filter((entry) => entry.id.endsWith(suffix));
+      const matches = services.list().filter((entry) => entry.id.endsWith(suffix));
       if (matches.length === 1) {
         return matches[0].service as T;
       }
@@ -53,11 +68,11 @@ export async function bootstrapApp(): Promise<AppRuntime> {
     }
   };
 
-  runtime.registries.serviceRegistry.registerService({
+  runtime.services.registerService({
     id: DIALOG_SERVICE_ID,
     service: new DialogService()
   });
-  runtime.registries.serviceRegistry.registerService({
+  runtime.services.registerService({
     id: SYSTEM_NOTIFICATION_SERVICE_ID,
     service: new SystemNotificationService()
   });
@@ -76,12 +91,12 @@ export async function bootstrapApp(): Promise<AppRuntime> {
   runtime.packages.splice(0, runtime.packages.length, ...loadedPackages);
   registerCoreSettingsUi(runtime);
 
-  registries.transportRegistry.list().forEach((entry) => {
+  transports.list().forEach((entry) => {
     transportManager.registerTransport(entry.transport);
     router.bindTransport(entry.id);
   });
 
-  registries.dispatcherRegistry.list().forEach((entry) => {
+  dispatchers.list().forEach((entry) => {
     router.registerDispatcher(entry.dispatcher);
   });
 

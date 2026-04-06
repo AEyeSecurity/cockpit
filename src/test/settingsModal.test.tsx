@@ -1,28 +1,37 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppShell } from "../app/AppShell";
-import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
-import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
+import { createCommandRegistry } from "../core/commands/commandRegistry";
+import { createContributionRegistry } from "../core/contributions/contributionRegistry";
 import { createContainer } from "../core/di/container";
 import { createEventBus } from "../core/events/eventBus";
-import { createRegistries } from "../core/registries/createRegistries";
+import { createKeybindingRegistry } from "../core/keybindings/keybindingRegistry";
+import { DispatcherRegistry } from "../core/registries/dispatcherRegistry";
+import { ServiceRegistry } from "../core/registries/serviceRegistry";
+import { TransportRegistry } from "../core/registries/transportRegistry";
 import type { AppRuntime } from "../core/types/module";
+import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
+import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
 import { registerCoreSettingsUi } from "../core/bootstrap/registerCoreSettingsUi";
 
 function createRuntime(): AppRuntime {
-  const registries = createRegistries();
-  registries.sidebarPanelRegistry.registerSidebarPanel({
+  const commands = createCommandRegistry();
+  const contributions = createContributionRegistry();
+  contributions.register({
     id: "sidebar.one",
+    slot: "sidebar",
     label: "One",
     render: () => <div>Sidebar One</div>
   });
-  registries.workspaceViewRegistry.registerWorkspaceView({
+  contributions.register({
     id: "workspace.one",
+    slot: "workspace",
     label: "Workspace One",
     render: () => <div>Workspace One</div>
   });
-  registries.consoleTabRegistry.registerConsoleTab({
+  contributions.register({
     id: "console.one",
+    slot: "console",
     label: "Console One",
     render: () => <div>Console One</div>
   });
@@ -56,7 +65,12 @@ function createRuntime(): AppRuntime {
     eventBus: createEventBus(),
     transportManager,
     router,
-    registries,
+    commands,
+    contributions,
+    keybindings: createKeybindingRegistry(),
+    services: new ServiceRegistry(),
+    dispatchers: new DispatcherRegistry(),
+    transports: new TransportRegistry(),
     packages: [
       {
         id: "nav2",

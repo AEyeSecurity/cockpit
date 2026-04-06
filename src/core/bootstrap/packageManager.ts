@@ -1,6 +1,4 @@
-import type { Dispatcher } from "../../packages/core/modules/runtime/dispatcher/base/Dispatcher";
-import type { Transport } from "../../packages/core/modules/runtime/transport/base/Transport";
-import { CORE_EVENTS } from "../events/topics";
+import type { CommandDescriptor, CommandHandler, CommandRegistry } from "../commands/types";
 import { isPackageEnabled, isPackageModuleEnabled, type ModuleConfig } from "../config/moduleConfigLoader";
 import {
   loadPackageConfigOverride,
@@ -8,11 +6,22 @@ import {
   resetPackageConfigOverride,
   savePackageConfigOverride
 } from "../config/packageConfigLoader";
-import type { AppRuntime, LoadedPackage, PackageCatalogEntry, RegistryBundle } from "../types/module";
-import type { ConsoleTabDefinition, FooterItemDefinition, ModalDialogDefinition, SidebarPanelDefinition, ToolbarMenuDefinition, WorkspaceViewDefinition } from "../types/ui";
+import type { ContributionRegistry, UIContribution } from "../contributions/types";
+import { CORE_EVENTS } from "../events/topics";
+import type { KeybindingDescriptor, KeybindingRegistry } from "../keybindings/types";
+import type { Dispatcher } from "../../packages/core/modules/runtime/dispatcher/base/Dispatcher";
+import type { Transport } from "../../packages/core/modules/runtime/transport/base/Transport";
 import type { DispatcherDefinition } from "../registries/dispatcherRegistry";
 import type { ServiceDefinition } from "../registries/serviceRegistry";
 import type { TransportDefinition } from "../registries/transportRegistry";
+import type {
+  AppRuntime,
+  DispatcherRegistryLike,
+  LoadedPackage,
+  PackageCatalogEntry,
+  ServiceRegistryLike,
+  TransportRegistryLike
+} from "../types/module";
 
 function scopeId(packageId: string, id: string): string {
   if (id.startsWith(`${packageId}.`)) {
@@ -57,267 +66,206 @@ function computePackageConfigOverride(
   return override;
 }
 
-function createScopedRegistries(
+function resolveCommandReference(rootRuntime: AppRuntime, packageId: string, commandId: string): string {
+  if (rootRuntime.commands.has(commandId)) return commandId;
+  const scoped = scopeId(packageId, commandId);
+  if (rootRuntime.commands.has(scoped)) return scoped;
+  return commandId;
+}
+
+function scopeToolbarContributionCommandIds(
   rootRuntime: AppRuntime,
   packageId: string,
-  scopedRuntimeRef: () => AppRuntime
-): RegistryBundle {
-  const root = rootRuntime.registries;
-
-  const wrapSidebarRender = (definition: SidebarPanelDefinition): SidebarPanelDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    render: () => definition.render(scopedRuntimeRef())
-  });
-  const wrapWorkspaceRender = (definition: WorkspaceViewDefinition): WorkspaceViewDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    render: () => definition.render(scopedRuntimeRef())
-  });
-  const wrapConsoleRender = (definition: ConsoleTabDefinition): ConsoleTabDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    render: () => definition.render(scopedRuntimeRef())
-  });
-  const wrapFooterRender = (definition: FooterItemDefinition): FooterItemDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    render: () => definition.render(scopedRuntimeRef())
-  });
-  const wrapModalRender = (definition: ModalDialogDefinition): ModalDialogDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    renderHeader: definition.renderHeader
-      ? ({ close }) => definition.renderHeader!({ runtime: scopedRuntimeRef(), close })
-      : undefined,
-    render: ({ close }) => definition.render({ runtime: scopedRuntimeRef(), close }),
-    renderFooter: definition.renderFooter
-      ? ({ close }) => definition.renderFooter!({ runtime: scopedRuntimeRef(), close })
-      : undefined
-  });
-  const wrapToolbarMenu = (definition: ToolbarMenuDefinition): ToolbarMenuDefinition => ({
-    ...definition,
-    id: scopeId(packageId, definition.id),
-    onSelect: definition.onSelect
-      ? ({ openModal }) =>
-          definition.onSelect!({
-            runtime: scopedRuntimeRef(),
-            openModal: (modalId) => {
-              const scopedModalId = scopeId(packageId, modalId);
-              if (root.modalRegistry.has(scopedModalId)) {
-                openModal(scopedModalId);
-                return;
-              }
-              openModal(modalId);
-            }
-          })
-      : undefined,
-    items: (definition.items ?? []).map((item) => ({
-      ...item,
-      id: scopeId(packageId, item.id),
-      onSelect: ({ openModal }) =>
-        item.onSelect({
-          runtime: scopedRuntimeRef(),
-          openModal: (modalId) => {
-            const scopedModalId = scopeId(packageId, modalId);
-            if (root.modalRegistry.has(scopedModalId)) {
-              openModal(scopedModalId);
-              return;
-            }
-            openModal(modalId);
-          }
-        })
-    }))
-  });
+  contribution: UIContribution
+): UIContribution {
+  if (contribution.slot !== "toolbar") {
+    return contribution;
+  }
 
   return {
-    toolbarMenuRegistry: {
-      registerToolbarMenu(definition: ToolbarMenuDefinition): void {
-        root.toolbarMenuRegistry.registerToolbarMenu(wrapToolbarMenu(definition));
-      },
-      unregister(id: string): void {
-        root.toolbarMenuRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.toolbarMenuRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.toolbarMenuRegistry.has(resolveLookupId(packageId, id, (entryId) => root.toolbarMenuRegistry.has(entryId)));
-      },
-      get(id: string): ToolbarMenuDefinition | undefined {
-        return root.toolbarMenuRegistry.get(resolveLookupId(packageId, id, (entryId) => root.toolbarMenuRegistry.has(entryId)));
-      },
-      list(): ToolbarMenuDefinition[] {
-        return root.toolbarMenuRegistry.list();
-      }
-    },
-    sidebarPanelRegistry: {
-      registerSidebarPanel(definition: SidebarPanelDefinition): void {
-        root.sidebarPanelRegistry.registerSidebarPanel(wrapSidebarRender(definition));
-      },
-      unregister(id: string): void {
-        root.sidebarPanelRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.sidebarPanelRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.sidebarPanelRegistry.has(resolveLookupId(packageId, id, (entryId) => root.sidebarPanelRegistry.has(entryId)));
-      },
-      get(id: string): SidebarPanelDefinition | undefined {
-        return root.sidebarPanelRegistry.get(resolveLookupId(packageId, id, (entryId) => root.sidebarPanelRegistry.has(entryId)));
-      },
-      list(): SidebarPanelDefinition[] {
-        return root.sidebarPanelRegistry.list();
-      }
-    },
-    workspaceViewRegistry: {
-      registerWorkspaceView(definition: WorkspaceViewDefinition): void {
-        root.workspaceViewRegistry.registerWorkspaceView(wrapWorkspaceRender(definition));
-      },
-      unregister(id: string): void {
-        root.workspaceViewRegistry.unregister(
-          resolveLookupId(packageId, id, (entryId) => root.workspaceViewRegistry.has(entryId))
-        );
-      },
-      has(id: string): boolean {
-        return root.workspaceViewRegistry.has(resolveLookupId(packageId, id, (entryId) => root.workspaceViewRegistry.has(entryId)));
-      },
-      get(id: string): WorkspaceViewDefinition | undefined {
-        return root.workspaceViewRegistry.get(resolveLookupId(packageId, id, (entryId) => root.workspaceViewRegistry.has(entryId)));
-      },
-      list(): WorkspaceViewDefinition[] {
-        return root.workspaceViewRegistry.list();
-      }
-    },
-    consoleTabRegistry: {
-      registerConsoleTab(definition: ConsoleTabDefinition): void {
-        root.consoleTabRegistry.registerConsoleTab(wrapConsoleRender(definition));
-      },
-      unregister(id: string): void {
-        root.consoleTabRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.consoleTabRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.consoleTabRegistry.has(resolveLookupId(packageId, id, (entryId) => root.consoleTabRegistry.has(entryId)));
-      },
-      get(id: string): ConsoleTabDefinition | undefined {
-        return root.consoleTabRegistry.get(resolveLookupId(packageId, id, (entryId) => root.consoleTabRegistry.has(entryId)));
-      },
-      list(): ConsoleTabDefinition[] {
-        return root.consoleTabRegistry.list();
-      }
-    },
-    footerItemRegistry: {
-      registerFooterItem(definition: FooterItemDefinition): void {
-        root.footerItemRegistry.registerFooterItem(wrapFooterRender(definition));
-      },
-      unregister(id: string): void {
-        root.footerItemRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.footerItemRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.footerItemRegistry.has(resolveLookupId(packageId, id, (entryId) => root.footerItemRegistry.has(entryId)));
-      },
-      get(id: string): FooterItemDefinition | undefined {
-        return root.footerItemRegistry.get(resolveLookupId(packageId, id, (entryId) => root.footerItemRegistry.has(entryId)));
-      },
-      list(): FooterItemDefinition[] {
-        return root.footerItemRegistry.list();
-      }
-    },
-    modalRegistry: {
-      registerModalDialog(definition: ModalDialogDefinition): void {
-        root.modalRegistry.registerModalDialog(wrapModalRender(definition));
-      },
-      unregister(id: string): void {
-        root.modalRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.modalRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.modalRegistry.has(resolveLookupId(packageId, id, (entryId) => root.modalRegistry.has(entryId)));
-      },
-      get(id: string): ModalDialogDefinition | undefined {
-        return root.modalRegistry.get(resolveLookupId(packageId, id, (entryId) => root.modalRegistry.has(entryId)));
-      },
-      list(): ModalDialogDefinition[] {
-        return root.modalRegistry.list();
-      }
-    },
-    serviceRegistry: {
-      registerService<T>(definition: ServiceDefinition<T>): void {
-        root.serviceRegistry.registerService({ ...definition, id: scopeId(packageId, definition.id) });
-      },
-      unregister(id: string): void {
-        const resolvedId = resolveLookupId(packageId, id, (entryId) => root.serviceRegistry.has(entryId));
-        root.serviceRegistry.unregister(resolvedId);
-      },
-      has(id: string): boolean {
-        return root.serviceRegistry.has(resolveLookupId(packageId, id, (entryId) => root.serviceRegistry.has(entryId)));
-      },
-      get(id: string): ServiceDefinition | undefined {
-        return root.serviceRegistry.get(resolveLookupId(packageId, id, (entryId) => root.serviceRegistry.has(entryId)));
-      },
-      list(): ServiceDefinition[] {
-        return root.serviceRegistry.list();
-      },
-      getService<T>(id: string): T {
-        const resolvedId = resolveLookupId(packageId, id, (entryId) => root.serviceRegistry.has(entryId));
-        return root.serviceRegistry.getService<T>(resolvedId);
-      }
-    },
-    dispatcherRegistry: {
-      registerDispatcher(definition: DispatcherDefinition): void {
-        const dispatcher = definition.dispatcher as Dispatcher & { id: string; transportId: string };
-        const scopedDispatcherId = scopeId(packageId, definition.id);
-        dispatcher.id = scopedDispatcherId;
-        dispatcher.transportId = scopeId(packageId, dispatcher.transportId);
-        root.dispatcherRegistry.registerDispatcher({
-          ...definition,
-          id: scopedDispatcherId,
-          dispatcher
-        });
-      },
-      unregister(id: string): void {
-        root.dispatcherRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.dispatcherRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.dispatcherRegistry.has(resolveLookupId(packageId, id, (entryId) => root.dispatcherRegistry.has(entryId)));
-      },
-      get(id: string): DispatcherDefinition | undefined {
-        return root.dispatcherRegistry.get(resolveLookupId(packageId, id, (entryId) => root.dispatcherRegistry.has(entryId)));
-      },
-      list(): DispatcherDefinition[] {
-        return root.dispatcherRegistry.list();
-      }
-    },
-    transportRegistry: {
-      registerTransport(definition: TransportDefinition): void {
-        const transport = definition.transport as Transport & { id: string };
-        const scopedTransportId = scopeId(packageId, definition.id);
-        transport.id = scopedTransportId;
-        root.transportRegistry.registerTransport({
-          ...definition,
-          id: scopedTransportId,
-          transport
-        });
-      },
-      unregister(id: string): void {
-        root.transportRegistry.unregister(resolveLookupId(packageId, id, (entryId) => root.transportRegistry.has(entryId)));
-      },
-      has(id: string): boolean {
-        return root.transportRegistry.has(resolveLookupId(packageId, id, (entryId) => root.transportRegistry.has(entryId)));
-      },
-      get(id: string): TransportDefinition | undefined {
-        return root.transportRegistry.get(resolveLookupId(packageId, id, (entryId) => root.transportRegistry.has(entryId)));
-      },
-      list(): TransportDefinition[] {
-        return root.transportRegistry.list();
-      }
-    }
+    ...contribution,
+    commandId: contribution.commandId
+      ? resolveCommandReference(rootRuntime, packageId, contribution.commandId)
+      : undefined,
+    items: contribution.items?.map((item) => ({
+      ...item,
+      id: scopeId(packageId, item.id),
+      commandId: resolveCommandReference(rootRuntime, packageId, item.commandId)
+    }))
   };
 }
 
 function createScopedRuntime(rootRuntime: AppRuntime, packageId: string): AppRuntime {
-  let scopedRuntime!: AppRuntime;
-  const registries = createScopedRegistries(rootRuntime, packageId, () => scopedRuntime);
-  scopedRuntime = {
+  const commands: CommandRegistry = {
+    register(descriptor: CommandDescriptor, handler: CommandHandler) {
+      return rootRuntime.commands.register({ ...descriptor, id: scopeId(packageId, descriptor.id) }, handler);
+    },
+    execute(commandId: string, ...args: unknown[]) {
+      const resolved = resolveLookupId(packageId, commandId, (entryId) => rootRuntime.commands.has(entryId));
+      return rootRuntime.commands.execute(resolved, ...args);
+    },
+    has(commandId: string): boolean {
+      return rootRuntime.commands.has(resolveLookupId(packageId, commandId, (entryId) => rootRuntime.commands.has(entryId)));
+    },
+    getDescriptor(commandId: string) {
+      return rootRuntime.commands.getDescriptor(
+        resolveLookupId(packageId, commandId, (entryId) => rootRuntime.commands.has(entryId))
+      );
+    },
+    list() {
+      return rootRuntime.commands.list();
+    },
+    onChange(listener) {
+      return rootRuntime.commands.onChange(listener);
+    }
+  };
+
+  const contributions: ContributionRegistry = {
+    register(contribution: UIContribution) {
+      const scopedContribution = scopeToolbarContributionCommandIds(rootRuntime, packageId, {
+        ...contribution,
+        id: scopeId(packageId, contribution.id),
+        ...(contribution.slot === "footer" && contribution.beforeId
+          ? {
+              beforeId: resolveLookupId(
+                packageId,
+                contribution.beforeId,
+                (entryId) => rootRuntime.contributions.has(entryId)
+              )
+            }
+          : {})
+      });
+      return rootRuntime.contributions.register(scopedContribution);
+    },
+    unregister(id: string): void {
+      rootRuntime.contributions.unregister(
+        resolveLookupId(packageId, id, (entryId) => rootRuntime.contributions.has(entryId))
+      );
+    },
+    has(id: string): boolean {
+      return rootRuntime.contributions.has(
+        resolveLookupId(packageId, id, (entryId) => rootRuntime.contributions.has(entryId))
+      );
+    },
+    get(id: string) {
+      return rootRuntime.contributions.get(
+        resolveLookupId(packageId, id, (entryId) => rootRuntime.contributions.has(entryId))
+      );
+    },
+    query(slot) {
+      return rootRuntime.contributions.query(slot);
+    },
+    onChange(listener) {
+      return rootRuntime.contributions.onChange(listener);
+    }
+  };
+
+  const keybindings: KeybindingRegistry = {
+    register(binding: KeybindingDescriptor) {
+      return rootRuntime.keybindings.register({
+        ...binding,
+        commandId: resolveCommandReference(rootRuntime, packageId, binding.commandId)
+      });
+    },
+    getBindingsForCommand(commandId: string) {
+      const resolved = resolveLookupId(packageId, commandId, (entryId) => rootRuntime.commands.has(entryId));
+      return rootRuntime.keybindings.getBindingsForCommand(resolved);
+    },
+    getBindingForKey(key, context) {
+      return rootRuntime.keybindings.getBindingForKey(key, context);
+    },
+    list() {
+      return rootRuntime.keybindings.list();
+    }
+  };
+
+  const services: ServiceRegistryLike = {
+    registerService<T>(definition: ServiceDefinition<T>): void {
+      rootRuntime.services.registerService({ ...definition, id: scopeId(packageId, definition.id) });
+    },
+    unregister(id: string): void {
+      const resolvedId = resolveLookupId(packageId, id, (entryId) => rootRuntime.services.has(entryId));
+      rootRuntime.services.unregister(resolvedId);
+    },
+    has(id: string): boolean {
+      return rootRuntime.services.has(resolveLookupId(packageId, id, (entryId) => rootRuntime.services.has(entryId)));
+    },
+    get(id: string) {
+      return rootRuntime.services.get(resolveLookupId(packageId, id, (entryId) => rootRuntime.services.has(entryId)));
+    },
+    list() {
+      return rootRuntime.services.list();
+    },
+    getService<T>(id: string): T {
+      const resolvedId = resolveLookupId(packageId, id, (entryId) => rootRuntime.services.has(entryId));
+      return rootRuntime.services.getService<T>(resolvedId);
+    }
+  };
+
+  const dispatchers: DispatcherRegistryLike = {
+    registerDispatcher(definition: DispatcherDefinition): void {
+      const dispatcher = definition.dispatcher as Dispatcher & { id: string; transportId: string };
+      const scopedDispatcherId = scopeId(packageId, definition.id);
+      dispatcher.id = scopedDispatcherId;
+      dispatcher.transportId = scopeId(packageId, dispatcher.transportId);
+      rootRuntime.dispatchers.registerDispatcher({
+        ...definition,
+        id: scopedDispatcherId,
+        dispatcher
+      });
+    },
+    unregister(id: string): void {
+      rootRuntime.dispatchers.unregister(resolveLookupId(packageId, id, (entryId) => rootRuntime.dispatchers.has(entryId)));
+    },
+    has(id: string): boolean {
+      return rootRuntime.dispatchers.has(
+        resolveLookupId(packageId, id, (entryId) => rootRuntime.dispatchers.has(entryId))
+      );
+    },
+    get(id: string) {
+      return rootRuntime.dispatchers.get(resolveLookupId(packageId, id, (entryId) => rootRuntime.dispatchers.has(entryId)));
+    },
+    list() {
+      return rootRuntime.dispatchers.list();
+    }
+  };
+
+  const transports: TransportRegistryLike = {
+    registerTransport(definition: TransportDefinition): void {
+      const transport = definition.transport as Transport & { id: string };
+      const scopedTransportId = scopeId(packageId, definition.id);
+      transport.id = scopedTransportId;
+      rootRuntime.transports.registerTransport({
+        ...definition,
+        id: scopedTransportId,
+        transport
+      });
+    },
+    unregister(id: string): void {
+      rootRuntime.transports.unregister(resolveLookupId(packageId, id, (entryId) => rootRuntime.transports.has(entryId)));
+    },
+    has(id: string): boolean {
+      return rootRuntime.transports.has(resolveLookupId(packageId, id, (entryId) => rootRuntime.transports.has(entryId)));
+    },
+    get(id: string) {
+      return rootRuntime.transports.get(resolveLookupId(packageId, id, (entryId) => rootRuntime.transports.has(entryId)));
+    },
+    list() {
+      return rootRuntime.transports.list();
+    }
+  };
+
+  return {
     ...rootRuntime,
     packageId,
-    registries,
+    commands,
+    contributions,
+    keybindings,
+    services,
+    dispatchers,
+    transports,
     getService<T>(serviceId: string): T {
-      return registries.serviceRegistry.getService<T>(serviceId);
+      return services.getService<T>(serviceId);
     },
     getPackageConfig<T extends Record<string, unknown>>(targetPackageId: string): T {
       return rootRuntime.getPackageConfig<T>(targetPackageId);
@@ -329,7 +277,6 @@ function createScopedRuntime(rootRuntime: AppRuntime, packageId: string): AppRun
       await rootRuntime.resetPackageConfig(targetPackageId);
     }
   };
-  return scopedRuntime;
 }
 
 export class PackageManager {

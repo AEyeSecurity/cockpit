@@ -1,9 +1,7 @@
-import type { AppRuntime } from "../../../../../core/types/module";
-import type { SidebarPanelDefinition } from "../../../../../core/types/ui";
+import type { SidebarContribution } from "../../../../../core/contributions/types";
 
 interface PanelProps {
-  runtime: AppRuntime;
-  panels: SidebarPanelDefinition[];
+  panels: SidebarContribution[];
   activePanelId: string;
   onSelectPanel: (id: string) => void;
   collapsed: boolean;
@@ -12,7 +10,7 @@ interface PanelProps {
   onResizeStart: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
-function panelIcon(panel: SidebarPanelDefinition): string {
+function panelIcon(panel: SidebarContribution): string {
   if (panel.icon) return panel.icon;
   const id = panel.id;
   if (id.includes("connection")) return "🔌";
@@ -43,7 +41,6 @@ function panelTooltip(label: string): string {
 }
 
 export function Panel({
-  runtime,
   panels,
   activePanelId,
   onSelectPanel,
@@ -81,7 +78,7 @@ export function Panel({
       </div>
       {!collapsed ? (
         <aside className="sidebar-panel" style={{ width }}>
-          {activePanel ? activePanel.render(runtime) : "No sidebar panel registered."}
+          {activePanel ? activePanel.render() : "No sidebar panel registered."}
         </aside>
       ) : null}
       {!collapsed ? (

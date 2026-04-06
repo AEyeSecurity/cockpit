@@ -8,6 +8,7 @@ import {
   saveCoreNotificationSettings
 } from "../config/globalNotificationConfig";
 import type { CoreNotificationSettings } from "../types/settings";
+import { ShellCommands } from "../../app/shellCommands";
 
 type SettingsTabId = "global" | `package:${string}`;
 type DraftValue = string | boolean;
@@ -27,6 +28,7 @@ interface SettingsUiState {
 }
 
 const settingsListeners = new Set<() => void>();
+const OPEN_SETTINGS_COMMAND_ID = "core.settings.openModal";
 let settingsUiState: SettingsUiState = {
   activeTab: "global",
   globalConfig: null,
@@ -279,8 +281,8 @@ function SettingsModalHeader({ runtime, close }: { runtime: AppRuntime; close: (
           </button>
         ))}
       </div>
-      <button type="button" onClick={close}>
-        X
+      <button type="button" className="modal-close-btn" onClick={close} aria-label="Cerrar">
+        ⛌
       </button>
     </div>
   );
@@ -624,20 +626,27 @@ function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element 
 }
 
 export function registerCoreSettingsUi(runtime: AppRuntime): void {
-  runtime.registries.modalRegistry.registerModalDialog({
+  runtime.contributions.register({
     id: "modal.settings",
+    slot: "modal",
     title: "Settings",
-    renderHeader: ({ runtime: modalRuntime, close }) => <SettingsModalHeader runtime={modalRuntime} close={close} />,
-    render: ({ runtime: modalRuntime }) => <SettingsModalBody runtime={modalRuntime} />,
-    renderFooter: ({ runtime: modalRuntime }) => <SettingsModalFooter runtime={modalRuntime} />
+    renderHeader: ({ close }) => <SettingsModalHeader runtime={runtime} close={close} />,
+    render: () => <SettingsModalBody runtime={runtime} />,
+    renderFooter: () => <SettingsModalFooter runtime={runtime} />
   });
 
-  runtime.registries.toolbarMenuRegistry.registerToolbarMenu({
-    id: "toolbar.settings",
-    label: "Settings",
-    onSelect: ({ openModal }) => {
+  runtime.commands.register(
+    { id: OPEN_SETTINGS_COMMAND_ID, title: "Open Settings Modal", category: "Settings" },
+    () => {
       resetSettingsUiState();
-      openModal("modal.settings");
+      return runtime.commands.execute(ShellCommands.openModal, "modal.settings");
     }
+  );
+
+  runtime.contributions.register({
+    id: "toolbar.settings",
+    slot: "toolbar",
+    label: "Settings",
+    commandId: OPEN_SETTINGS_COMMAND_ID
   });
 }

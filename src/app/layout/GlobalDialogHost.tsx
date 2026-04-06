@@ -9,7 +9,7 @@ interface GlobalDialogHostProps {
 export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Element | null {
   let dialogService: DialogService | null = null;
   try {
-    dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+    dialogService = runtime.getService<DialogService>(DIALOG_SERVICE_ID);
   } catch {
     dialogService = null;
   }
@@ -57,6 +57,14 @@ export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Elemen
       <div className="global-dialog-card" onClick={(event) => event.stopPropagation()}>
         <header className="global-dialog-header">
           <strong>{activeDialog.title}</strong>
+          <button
+            type="button"
+            className="global-dialog-close-btn"
+            onClick={() => dialogService.dismiss()}
+            aria-label="Cerrar"
+          >
+            ⛌
+          </button>
         </header>
         <div className="global-dialog-body">
           <p className="global-dialog-message">{activeDialog.message}</p>

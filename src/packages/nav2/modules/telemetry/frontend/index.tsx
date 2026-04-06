@@ -16,8 +16,8 @@ function resolveOptionalServices(runtime: ModuleContext): {
   connection: ConnectionService | null;
 } {
   try {
-    const navigation = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-    const connection = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+    const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+    const connection = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
     return { navigation, connection };
   } catch {
     return { navigation: null, connection: null };
@@ -25,7 +25,7 @@ function resolveOptionalServices(runtime: ModuleContext): {
 }
 
 function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<TelemetryService>(SERVICE_ID);
+  const service = runtime.services.getService<TelemetryService>(SERVICE_ID);
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot>(service.getSnapshot());
   const services = resolveOptionalServices(runtime);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
@@ -115,7 +115,7 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
 }
 
 function TelemetryConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<TelemetryService>(SERVICE_ID);
+  const service = runtime.services.getService<TelemetryService>(SERVICE_ID);
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot>(service.getSnapshot());
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -174,27 +174,29 @@ export function createTelemetryModule(): CockpitModule {
     version: "1.2.0",
     enabledByDefault: true,
     register(ctx: ModuleContext): void {
-      const dispatcherDefinition = ctx.registries.dispatcherRegistry.get(DISPATCHER_ID);
+      const dispatcherDefinition = ctx.dispatchers.get(DISPATCHER_ID);
       if (!dispatcherDefinition) return;
 
       const robotDispatcher = dispatcherDefinition.dispatcher as RobotDispatcher;
       const telemetryService = new TelemetryService(robotDispatcher, ctx.eventBus);
-      ctx.registries.serviceRegistry.registerService({
+      ctx.services.registerService({
         id: SERVICE_ID,
         service: telemetryService
       });
 
-      ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
+      ctx.contributions.register({
         id: "sidebar.telemetry",
+        slot: "sidebar",
         label: "Telemetry",
         icon: "📡",
-        render: (runtime) => <TelemetrySidebarPanel runtime={runtime} />
+        render: () => <TelemetrySidebarPanel runtime={ctx} />
       });
 
-      ctx.registries.consoleTabRegistry.registerConsoleTab({
+      ctx.contributions.register({
         id: "console.telemetry",
+        slot: "console",
         label: "Telemetry",
-        render: (runtime) => <TelemetryConsoleTab runtime={runtime} />
+        render: () => <TelemetryConsoleTab runtime={ctx} />
       });
     }
   };

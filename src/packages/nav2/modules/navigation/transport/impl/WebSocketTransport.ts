@@ -11,6 +11,7 @@ export class WebSocketTransport implements Transport {
   constructor(readonly id: string, private readonly urlResolver: (ctx: TransportContext) => string) {}
 
   async connect(ctx: TransportContext): Promise<void> {
+    // eliminar la lógica de usar un URL resolver
     const url = this.urlResolver(ctx);
     this.connectedUrl = url;
     if (typeof WebSocket === "undefined") return;

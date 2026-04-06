@@ -50,7 +50,7 @@ textarea {
   border: 1px solid #4f6a84;
   background: #ffffff;
   color: var(--text);
-  padding: 8px 10px;
+  padding: 4px 8px;
 }
 
 button {
@@ -145,7 +145,6 @@ summary:focus-visible {
   background: #ffffff;
   box-shadow: 0 8px 20px rgba(17, 34, 52, 0.24);
   z-index: 40;
-  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -235,7 +234,7 @@ summary:focus-visible {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-  padding: 12px;
+  padding: 0;
   overflow: auto;
 }
 
@@ -331,7 +330,6 @@ summary:focus-visible {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
 }
 
 .modal-footer button {
@@ -342,6 +340,8 @@ summary:focus-visible {
   border: 1px solid #5d7590;
   color: var(--text);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
 }
 
 .panel-card {
@@ -377,7 +377,6 @@ summary:focus-visible {
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 5px;
 }
 
 .hidden {
@@ -388,6 +387,7 @@ summary:focus-visible {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  padding: 8px 0
 }
 
 .action-grid {
@@ -424,9 +424,11 @@ summary:focus-visible {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   max-height: 260px;
   overflow: auto;
+  background: #2b2424;
+  border: 1px solid var(--line);
+  max-height: none;
 }
 
 .feed-item {
@@ -438,12 +440,15 @@ summary:focus-visible {
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
+  background: #352d2d;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
 }
 
 .feed-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
 }
 
 
@@ -560,13 +565,15 @@ body,
 
 .toolbar-menus {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   flex-wrap: nowrap;
   gap: 2px;
+  margin-left: 14px;
 }
 
 .toolbar-menu {
   position: relative;
+  display: flex;
 }
 
 .toolbar-menu-trigger {
@@ -575,8 +582,10 @@ body,
   background: transparent;
   color: var(--text);
   font-weight: 500;
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: 34px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
   width: auto;
 }
 
@@ -630,6 +639,10 @@ body,
   min-width: 0;
   display: inline-flex;
   align-items: center;
+}
+
+.footer-item-connection-status {
+  align-items: stretch;
 }
 
 .footer-item-right-anchor {
@@ -697,9 +710,14 @@ body,
   border-right: 1px solid var(--line);
   border-radius: 0;
   background: var(--panel);
-  padding: 0 5px 5px;
+  padding: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.sidebar-panel .panel-section {
+  border: 0;
+  border-bottom: 1px solid rgba(198, 184, 187, 0.22);
 }
 
 .splitter-vertical {
@@ -740,6 +758,7 @@ body,
   color: var(--muted);
   min-height: 30px;
   padding: 0 12px;
+  border-bottom: 2px solid transparent;
 }
 
 .workspace-selector button.active {
@@ -752,7 +771,7 @@ body,
   border: 0;
   border-radius: 0;
   background: #2f2828;
-  padding: 10px;
+  padding: 0;
   min-height: 0;
   overflow: auto;
 }
@@ -788,7 +807,6 @@ body,
 
 .console-tabs {
   gap: 0;
-  border-bottom: 1px solid var(--line);
   align-items: center;
 }
 
@@ -799,6 +817,7 @@ body,
   color: var(--muted);
   min-height: 30px;
   padding: 0 10px;
+  border-bottom: 2px solid transparent;
 }
 
 .console-tabs button.active {
@@ -832,7 +851,7 @@ body,
 }
 
 .console-tab-content {
-  padding: 8px;
+  padding: 0;
   background: #262121;
   min-height: 0;
   overflow: auto;
@@ -863,9 +882,14 @@ pre {
   color: var(--text);
 }
 
+.panel-section-title {
+  margin: 0 0 8px;
+  line-height: 1.1;
+}
+
 .collapsible-section {
   border: 0;
-  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   background: transparent;
   padding: 0;
 }
@@ -1016,22 +1040,48 @@ textarea::placeholder {
   background: #241f1f;
 }
 
+.modal-header {
+  padding: 0 0 0 12px;
+  gap: 0;
+  align-items: stretch;
+}
+
 .modal-header button,
-.modal-footer button {
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: #4a4040;
+.modal-footer button,
+.global-dialog-actions button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
+  min-height: 28px;
+  padding: 4px 20px;
+  width: auto;
 }
 
 .modal-header button:hover:not(:disabled),
-.modal-footer button:hover:not(:disabled) {
-  background: #5b4f4f;
+.modal-footer button:hover:not(:disabled),
+.global-dialog-actions button:hover:not(:disabled) {
+  background: #3e3535;
+}
+
+.modal-header .danger-btn,
+.modal-footer .danger-btn,
+.global-dialog-actions .danger-btn {
+  background: #7e2c3f;
+  border: 1px solid #8d3a4d;
+  color: #fbe8ed;
+}
+
+.modal-header .danger-btn:hover:not(:disabled),
+.modal-footer .danger-btn:hover:not(:disabled),
+.global-dialog-actions .danger-btn:hover:not(:disabled) {
+  background: #8f3a4f;
 }
 
 .modal-footer {
   justify-content: flex-start;
+  align-items: stretch;
 }
 
 .modal-card.modal-card-modal-settings {
@@ -1044,21 +1094,37 @@ textarea::placeholder {
   width: 100%;
   min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
 }
 
 .settings-header-tabs {
   flex: 1;
   min-width: 0;
+  height: 100%;
   padding: 0;
-  gap: 6px;
-  background: transparent;
+  gap: 0;
+  border-bottom: 0;
+  align-items: stretch;
 }
 
 .settings-header-tabs button {
   width: auto;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  min-height: 100%;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.modal-footer button {
+  min-height: 100%;
+  padding: 8px 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .settings-modal-layout {
@@ -1120,7 +1186,6 @@ textarea::placeholder {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 
 .settings-boolean-toggle {
@@ -1154,13 +1219,34 @@ textarea::placeholder {
 .global-dialog-header {
   border-bottom: 1px solid var(--line);
   background: #241f1f;
-  padding: 8px 10px;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 0;
+  padding: 0;
+  min-height: 40px;
+}
+
+.global-dialog-header strong {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 44px 0 10px;
+  pointer-events: none;
 }
 
 .global-dialog-body {
   display: grid;
   gap: 10px;
   padding: 10px;
+  min-height: 120px;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
 }
 
 .global-dialog-message {
@@ -1184,20 +1270,32 @@ textarea::placeholder {
   padding: 8px 10px;
 }
 
-
-
-/* Ensure specific widgets also follow Monokai defaults */
-.feed-list {
-  background: #2b2424;
-  border: 1px solid var(--line);
-  padding: 8px;
-  max-height: none;
+.modal-card button {
+  border-radius: 0;
 }
 
-.feed-item {
-  background: #352d2d;
-  border: 1px solid var(--line);
+.modal-close-btn,
+.global-dialog-close-btn {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
+  width: 40px;
+  min-width: 40px;
+  min-height: 100%;
+  height: 100%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-weight: 500;
+}
+
+.modal-close-btn:hover:not(:disabled),
+.global-dialog-close-btn:hover:not(:disabled) {
+  background: #3e3535;
 }
 
 .console-tab-content .feed-list {

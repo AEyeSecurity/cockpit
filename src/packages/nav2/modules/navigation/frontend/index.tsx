@@ -11,6 +11,8 @@ import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInf
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
+import { NavigationCommands } from "../commands";
+import { ShellCommands } from "../../../../../app/shellCommands";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.robot";
@@ -111,7 +113,7 @@ interface TelemetryServiceLike {
 
 function getTelemetryService(runtime: ModuleContext): TelemetryServiceLike | null {
   try {
-    return runtime.registries.serviceRegistry.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
+    return runtime.services.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
   } catch {
     return null;
   }
@@ -119,7 +121,7 @@ function getTelemetryService(runtime: ModuleContext): TelemetryServiceLike | nul
 
 function getMapService(runtime: ModuleContext): MapService | null {
   try {
-    return runtime.registries.serviceRegistry.getService<MapService>(MAP_SERVICE_ID);
+    return runtime.services.getService<MapService>(MAP_SERVICE_ID);
   } catch {
     return null;
   }
@@ -144,7 +146,7 @@ function formatInfoTimestamp(value: unknown): string {
 }
 
 function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  const service = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const [state, setState] = useState(service.getState());
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
@@ -199,7 +201,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 }
 
 function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  const service = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const [state, setState] = useState(service.getState());
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
@@ -212,10 +214,10 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 }
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   let connectionService: ConnectionService | null = null;
   try {
-    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   } catch {
     connectionService = null;
   }
@@ -416,7 +418,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 }
 
 function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const [state, setState] = useState<NavigationState>(service.getState());
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
@@ -453,7 +455,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
 
 function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Element | null {
   const mapService = getMapService(runtime);
-  const dialogService = runtime.registries.serviceRegistry.getService<DialogService>(DIALOG_SERVICE_ID);
+  const dialogService = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const [state, setState] = useState<MapWorkspaceState | null>(mapService ? mapService.getState() : null);
 
   useEffect(() => {
@@ -586,10 +588,10 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
 }
 
 function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   let connectionService: ConnectionService | null = null;
   try {
-    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   } catch {
     connectionService = null;
   }
@@ -675,7 +677,7 @@ function isCameraDisabledPresetError(text: string): boolean {
 }
 
 function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const [navigation, setNavigation] = useState<NavigationState>(service.getState());
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(service.getState().lastSnapshot);
   const [loading, setLoading] = useState(false);
@@ -812,7 +814,7 @@ function SnapshotModalFooter({ runtime }: { runtime: ModuleContext }): JSX.Eleme
 }
 
 function InfoModalFooter({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const sensorInfoService = runtime.registries.serviceRegistry.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  const sensorInfoService = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
   const [state, setState] = useState(sensorInfoService.getState());
 
   useEffect(() => sensorInfoService.subscribe((next) => setState(next)), [sensorInfoService]);
@@ -844,10 +846,10 @@ function InfoModalFooter({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
 function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const telemetryService = getTelemetryService(runtime);
-  const sensorInfoService = runtime.registries.serviceRegistry.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  const sensorInfoService = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
   let connectionService: ConnectionService | null = null;
   try {
-    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   } catch {
     connectionService = null;
   }
@@ -1154,7 +1156,7 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
 function registerTransport(ctx: ModuleContext): void {
   const transport = new WebSocketTransport(TRANSPORT_ID, ({ env }) => env.wsUrl);
-  ctx.registries.transportRegistry.registerTransport({
+  ctx.transports.registerTransport({
     id: transport.id,
     transport
   });
@@ -1162,7 +1164,7 @@ function registerTransport(ctx: ModuleContext): void {
 
 function registerDispatcher(ctx: ModuleContext): RobotDispatcher {
   const dispatcher = new RobotDispatcher(DISPATCHER_ID, TRANSPORT_ID);
-  ctx.registries.dispatcherRegistry.registerDispatcher({
+  ctx.dispatchers.registerDispatcher({
     id: dispatcher.id,
     dispatcher
   });
@@ -1181,7 +1183,7 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     angularSpeed: parseNumberInRange(config.manual_angular_speed_default, 0.4, limits.angularMin, limits.angularMax),
     loopIntervalMs: parseLoopIntervalMs(config.manual_loop_interval_ms, 50)
   });
-  ctx.registries.serviceRegistry.registerService({
+  ctx.services.registerService({
     id: NAVIGATION_SERVICE_ID,
     service: navigationService
   });
@@ -1193,7 +1195,7 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     ctx.eventBus,
     buildConnectionPresetDefaults(ctx, config)
   );
-  ctx.registries.serviceRegistry.registerService({
+  ctx.services.registerService({
     id: CONNECTION_SERVICE_ID,
     service: connectionService
   });
@@ -1215,7 +1217,7 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
   });
 
   const sensorInfoService = new SensorInfoService(dispatcher);
-  ctx.registries.serviceRegistry.registerService({
+  ctx.services.registerService({
     id: SENSOR_INFO_SERVICE_ID,
     service: sensorInfoService
   });
@@ -1224,61 +1226,231 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
 }
 
 function registerSidebarPanels(ctx: ModuleContext): void {
-  ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
+  ctx.contributions.register({
     id: "sidebar.connection",
+    slot: "sidebar",
     label: "Connection",
     icon: "🔌",
-    render: (runtime) => <ConnectionSidebarPanel runtime={runtime} />
+    render: () => <ConnectionSidebarPanel runtime={ctx} />
   });
-  ctx.registries.sidebarPanelRegistry.registerSidebarPanel({
+  ctx.contributions.register({
     id: "sidebar.navigation",
+    slot: "sidebar",
     label: "Navigation",
     icon: "🧭",
-    render: (runtime) => <NavigationSidebarPanel runtime={runtime} />
+    render: () => <NavigationSidebarPanel runtime={ctx} />
   });
 }
 
 function registerModals(ctx: ModuleContext): void {
-  ctx.registries.modalRegistry.registerModalDialog({
+  ctx.contributions.register({
     id: "modal.snapshot",
+    slot: "modal",
     title: "Navigation Snapshot",
-    render: ({ runtime }) => <SnapshotModal runtime={runtime} />,
-    renderFooter: ({ runtime }) => <SnapshotModalFooter runtime={runtime} />
+    render: () => <SnapshotModal runtime={ctx} />,
+    renderFooter: () => <SnapshotModalFooter runtime={ctx} />
   });
-  ctx.registries.modalRegistry.registerModalDialog({
+  ctx.contributions.register({
     id: "modal.info",
+    slot: "modal",
     title: "Info",
-    render: ({ runtime }) => <InfoModal runtime={runtime} />,
-    renderFooter: ({ runtime }) => <InfoModalFooter runtime={runtime} />
+    render: () => <InfoModal runtime={ctx} />,
+    renderFooter: () => <InfoModalFooter runtime={ctx} />
   });
 }
 
 function registerFooterItems(ctx: ModuleContext): void {
-  ctx.registries.footerItemRegistry.registerFooterItem({
+  ctx.contributions.register({
     id: "footer.connection-status",
+    slot: "footer",
     beforeId: "core.footer.metrics",
-    render: (runtime) => <ConnectionStatusFooterItem runtime={runtime} />
+    render: () => <ConnectionStatusFooterItem runtime={ctx} />
   });
 }
 
+function registerCommands(ctx: ModuleContext, navigationService: NavigationService): void {
+  ctx.commands.register(
+    { id: NavigationCommands.openSnapshotModal, title: "Open Snapshot Modal", category: "Navigation" },
+    () => {
+      void ctx.commands.execute(ShellCommands.openModal, "modal.snapshot");
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.captureSnapshot, title: "Capture Snapshot", category: "Navigation" },
+    () => {
+      void ctx.commands.execute(ShellCommands.openModal, "modal.snapshot");
+      navigationService.requestSnapshot().then(() => {
+        ctx.eventBus.emit("console.event", {
+          level: "info",
+          text: "Snapshot captured (hotkey)",
+          timestamp: Date.now()
+        });
+      }).catch((error: unknown) => {
+        const message = String(error);
+        if (message.toLowerCase().includes("camera disabled in current preset")) {
+          ctx.eventBus.emit("console.event", {
+            level: "info",
+            text: "Snapshot no disponible para el preset de conexión actual.",
+            timestamp: Date.now()
+          });
+          return;
+        }
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: `Snapshot capture failed: ${message}`,
+          timestamp: Date.now()
+        });
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.openInfoModal, title: "Open Info Modal", category: "Navigation" },
+    () => {
+      void ctx.commands.execute(ShellCommands.openModal, "modal.info");
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.swapWorkspace, title: "Swap Workspace", category: "Navigation" },
+    () => {
+      ctx.eventBus.emit(NAV_EVENTS.swapWorkspaceRequest, {});
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.toggleGoalMode, title: "Toggle Goal Mode", category: "Navigation" },
+    () => {
+      const enabled = navigationService.toggleGoalMode();
+      ctx.eventBus.emit("console.event", {
+        level: "info",
+        text: enabled ? "Goal mode enabled (hotkey)" : "Goal mode disabled (hotkey)",
+        timestamp: Date.now()
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.toggleManualMode, title: "Toggle Manual Mode", category: "Navigation" },
+    () => {
+      const current = navigationService.getState().manualMode;
+      void navigationService.setManualMode(!current).then(() => {
+        ctx.eventBus.emit("console.event", {
+          level: "info",
+          text: !current ? "Manual mode enabled (hotkey)" : "Manual mode disabled (hotkey)",
+          timestamp: Date.now()
+        });
+      }).catch((error: unknown) => {
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: `Manual mode hotkey failed: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.toggleCameraZoom, title: "Toggle Camera Zoom", category: "Navigation" },
+    () => { void navigationService.toggleCameraZoom(); }
+  );
+
+  const manualKeys: Array<[string, string, "w" | "a" | "s" | "d", boolean]> = [
+    [NavigationCommands.manualKeyWDown, "Manual W Down", "w", true],
+    [NavigationCommands.manualKeyWUp,   "Manual W Up",   "w", false],
+    [NavigationCommands.manualKeyADown, "Manual A Down", "a", true],
+    [NavigationCommands.manualKeyAUp,   "Manual A Up",   "a", false],
+    [NavigationCommands.manualKeySDown, "Manual S Down", "s", true],
+    [NavigationCommands.manualKeySUp,   "Manual S Up",   "s", false],
+    [NavigationCommands.manualKeyDDown, "Manual D Down", "d", true],
+    [NavigationCommands.manualKeyDUp,   "Manual D Up",   "d", false],
+  ];
+  for (const [id, title, key, pressed] of manualKeys) {
+    ctx.commands.register({ id, title, category: "Navigation" }, () => {
+      navigationService.setManualKeyState(key, pressed);
+    });
+  }
+
+  ctx.commands.register(
+    { id: NavigationCommands.manualBrakeDown, title: "Manual Brake Down", category: "Navigation" },
+    () => { navigationService.setManualBrakeHeld(true); }
+  );
+  ctx.commands.register(
+    { id: NavigationCommands.manualBrakeUp, title: "Manual Brake Up", category: "Navigation" },
+    () => { navigationService.setManualBrakeHeld(false); }
+  );
+
+  const cameraCommands: Array<[string, string, number]> = [
+    [NavigationCommands.panCameraUp,    "Pan Camera Up",    0],
+    [NavigationCommands.panCameraDown,  "Pan Camera Down",  180],
+    [NavigationCommands.panCameraLeft,  "Pan Camera Left",  90],
+    [NavigationCommands.panCameraRight, "Pan Camera Right", -90],
+  ];
+  for (const [id, title, angle] of cameraCommands) {
+    ctx.commands.register({ id, title, category: "Navigation" }, () => {
+      void navigationService.panCamera(angle);
+    });
+  }
+
+  ctx.commands.register(
+    { id: NavigationCommands.dismissEscape, title: "Dismiss (Escape)", category: "Navigation" },
+    () => {
+      if (navigationService.getState().goalMode) {
+        navigationService.toggleGoalMode();
+        ctx.eventBus.emit("console.event", {
+          level: "info",
+          text: "Goal mode disabled (Esc)",
+          timestamp: Date.now()
+        });
+      }
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.downloadSnapshot, title: "Download Snapshot", category: "Navigation" },
+    () => { ctx.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {}); }
+  );
+
+  // Keybindings
+  ctx.keybindings.register({ key: "q", commandId: NavigationCommands.captureSnapshot, source: "default" });
+  ctx.keybindings.register({ key: "i", commandId: NavigationCommands.openInfoModal, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "e", commandId: NavigationCommands.swapWorkspace, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleGoalMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "m", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "-", commandId: NavigationCommands.toggleCameraZoom, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "w", commandId: NavigationCommands.manualKeyWDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "a", commandId: NavigationCommands.manualKeyADown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "s", commandId: NavigationCommands.manualKeySDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "d", commandId: NavigationCommands.manualKeyDDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "space", commandId: NavigationCommands.manualBrakeDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "w:up", commandId: NavigationCommands.manualKeyWUp, source: "default" });
+  ctx.keybindings.register({ key: "a:up", commandId: NavigationCommands.manualKeyAUp, source: "default" });
+  ctx.keybindings.register({ key: "s:up", commandId: NavigationCommands.manualKeySUp, source: "default" });
+  ctx.keybindings.register({ key: "d:up", commandId: NavigationCommands.manualKeyDUp, source: "default" });
+  ctx.keybindings.register({ key: "space:up", commandId: NavigationCommands.manualBrakeUp, source: "default" });
+  ctx.keybindings.register({ key: "up", commandId: NavigationCommands.panCameraUp, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "down", commandId: NavigationCommands.panCameraDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "left", commandId: NavigationCommands.panCameraLeft, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "right", commandId: NavigationCommands.panCameraRight, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "escape", commandId: NavigationCommands.dismissEscape, source: "default", when: "!modalOpen", weight: -1 });
+}
+
 function registerToolbarMenu(ctx: ModuleContext): void {
-  ctx.registries.toolbarMenuRegistry.registerToolbarMenu({
+  ctx.contributions.register({
     id: "toolbar.navigation",
+    slot: "toolbar",
     label: "Navigation",
     items: [
       {
         id: "navigation.open-snapshot-modal",
         label: "Captura",
-        onSelect: ({ openModal }) => {
-          openModal("modal.snapshot");
-        }
+        commandId: NavigationCommands.openSnapshotModal
       },
       {
         id: "navigation.open-info-modal",
         label: "Información",
-        onSelect: ({ openModal }) => {
-          openModal("modal.info");
-        }
+        commandId: NavigationCommands.openInfoModal
       }
     ]
   });
@@ -1292,7 +1464,8 @@ export function createNavigationModule(): CockpitModule {
     register(ctx: ModuleContext): void {
       registerTransport(ctx);
       const dispatcher = registerDispatcher(ctx);
-      registerServices(ctx, dispatcher);
+      const navigationService = registerServices(ctx, dispatcher);
+      registerCommands(ctx, navigationService);
       registerSidebarPanels(ctx);
       registerModals(ctx);
       registerFooterItems(ctx);

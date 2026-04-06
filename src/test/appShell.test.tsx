@@ -1,49 +1,68 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AppShell } from "../app/AppShell";
-import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
-import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
+import { createCommandRegistry } from "../core/commands/commandRegistry";
+import { createContributionRegistry } from "../core/contributions/contributionRegistry";
 import { createContainer } from "../core/di/container";
 import { createEventBus } from "../core/events/eventBus";
-import { createRegistries } from "../core/registries/createRegistries";
+import { createKeybindingRegistry } from "../core/keybindings/keybindingRegistry";
+import { DispatcherRegistry } from "../core/registries/dispatcherRegistry";
+import { ServiceRegistry } from "../core/registries/serviceRegistry";
+import { TransportRegistry } from "../core/registries/transportRegistry";
 import type { AppRuntime } from "../core/types/module";
+import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
+import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
 
 function createRuntime(): AppRuntime {
-  const registries = createRegistries();
-  registries.sidebarPanelRegistry.registerSidebarPanel({
+  const commands = createCommandRegistry();
+  const contributions = createContributionRegistry();
+  const transportManager = new TransportManager();
+  const router = new DispatchRouter(transportManager);
+  const services = new ServiceRegistry();
+  const dispatchers = new DispatcherRegistry();
+  const transports = new TransportRegistry();
+
+  commands.register({ id: "test.shell.openModal", title: "Open Test Modal", category: "Test" }, () =>
+    commands.execute("core.shell.openModal", "modal.test")
+  );
+
+  contributions.register({
     id: "sidebar.one",
+    slot: "sidebar",
     label: "One",
     render: () => <div>Sidebar One</div>
   });
-  registries.workspaceViewRegistry.registerWorkspaceView({
+  contributions.register({
     id: "workspace.one",
+    slot: "workspace",
     label: "Workspace One",
     render: () => <div>Workspace One</div>
   });
-  registries.consoleTabRegistry.registerConsoleTab({
+  contributions.register({
     id: "console.one",
+    slot: "console",
     label: "Console One",
     render: () => <div>Console One</div>
   });
-  registries.modalRegistry.registerModalDialog({
+  contributions.register({
     id: "modal.test",
+    slot: "modal",
     title: "Test Modal",
     render: () => <div>Modal Body</div>
   });
-  registries.toolbarMenuRegistry.registerToolbarMenu({
+  contributions.register({
     id: "toolbar.test",
+    slot: "toolbar",
     label: "Tools",
     items: [
       {
         id: "open-modal",
         label: "Open modal",
-        onSelect: ({ openModal }) => openModal("modal.test")
+        commandId: "test.shell.openModal"
       }
     ]
   });
 
-  const transportManager = new TransportManager();
-  const router = new DispatchRouter(transportManager);
   return {
     packageId: "core",
     env: {
@@ -59,7 +78,12 @@ function createRuntime(): AppRuntime {
     eventBus: createEventBus(),
     transportManager,
     router,
-    registries,
+    commands,
+    contributions,
+    keybindings: createKeybindingRegistry(),
+    services,
+    dispatchers,
+    transports,
     packages: [],
     getService: () => undefined as never,
     getPackageConfig: <T extends Record<string, unknown>>() => ({}) as T,
@@ -86,10 +110,14 @@ describe("AppShell", () => {
 
   it("opens modal directly from toolbar button without dropdown", async () => {
     const runtime = createRuntime();
-    runtime.registries.toolbarMenuRegistry.registerToolbarMenu({
+    runtime.commands.register({ id: "test.settings.openModal", title: "Open Settings Modal", category: "Test" }, () =>
+      runtime.commands.execute("core.shell.openModal", "modal.test")
+    );
+    runtime.contributions.register({
       id: "toolbar.settings",
+      slot: "toolbar",
       label: "Settings",
-      onSelect: ({ openModal }) => openModal("modal.test")
+      commandId: "test.settings.openModal"
     });
 
     render(<AppShell runtime={runtime} />);

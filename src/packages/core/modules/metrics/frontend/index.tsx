@@ -11,7 +11,7 @@ function formatBytes(bytes: number): string {
 }
 
 function MetricsFooterItem({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.registries.serviceRegistry.getService<MetricsService>(METRICS_SERVICE_ID);
+  const service = runtime.services.getService<MetricsService>(METRICS_SERVICE_ID);
   const [state, setState] = useState<MetricsState>(service.getState());
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
@@ -32,14 +32,15 @@ export function createMetricsModule(): CockpitModule {
     enabledByDefault: true,
     register(ctx: ModuleContext): void {
       const metricsService = new MetricsService(ctx.transportManager);
-      ctx.registries.serviceRegistry.registerService({
+      ctx.services.registerService({
         id: METRICS_SERVICE_ID,
         service: metricsService
       });
 
-      ctx.registries.footerItemRegistry.registerFooterItem({
+      ctx.contributions.register({
         id: "footer.metrics",
-        render: (runtime) => <MetricsFooterItem runtime={runtime} />
+        slot: "footer",
+        render: () => <MetricsFooterItem runtime={ctx} />
       });
     }
   };

@@ -831,22 +831,22 @@ function LeafletMapCanvas({
 
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
-  const mapService = runtime.registries.serviceRegistry.getService<MapService>(SERVICE_ID);
+  const mapService = runtime.services.getService<MapService>(SERVICE_ID);
   let navigationService: NavigationService | null = null;
   try {
-    navigationService = runtime.registries.serviceRegistry.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+    navigationService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   } catch {
     navigationService = null;
   }
   let connectionService: ConnectionService | null = null;
   try {
-    connectionService = runtime.registries.serviceRegistry.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   } catch {
     connectionService = null;
   }
   let telemetryService: TelemetryServiceLike | null = null;
   try {
-    telemetryService = runtime.registries.serviceRegistry.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
+    telemetryService = runtime.services.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
   } catch {
     telemetryService = null;
   }
@@ -1364,21 +1364,22 @@ export function createMapModule(): CockpitModule {
     enabledByDefault: true,
     register(ctx: ModuleContext): void {
       const dispatcher = new MapDispatcher(DISPATCHER_ID, TRANSPORT_ID);
-      ctx.registries.dispatcherRegistry.registerDispatcher({
+      ctx.dispatchers.registerDispatcher({
         id: dispatcher.id,
         dispatcher
       });
 
       const service = new MapService(dispatcher);
-      ctx.registries.serviceRegistry.registerService({
+      ctx.services.registerService({
         id: SERVICE_ID,
         service
       });
 
-      ctx.registries.workspaceViewRegistry.registerWorkspaceView({
+      ctx.contributions.register({
         id: "workspace.map",
+        slot: "workspace",
         label: "Map",
-        render: (runtime) => <MapWorkspaceView runtime={runtime} />
+        render: () => <MapWorkspaceView runtime={ctx} />
       });
     }
   };

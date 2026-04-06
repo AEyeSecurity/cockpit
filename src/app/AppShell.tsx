@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ToolbarMenu, Panel, WorkspacePanel, ConsolePanel, Footer } from "../packages/core";
+import type { KeybindingContext } from "../core/keybindings/types";
+import { useSlot } from "../core/contributions/useSlot";
 import { GlobalDialogHost } from "./layout/GlobalDialogHost";
+import { KeybindingHost } from "./layout/KeybindingHost";
 import { ModalHost } from "./layout/ModalHost";
+import { registerShellCommands } from "./shellCommands";
 import type { AppRuntime } from "../core/types/module";
-import { NAV_EVENTS } from "../core/events/topics";
 import { DIALOG_SERVICE_ID, type DialogService } from "../packages/core/modules/runtime/service/impl/DialogService";
 import { SYSTEM_NOTIFICATION_SERVICE_ID, type SystemNotificationService } from "../packages/core/modules/runtime/service/impl/SystemNotificationService";
 
@@ -14,17 +17,6 @@ interface AppShellProps {
 interface ConnectionServiceLike {
   getState(): { connected: boolean; lastError: string };
   subscribe(listener: (state: { connected: boolean; lastError: string }) => void): () => void;
-}
-
-interface NavigationServiceLike {
-  getState(): { goalMode: boolean; manualMode: boolean };
-  toggleGoalMode(): boolean;
-  requestSnapshot(): Promise<unknown>;
-  setManualMode(enabled: boolean): Promise<unknown>;
-  toggleCameraZoom(): Promise<unknown>;
-  setManualKeyState(key: "w" | "a" | "s" | "d", pressed: boolean): void;
-  setManualBrakeHeld(pressed: boolean): void;
-  panCamera(angleDeg: number): Promise<unknown>;
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -46,19 +38,15 @@ function isDisconnectedErrorText(text: string): boolean {
   );
 }
 
-function isCameraDisabledPresetError(text: string): boolean {
-  return text.toLowerCase().includes("camera disabled in current preset");
-}
-
 const CONNECTION_SERVICE_ID = "service.connection";
 
 export function AppShell({ runtime }: AppShellProps): JSX.Element {
-  const toolbarMenus = runtime.registries.toolbarMenuRegistry.list();
-  const sidebarPanels = runtime.registries.sidebarPanelRegistry.list();
-  const workspaceViews = runtime.registries.workspaceViewRegistry.list();
-  const consoleTabs = runtime.registries.consoleTabRegistry.list();
-  const modalDialogs = runtime.registries.modalRegistry.list();
-  const footerItems = runtime.registries.footerItemRegistry.list();
+  const toolbarMenus = useSlot(runtime.contributions, "toolbar");
+  const sidebarPanels = useSlot(runtime.contributions, "sidebar");
+  const workspaceViews = useSlot(runtime.contributions, "workspace");
+  const consoleTabs = useSlot(runtime.contributions, "console");
+  const modalDialogs = useSlot(runtime.contributions, "modal");
+  const footerItems = useSlot(runtime.contributions, "footer");
 
   const [activeSidebarId, setActiveSidebarId] = useState<string>(sidebarPanels[0]?.id ?? "");
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(workspaceViews[0]?.id ?? "");
@@ -75,11 +63,25 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     const namespaced = modalDialogs.find((dialog) => dialog.id.endsWith(suffix));
     return namespaced?.id ?? modalId;
   };
-  const snapshotModalId = resolveModalId("modal.snapshot");
-  const infoModalId = resolveModalId("modal.info");
-  const openModal = (modalId: string): void => {
-    setActiveModalId(resolveModalId(modalId));
-  };
+
+  useEffect(() => {
+    const disposables = registerShellCommands(runtime, {
+      toggleSidebar: () => setSidebarCollapsed((prev) => !prev),
+      toggleConsole: () => setConsoleCollapsed((prev) => !prev),
+      openModal: (modalId: string) => setActiveModalId(resolveModalId(modalId)),
+      closeModal: () => setActiveModalId(null),
+      getActiveModalId: () => activeModalId
+    });
+    return () => disposables.forEach((d) => d.dispose());
+  }, [runtime, activeModalId, modalDialogs]);
+
+  const keybindingContext = useMemo<KeybindingContext>(
+    () => ({
+      modalOpen: activeModalId !== null,
+      editing: false
+    }),
+    [activeModalId]
+  );
 
   useEffect(() => {
     if (activeSidebarId && sidebarPanels.some((panel) => panel.id === activeSidebarId)) return;
@@ -182,18 +184,6 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isEditingTarget(event.target)) return;
 
-      const withCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
-      if (withCtrl && event.code === "KeyJ") {
-        setConsoleCollapsed((prev) => !prev);
-        event.preventDefault();
-        return;
-      }
-      if (withCtrl && event.code === "KeyB") {
-        setSidebarCollapsed((prev) => !prev);
-        event.preventDefault();
-        return;
-      }
-
       let dialogService: DialogService | null = null;
       try {
         dialogService = runtime.getService<DialogService>(DIALOG_SERVICE_ID);
@@ -207,193 +197,13 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
         }
         return;
       }
-
-      let navigationService: NavigationServiceLike | null = null;
-      try {
-        navigationService = runtime.getService<NavigationServiceLike>("service.navigation");
-      } catch {
-        navigationService = null;
-      }
-
-      if (event.key === "Escape") {
-        if (activeModalId) {
-          if (event.shiftKey && activeModalId === snapshotModalId) {
-            runtime.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {});
-          }
-          setActiveModalId(null);
-          event.preventDefault();
-          return;
-        }
-        if (navigationService?.getState().goalMode) {
-          navigationService.toggleGoalMode();
-          runtime.eventBus.emit("console.event", {
-            level: "info",
-            text: "Goal mode disabled (Esc)",
-            timestamp: Date.now()
-          });
-          event.preventDefault();
-          return;
-        }
-      }
-
-      if (event.code === "KeyQ") {
-        openModal(snapshotModalId);
-        if (navigationService) {
-          void navigationService
-            .requestSnapshot()
-            .then(() => {
-              runtime.eventBus.emit("console.event", {
-                level: "info",
-                text: "Snapshot captured (hotkey)",
-                timestamp: Date.now()
-              });
-            })
-            .catch((error) => {
-              const message = String(error);
-              if (isCameraDisabledPresetError(message)) {
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: "Snapshot no disponible para el preset de conexión actual.",
-                  timestamp: Date.now()
-                });
-                return;
-              }
-              runtime.eventBus.emit("console.event", {
-                level: "error",
-                text: `Snapshot capture failed: ${message}`,
-                timestamp: Date.now()
-              });
-            });
-        } else {
-          runtime.eventBus.emit(NAV_EVENTS.snapshotCaptureRequest, {});
-        }
-        event.preventDefault();
-        return;
-      }
-
-      if (activeModalId) return;
-
-      if (event.code === "KeyI" && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        openModal(infoModalId);
-        event.preventDefault();
-        return;
-      }
-
-      if (event.code === "KeyE") {
-        runtime.eventBus.emit(NAV_EVENTS.swapWorkspaceRequest, {});
-        event.preventDefault();
-        return;
-      }
-
-      if (event.code === "KeyF" && navigationService) {
-        const enabled = navigationService.toggleGoalMode();
-        runtime.eventBus.emit("console.event", {
-          level: "info",
-          text: enabled ? "Goal mode enabled (hotkey)" : "Goal mode disabled (hotkey)",
-          timestamp: Date.now()
-        });
-        event.preventDefault();
-        return;
-      }
-
-      if (event.code === "KeyM" && navigationService) {
-        const current = navigationService.getState().manualMode;
-        void navigationService
-          .setManualMode(!current)
-          .then(() => {
-            runtime.eventBus.emit("console.event", {
-              level: "info",
-              text: !current ? "Manual mode enabled (hotkey)" : "Manual mode disabled (hotkey)",
-              timestamp: Date.now()
-            });
-          })
-          .catch((error) => {
-            runtime.eventBus.emit("console.event", {
-              level: "error",
-              text: `Manual mode hotkey failed: ${String(error)}`,
-              timestamp: Date.now()
-            });
-          });
-        event.preventDefault();
-      }
-
-      if ((event.code === "Minus" || event.code === "NumpadSubtract") && navigationService) {
-        void navigationService.toggleCameraZoom();
-        event.preventDefault();
-        return;
-      }
-
-      if (navigationService) {
-        const manualKeyByCode: Record<string, "w" | "a" | "s" | "d"> = {
-          KeyW: "w",
-          KeyA: "a",
-          KeyS: "s",
-          KeyD: "d"
-        };
-        const manualKey = manualKeyByCode[event.code];
-        if (manualKey) {
-          navigationService.setManualKeyState(manualKey, true);
-          event.preventDefault();
-          return;
-        }
-        if (event.code === "Space") {
-          navigationService.setManualBrakeHeld(true);
-          event.preventDefault();
-          return;
-        }
-      }
-
-      if (navigationService) {
-        const cameraArrowByCode: Record<string, number> = {
-          ArrowUp: 0,
-          ArrowDown: 180,
-          ArrowLeft: 90,
-          ArrowRight: -90
-        };
-        const angle = cameraArrowByCode[event.code];
-        if (typeof angle === "number") {
-          void navigationService.panCamera(angle);
-          event.preventDefault();
-          return;
-        }
-      }
-    };
-
-    const onKeyUp = (event: KeyboardEvent): void => {
-      if (isEditingTarget(event.target)) return;
-      let navigationService: NavigationServiceLike | null = null;
-      try {
-        navigationService = runtime.getService<NavigationServiceLike>("service.navigation");
-      } catch {
-        navigationService = null;
-      }
-      if (!navigationService) return;
-
-      const manualKeyByCode: Record<string, "w" | "a" | "s" | "d"> = {
-        KeyW: "w",
-        KeyA: "a",
-        KeyS: "s",
-        KeyD: "d"
-      };
-      const manualKey = manualKeyByCode[event.code];
-      if (manualKey) {
-        navigationService.setManualKeyState(manualKey, false);
-        event.preventDefault();
-        return;
-      }
-      if (event.code === "Space") {
-        navigationService.setManualBrakeHeld(false);
-        event.preventDefault();
-      }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeModalId, runtime, snapshotModalId, infoModalId]);
+  }, [runtime]);
 
   const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>): void => {
     if (sidebarCollapsed) return;
@@ -443,7 +253,8 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
   return (
     <div className="shell">
-      <ToolbarMenu runtime={runtime} menus={toolbarMenus} openModal={openModal} />
+      <KeybindingHost runtime={runtime} context={keybindingContext} />
+      <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
       <div
         className="shell-body"
         style={{
@@ -451,7 +262,6 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
         }}
       >
         <Panel
-          runtime={runtime}
           panels={sidebarPanels}
           activePanelId={activeSidebarId}
           onSelectPanel={(id) => {
@@ -467,12 +277,7 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
           width={sidebarWidth}
           onResizeStart={startSidebarResize}
         />
-        <WorkspacePanel
-          runtime={runtime}
-          views={workspaceViews}
-          activeViewId={activeWorkspaceId}
-          onSelectView={setActiveWorkspaceId}
-        >
+        <WorkspacePanel views={workspaceViews} activeViewId={activeWorkspaceId} onSelectView={setActiveWorkspaceId}>
           <div
             className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
             onMouseDown={startConsoleResize}
@@ -480,7 +285,6 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
             aria-orientation="horizontal"
           />
           <ConsolePanel
-            runtime={runtime}
             tabs={consoleTabs}
             activeTabId={activeConsoleId}
             onSelectTab={setActiveConsoleId}
@@ -489,10 +293,9 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
           />
         </WorkspacePanel>
       </div>
-      <ModalHost runtime={runtime} dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
+      <ModalHost dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
       <GlobalDialogHost runtime={runtime} />
       <Footer
-        runtime={runtime}
         items={footerItems}
         consoleCollapsed={consoleCollapsed}
         onToggleConsoleCollapse={() => setConsoleCollapsed((prev) => !prev)}

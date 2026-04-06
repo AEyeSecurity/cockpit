@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
+import { ShellCommands } from "../../../../../app/shellCommands";
 import { MissionDispatcher } from "../dispatcher/impl/MissionDispatcher";
 import { MissionService } from "../service/impl/MissionService";
 import type { RosbagStatus } from "../dispatcher/impl/MissionDispatcher";
@@ -9,9 +10,10 @@ import { RosBridgeTransport } from "../transport/impl/RosBridgeTransport";
 const TRANSPORT_ID = "transport.rosbridge";
 const DISPATCHER_ID = "dispatcher.mission";
 const SERVICE_ID = "service.mission";
+const OPEN_RECORD_MODAL_COMMAND_ID = "nav2.debug.openRecordModal";
 
 function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const missionService = runtime.registries.serviceRegistry.getService<MissionService>(SERVICE_ID);
+  const missionService = runtime.services.getService<MissionService>(SERVICE_ID);
   const [profile, setProfile] = useState("core");
   const [status, setStatus] = useState<RosbagStatus>({
     active: false,
@@ -112,39 +114,44 @@ export function createDebugModule(): CockpitModule {
     enabledByDefault: true,
     register(ctx: ModuleContext): void {
       const transport = new RosBridgeTransport(TRANSPORT_ID, ({ env }) => env.rosbridgeUrl);
-      ctx.registries.transportRegistry.registerTransport({
+      ctx.transports.registerTransport({
         id: transport.id,
         transport
       });
 
       const dispatcher = new MissionDispatcher(DISPATCHER_ID, TRANSPORT_ID);
-      ctx.registries.dispatcherRegistry.registerDispatcher({
+      ctx.dispatchers.registerDispatcher({
         id: dispatcher.id,
         dispatcher
       });
 
       const service = new MissionService(dispatcher);
-      ctx.registries.serviceRegistry.registerService({
+      ctx.services.registerService({
         id: SERVICE_ID,
         service
       });
 
-      ctx.registries.modalRegistry.registerModalDialog({
+      ctx.contributions.register({
         id: "modal.record",
+        slot: "modal",
         title: "Record",
-        render: ({ runtime }) => <RecordModal runtime={runtime} />
+        render: () => <RecordModal runtime={ctx} />
       });
 
-      ctx.registries.toolbarMenuRegistry.registerToolbarMenu({
+      ctx.commands.register(
+        { id: OPEN_RECORD_MODAL_COMMAND_ID, title: "Open Record Modal", category: "Debug" },
+        () => ctx.commands.execute(ShellCommands.openModal, "modal.record")
+      );
+
+      ctx.contributions.register({
         id: "toolbar.debug",
+        slot: "toolbar",
         label: "Debug",
         items: [
           {
             id: "debug.open-record-modal",
             label: "Open record modal",
-            onSelect: ({ openModal }) => {
-              openModal("modal.record");
-            }
+            commandId: OPEN_RECORD_MODAL_COMMAND_ID
           }
         ]
       });

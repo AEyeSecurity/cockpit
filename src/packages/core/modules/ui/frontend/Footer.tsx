@@ -1,14 +1,12 @@
-import type { AppRuntime } from "../../../../../core/types/module";
-import type { FooterItemDefinition } from "../../../../../core/types/ui";
+import type { FooterContribution } from "../../../../../core/contributions/types";
 
 interface FooterProps {
-  runtime: AppRuntime;
-  items: FooterItemDefinition[];
+  items: FooterContribution[];
   consoleCollapsed: boolean;
   onToggleConsoleCollapse: () => void;
 }
 
-function orderFooterItems(items: FooterItemDefinition[]): FooterItemDefinition[] {
+function orderFooterItems(items: FooterContribution[]): FooterContribution[] {
   const ordered = [...items];
   for (const item of [...ordered]) {
     if (!item.beforeId) continue;
@@ -26,7 +24,7 @@ function orderFooterItems(items: FooterItemDefinition[]): FooterItemDefinition[]
   return ordered;
 }
 
-export function Footer({ runtime, items, consoleCollapsed, onToggleConsoleCollapse }: FooterProps): JSX.Element {
+export function Footer({ items, consoleCollapsed, onToggleConsoleCollapse }: FooterProps): JSX.Element {
   const orderedItems = orderFooterItems(items);
   const firstRightItemIndex = orderedItems.findIndex((item) => item.align === "right");
   const hasRightAlignedItems = firstRightItemIndex >= 0;
@@ -36,11 +34,13 @@ export function Footer({ runtime, items, consoleCollapsed, onToggleConsoleCollap
       {orderedItems.map((item, index) => (
         <div
           key={item.id}
-          className={`footer-item${item.align === "right" ? " footer-item-right" : ""}${
+          className={`footer-item${item.id.includes("connection-status") ? " footer-item-connection-status" : ""}${
+            item.align === "right" ? " footer-item-right" : ""
+          }${
             index === firstRightItemIndex ? " footer-item-right-anchor" : ""
           }`}
         >
-          {item.render(runtime)}
+          {item.render()}
         </div>
       ))}
       <button

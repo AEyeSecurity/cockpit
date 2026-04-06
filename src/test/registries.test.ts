@@ -1,29 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { SidebarPanelRegistry } from "../core/registries/sidebarPanelRegistry";
+import { createContributionRegistry } from "../core/contributions/contributionRegistry";
 import { isModuleEnabled, isPackageEnabled, isPackageModuleEnabled, type ModuleConfig } from "../core/config/moduleConfigLoader";
 import type { CockpitModule, CockpitPackage } from "../core/types/module";
 
-describe("registries", () => {
+describe("contributionRegistry", () => {
   it("preserves insertion order", () => {
-    const registry = new SidebarPanelRegistry();
-    registry.registerSidebarPanel({ id: "z", label: "z", render: () => null });
-    registry.registerSidebarPanel({ id: "a", label: "a", render: () => null });
-    registry.registerSidebarPanel({ id: "b", label: "b", render: () => null });
+    const registry = createContributionRegistry();
+    registry.register({ id: "z", slot: "sidebar", label: "z", render: () => null });
+    registry.register({ id: "a", slot: "sidebar", label: "a", render: () => null });
+    registry.register({ id: "b", slot: "sidebar", label: "b", render: () => null });
 
-    expect(registry.list().map((entry) => entry.id)).toEqual(["z", "a", "b"]);
+    expect(registry.query("sidebar").map((entry) => entry.id)).toEqual(["z", "a", "b"]);
   });
 
   it("throws on id collision", () => {
-    const registry = new SidebarPanelRegistry();
-    registry.registerSidebarPanel({ id: "dup", label: "dup", render: () => null });
+    const registry = createContributionRegistry();
+    registry.register({ id: "dup", slot: "sidebar", label: "dup", render: () => null });
     expect(() =>
-      registry.registerSidebarPanel({ id: "dup", label: "other", render: () => null })
-    ).toThrow("Registry collision");
+      registry.register({ id: "dup", slot: "sidebar", label: "other", render: () => null })
+    ).toThrow("Contribution already registered");
   });
 
   it("supports unregister", () => {
-    const registry = new SidebarPanelRegistry();
-    registry.registerSidebarPanel({ id: "to-remove", label: "remove", render: () => null });
+    const registry = createContributionRegistry();
+    registry.register({ id: "to-remove", slot: "sidebar", label: "remove", render: () => null });
     registry.unregister("to-remove");
     expect(registry.has("to-remove")).toBe(false);
   });

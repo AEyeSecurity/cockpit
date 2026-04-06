@@ -1,22 +1,14 @@
 import type { ReactNode } from "react";
-import type { AppRuntime } from "../../../../../core/types/module";
-import type { WorkspaceViewDefinition } from "../../../../../core/types/ui";
+import type { WorkspaceContribution } from "../../../../../core/contributions/types";
 
 interface WorkspacePanelProps {
-  runtime: AppRuntime;
-  views: WorkspaceViewDefinition[];
+  views: WorkspaceContribution[];
   activeViewId: string;
   onSelectView: (id: string) => void;
   children?: ReactNode;
 }
 
-export function WorkspacePanel({
-  runtime,
-  views,
-  activeViewId,
-  onSelectView,
-  children
-}: WorkspacePanelProps): JSX.Element {
+export function WorkspacePanel({ views, activeViewId, onSelectView, children }: WorkspacePanelProps): JSX.Element {
   const activeView = views.find((v) => v.id === activeViewId) ?? null;
 
   return (
@@ -34,7 +26,7 @@ export function WorkspacePanel({
         ))}
       </section>
       <section className="workspace-view">
-        {activeView ? activeView.render(runtime) : "No workspace view registered."}
+        {activeView ? activeView.render() : "No workspace view registered."}
       </section>
       {children}
     </main>
