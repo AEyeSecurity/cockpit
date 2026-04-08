@@ -1,4 +1,3 @@
-import type { MessagePayload } from "../../../../../../core/types/message";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 
 export interface GoalInput {
@@ -674,7 +673,7 @@ export class NavigationService {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
     }
     const validated = parseGoal(input);
-    const payload: MessagePayload = {
+    const payload = {
       waypoints: [
         {
           lat: validated.x,

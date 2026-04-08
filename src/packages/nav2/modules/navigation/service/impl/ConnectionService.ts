@@ -1,5 +1,6 @@
 import type { EnvConfig } from "../../../../../../core/config/envConfig";
 import type { EventBus } from "../../../../../../core/events/eventBus";
+import type { TransportStatus } from "../../../../../core/modules/runtime/transport/base/Transport";
 import type { TransportManager, TransportTrafficStats } from "../../../../../core/modules/runtime/transport/manager/TransportManager";
 
 export type ConnectionPreset = "real" | "sim";
@@ -108,6 +109,9 @@ export class ConnectionService {
     };
     this.transportManager.subscribeTraffic(this.transportId, (stats) => {
       this.applyTraffic(stats);
+    });
+    this.transportManager.subscribeStatus(this.transportId, (status) => {
+      this.applyTransportStatus(status);
     });
   }
 
@@ -287,6 +291,43 @@ export class ConnectionService {
       txBytes: stats.txBytes,
       rxBytes: stats.rxBytes
     };
+    this.emit();
+  }
+
+  private applyTransportStatus(status: TransportStatus): void {
+    if (status.connected) {
+      if (this.state.connected && !this.state.connecting && !this.state.lastError) return;
+      this.state = {
+        ...this.state,
+        connecting: false,
+        connected: true,
+        lastError: ""
+      };
+      this.emit();
+      return;
+    }
+
+    const reason = String(status.reason ?? "").trim();
+    const nextError = status.intentional ? "" : reason || "Conexión perdida con backend";
+    const changed =
+      this.state.connecting ||
+      this.state.connected ||
+      this.state.lastError !== nextError;
+    if (!changed) return;
+
+    this.state = {
+      ...this.state,
+      connecting: false,
+      connected: false,
+      lastError: nextError
+    };
+    if (!status.intentional) {
+      this.eventBus.emit("console.event", {
+        level: "error",
+        text: nextError,
+        timestamp: Date.now()
+      });
+    }
     this.emit();
   }
 

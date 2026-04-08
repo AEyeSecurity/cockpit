@@ -1,5 +1,5 @@
-import type { IncomingPacket } from "../../../../../../core/types/message";
-import { DispatcherBase } from "../../../../../core/modules/runtime/dispatcher/base/Dispatcher";
+import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
+import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface MissionStartRequest {
   missionId: string;
@@ -13,42 +13,32 @@ export interface RosbagStatus {
   logPath: string;
 }
 
-export class MissionDispatcher extends DispatcherBase {
+export class MissionDispatcher extends Nav2DispatcherBase {
   constructor(id: string, transportId: string) {
-    super(id, transportId, [
-      "ack",
-      "rosbag_status",
-      "nav_event",
-      "mission.start",
-      "mission.status.update"
-    ]);
+    super(id, transportId);
   }
 
-  handleIncoming(message: IncomingPacket): void {
-    this.publish(message.op, message);
-  }
-
-  async startMission(request: MissionStartRequest): Promise<IncomingPacket> {
+  async startMission(request: MissionStartRequest): Promise<Nav2IncomingMessage> {
     return this.request("mission.start", request as never, { timeoutMs: 6000 });
   }
 
-  async startRosbag(profile: string): Promise<IncomingPacket> {
+  async startRosbag(profile: string): Promise<Nav2IncomingMessage> {
     return this.request("start_rosbag", { profile } as never, { timeoutMs: 6000 });
   }
 
-  async stopRosbag(): Promise<IncomingPacket> {
+  async stopRosbag(): Promise<Nav2IncomingMessage> {
     return this.request("stop_rosbag", {}, { timeoutMs: 6000 });
   }
 
-  async requestRosbagStatus(): Promise<IncomingPacket> {
+  async requestRosbagStatus(): Promise<Nav2IncomingMessage> {
     return this.request("get_rosbag_status", {}, { timeoutMs: 4000 });
   }
 
-  subscribeMissionStatus(callback: (message: IncomingPacket) => void): () => void {
+  subscribeMissionStatus(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_event", callback);
   }
 
-  subscribeRosbagStatus(callback: (message: IncomingPacket) => void): () => void {
+  subscribeRosbagStatus(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("rosbag_status", callback);
   }
 }

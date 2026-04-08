@@ -1,5 +1,4 @@
 import type { EnvConfig } from "../../../../../../core/config/envConfig";
-import type { IncomingPacket, OutgoingPacket } from "../../../../../../core/types/message";
 
 // TODO: eliminar esta interfaz. hacer que cada clase que implemente Transport simplemente defina connect(), sin argumentos
 // TODO: las variables de entorno se gestionarán por paquete, entonces se debe crear una clase EnvManager en el paquete core
@@ -12,15 +11,21 @@ export interface TransportContext {
   env: EnvConfig;
 }
 
-// TODO: usar clase generica en lugar de IncomingPacket/OutgoingPackage
-export type TransportReceiveHandler = (message: IncomingPacket) => void;
+export type TransportReceiveHandler = (message: unknown) => void;
+export type TransportStatusHandler = (status: TransportStatus) => void;
+
+export interface TransportStatus {
+  connected: boolean;
+  intentional: boolean;
+  reason: string;
+}
 
 export interface Transport {
   id: string;
   kind: string;
   connect(ctx: TransportContext): Promise<void>;
   disconnect(): Promise<void>;
-  send(packet: OutgoingPacket): Promise<void>;
+  send(packet: unknown): Promise<void>;
   recv(handler: TransportReceiveHandler): () => void;
+  subscribeStatus(handler: TransportStatusHandler): () => void;
 }
-

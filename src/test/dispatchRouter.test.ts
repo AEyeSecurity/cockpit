@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
 import { DispatcherBase } from "../packages/core/modules/runtime/dispatcher/base/Dispatcher";
-import type { IncomingPacket, OutgoingPacket } from "../core/types/message";
-import type { Transport, TransportContext, TransportReceiveHandler } from "../packages/core/modules/runtime/transport/base/Transport";
+import type {
+  Transport,
+  TransportContext,
+  TransportReceiveHandler,
+  TransportStatusHandler
+} from "../packages/core/modules/runtime/transport/base/Transport";
 import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
 
 class MockTransport implements Transport {
   readonly kind = "mock";
   private readonly handlers = new Set<TransportReceiveHandler>();
-  lastSent: OutgoingPacket | null = null;
+  private readonly statusHandlers = new Set<TransportStatusHandler>();
+  lastSent: unknown = null;
   connected = false;
 
   constructor(readonly id: string) {}
@@ -21,7 +26,7 @@ class MockTransport implements Transport {
     this.connected = false;
   }
 
-  async send(packet: OutgoingPacket): Promise<void> {
+  async send(packet: unknown): Promise<void> {
     this.lastSent = packet;
   }
 
@@ -30,79 +35,88 @@ class MockTransport implements Transport {
     return () => this.handlers.delete(handler);
   }
 
-  emit(message: IncomingPacket): void {
+  subscribeStatus(handler: TransportStatusHandler): () => void {
+    this.statusHandlers.add(handler);
+    return () => this.statusHandlers.delete(handler);
+  }
+
+  emit(message: unknown): void {
     this.handlers.forEach((handler) => handler(message));
   }
 }
 
 class TestDispatcher extends DispatcherBase {
-  seen: IncomingPacket[] = [];
+  seen = new Array<{ raw: unknown; transportId: string }>();
 
-  constructor(id: string, transportId: string, ops: string[]) {
-    super(id, transportId, ops);
+  constructor(id: string, transportId: string) {
+    super(id, transportId);
   }
 
-  handleIncoming(message: IncomingPacket): void {
-    this.seen.push(message);
-    this.publish(message.op, message);
+  handleIncoming(raw: unknown, transportId: string): void {
+    this.seen.push({ raw, transportId });
+  }
+
+  async send(raw: unknown): Promise<void> {
+    await this.sendRaw(raw);
   }
 }
 
 describe("DispatchRouter", () => {
   let manager: TransportManager;
   let router: DispatchRouter;
-  let transport: MockTransport;
+  let transportA: MockTransport;
+  let transportB: MockTransport;
 
   beforeEach(() => {
     manager = new TransportManager();
     router = new DispatchRouter(manager);
-    transport = new MockTransport("transport.mock");
-    manager.registerTransport(transport);
-    router.bindTransport(transport.id);
+    transportA = new MockTransport("transport.a");
+    transportB = new MockTransport("transport.b");
+    manager.registerTransport(transportA);
+    manager.registerTransport(transportB);
+    router.bindTransport(transportA.id);
+    router.bindTransport(transportB.id);
   });
 
-  it("routes inbound messages by op and transport", () => {
-    const dispatcher = new TestDispatcher("dispatcher.robot", transport.id, ["robot.status.update"]);
+  it("fanouts inbound raw messages to dispatchers bound to the same transport", () => {
+    const first = new TestDispatcher("dispatcher.first", transportA.id);
+    const second = new TestDispatcher("dispatcher.second", transportA.id);
+    router.registerDispatcher(first);
+    router.registerDispatcher(second);
+
+    const incoming = { op: "nav_telemetry", payload: { connected: true } };
+    transportA.emit(incoming);
+
+    expect(first.seen).toHaveLength(1);
+    expect(second.seen).toHaveLength(1);
+    expect(first.seen[0].raw).toEqual(incoming);
+    expect(first.seen[0].transportId).toBe(transportA.id);
+    expect(second.seen[0].transportId).toBe(transportA.id);
+  });
+
+  it("does not deliver inbound raw messages to dispatchers on other transports", () => {
+    const onA = new TestDispatcher("dispatcher.a", transportA.id);
+    const onB = new TestDispatcher("dispatcher.b", transportB.id);
+    router.registerDispatcher(onA);
+    router.registerDispatcher(onB);
+
+    transportA.emit({ op: "map.loaded" });
+    expect(onA.seen).toHaveLength(1);
+    expect(onB.seen).toHaveLength(0);
+  });
+
+  it("sends opaque raw payload through sendRaw", async () => {
+    const packet = { op: "set_goal_ll", requestId: "r-1", payload: { x: 1 } };
+    await router.sendRaw(transportA.id, packet);
+    expect(transportA.lastSent).toEqual(packet);
+  });
+
+  it("allows package-owned dispatchers to send raw payload through protected sendRaw", async () => {
+    const dispatcher = new TestDispatcher("dispatcher.tx", transportA.id);
     router.registerDispatcher(dispatcher);
+    const packet = { op: "mission.start", payload: { missionId: "m1" } };
 
-    transport.emit({ op: "robot.status.update", payload: { connected: true } as never });
-    expect(dispatcher.seen).toHaveLength(1);
-    expect(dispatcher.seen[0].transportId).toBe(transport.id);
-  });
-
-  it("resolves request/response correlation by requestId", async () => {
-    const requestPromise = router.request(transport.id, "robot.status.get", { verbose: true } as never, {
-      timeoutMs: 1500
-    });
-    const requestId = transport.lastSent?.requestId;
-    expect(requestId).toBeTruthy();
-
-    transport.emit({
-      op: "robot.status.get.result",
-      requestId,
-      ok: true,
-      payload: { connected: true } as never
-    });
-
-    await expect(requestPromise).resolves.toMatchObject({ ok: true });
-  });
-
-  it("times out unresolved requests", async () => {
-    await expect(
-      router.request(transport.id, "never.responds", {} as never, { timeoutMs: 15 })
-    ).rejects.toThrow("timeout");
-  });
-
-  it("resolves request using legacy ack.request fallback", async () => {
-    const requestPromise = router.request(transport.id, "set_manual_mode", { enabled: true } as never, {
-      timeoutMs: 1500
-    });
-    transport.emit({
-      op: "ack",
-      request: "set_manual_mode",
-      ok: true,
-      enabled: true
-    });
-    await expect(requestPromise).resolves.toMatchObject({ op: "ack", ok: true, request: "set_manual_mode" });
+    await dispatcher.send(packet);
+    expect(transportA.lastSent).toEqual(packet);
   });
 });

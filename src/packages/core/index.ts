@@ -21,7 +21,6 @@ export { DispatchRouter } from "./modules/runtime/dispatcher/DispatchRouter";
 export type { Transport, TransportContext, TransportReceiveHandler } from "./modules/runtime/transport/base/Transport";
 export { TransportManager } from "./modules/runtime/transport/manager/TransportManager";
 export type { TransportTrafficStats } from "./modules/runtime/transport/manager/TransportManager";
-export { decodeLegacyIncoming, encodeLegacyOutgoing } from "./modules/runtime/transport/base/legacyCodec";
 
 // Core services
 export { DialogService, DIALOG_SERVICE_ID } from "./modules/runtime/service/impl/DialogService";

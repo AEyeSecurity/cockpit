@@ -1,5 +1,5 @@
-import type { IncomingPacket } from "../../../../../../core/types/message";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
+import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export type SensorInfoTab = "general" | "topics" | "pixhawk_gps" | "lidar" | "camera";
 
@@ -16,7 +16,7 @@ export interface SensorInfoState {
   loading: Record<SensorInfoTab, boolean>;
   implemented: Record<SensorInfoTab, boolean>;
   errors: Record<SensorInfoTab, string>;
-  payloads: Partial<Record<SensorInfoTab, IncomingPacket>>;
+  payloads: Partial<Record<SensorInfoTab, Nav2IncomingMessage>>;
   topics: {
     search: string;
     selectedTopic: string;
@@ -276,7 +276,7 @@ export class SensorInfoService {
     }
   }
 
-  private applyIncoming(message: IncomingPacket): void {
+  private applyIncoming(message: Nav2IncomingMessage): void {
     const tab = parseTab(message.tab);
     if (!tab) return;
 
@@ -358,7 +358,7 @@ export class SensorInfoService {
     this.emit();
   }
 
-  private applyAck(message: IncomingPacket): void {
+  private applyAck(message: Nav2IncomingMessage): void {
     if (String(message.request ?? "") !== "set_sensor_info_view") return;
     const tab = parseTab(message.tab) ?? this.state.activeTab;
     if (!tab) return;

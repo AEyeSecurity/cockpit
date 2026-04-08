@@ -26,18 +26,6 @@ function isEditingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-function isDisconnectedErrorText(text: string): boolean {
-  const normalized = text.toLowerCase();
-  if (!normalized.trim()) return false;
-  return (
-    normalized.includes(" is disconnected") ||
-    normalized.includes("disconnected (") ||
-    normalized.includes("connection lost") ||
-    normalized.includes("websocket connection failed") ||
-    normalized.includes("no active connection")
-  );
-}
-
 const CONNECTION_SERVICE_ID = "service.connection";
 
 export function AppShell({ runtime }: AppShellProps): JSX.Element {
@@ -126,7 +114,6 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
     let connected = connectionService.getState().connected;
     let notifiedLoss = false;
-    let lastNoConnectionNoticeAt = 0;
 
     const notifyLostConnection = (reason: string): void => {
       if (notifiedLoss) return;
@@ -135,18 +122,6 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       void dialogService.alert({
         title: "Conexión perdida",
         message: `Se perdió la conexión con el backend remoto.${detail}`,
-        confirmLabel: "Entendido",
-        danger: true
-      });
-    };
-
-    const notifyNoConnection = (): void => {
-      const now = Date.now();
-      if (now - lastNoConnectionNoticeAt < 1200) return;
-      lastNoConnectionNoticeAt = now;
-      void dialogService.alert({
-        title: "Sin conexión activa",
-        message: "No hay conexión activa con el backend. Conéctate para ejecutar esta acción.",
         confirmLabel: "Entendido",
         danger: true
       });
@@ -162,21 +137,8 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       }
     });
 
-    const unsubscribeConsole = runtime.eventBus.on<{ level?: unknown; text?: unknown }>("console.event", (entry) => {
-      const level = typeof entry.level === "string" ? entry.level : "";
-      if (level !== "error") return;
-      const rawText = typeof entry.text === "string" ? entry.text : "";
-      if (!isDisconnectedErrorText(rawText)) return;
-      if (connected) {
-        notifyLostConnection(rawText);
-        return;
-      }
-      notifyNoConnection();
-    });
-
     return () => {
       unsubscribeConnection();
-      unsubscribeConsole();
     };
   }, [runtime]);
 

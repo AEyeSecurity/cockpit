@@ -1,5 +1,5 @@
-import type { IncomingPacket, MessagePayload } from "../../../../../../core/types/message";
-import { DispatcherBase } from "../../../../../core/modules/runtime/dispatcher/base/Dispatcher";
+import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
+import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface RobotStatus {
   batteryPct: number;
@@ -7,38 +7,24 @@ export interface RobotStatus {
   connected: boolean;
 }
 
-export class RobotDispatcher extends DispatcherBase {
+export class RobotDispatcher extends Nav2DispatcherBase {
   constructor(id: string, transportId: string) {
-    super(id, transportId, [
-      "state",
-      "robot_pose",
-      "nav_telemetry",
-      "nav_event",
-      "nav_alerts",
-      "nav_snapshot",
-      "camera_status",
-      "sensor_info",
-      "ack"
-    ]);
+    super(id, transportId);
   }
 
-  handleIncoming(message: IncomingPacket): void {
-    this.publish(message.op, message);
-  }
-
-  async requestGoal(goal: MessagePayload): Promise<IncomingPacket> {
+  async requestGoal(goal: unknown): Promise<Nav2IncomingMessage> {
     return this.request("set_goal_ll", goal, { timeoutMs: 5000 });
   }
 
-  async requestCancelGoal(): Promise<IncomingPacket> {
+  async requestCancelGoal(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_goal", {}, { timeoutMs: 5000 });
   }
 
-  async requestManualMode(enabled: boolean): Promise<IncomingPacket> {
+  async requestManualMode(enabled: boolean): Promise<Nav2IncomingMessage> {
     return this.request("set_manual_mode", { enabled } as never, { timeoutMs: 5000 });
   }
 
-  async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<IncomingPacket> {
+  async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<Nav2IncomingMessage> {
     // Legacy backend contract expects snake_case controls at top level.
     return this.request(
       "set_manual_cmd",
@@ -51,39 +37,41 @@ export class RobotDispatcher extends DispatcherBase {
     );
   }
 
-  async requestSnapshot(): Promise<IncomingPacket> {
+  async requestSnapshot(): Promise<Nav2IncomingMessage> {
     return this.request("get_nav_snapshot", {}, { timeoutMs: 7000 });
   }
 
-  async requestSaveWaypointsFile(waypoints: Array<{ lat: number; lon: number; yaw_deg: number }>): Promise<IncomingPacket> {
+  async requestSaveWaypointsFile(
+    waypoints: Array<{ lat: number; lon: number; yaw_deg: number }>
+  ): Promise<Nav2IncomingMessage> {
     return this.request("save_waypoints_file", { waypoints } as never, { timeoutMs: 7000 });
   }
 
-  async requestLoadWaypointsFile(): Promise<IncomingPacket> {
+  async requestLoadWaypointsFile(): Promise<Nav2IncomingMessage> {
     return this.request("load_waypoints_file", {}, { timeoutMs: 7000 });
   }
 
-  async requestCameraPan(angleDeg: number): Promise<IncomingPacket> {
+  async requestCameraPan(angleDeg: number): Promise<Nav2IncomingMessage> {
     return this.request("camera_pan", { angle: angleDeg } as never, { timeoutMs: 4000 });
   }
 
-  async requestCameraZoomToggle(): Promise<IncomingPacket> {
+  async requestCameraZoomToggle(): Promise<Nav2IncomingMessage> {
     return this.request("camera_zoom_toggle", {}, { timeoutMs: 4000 });
   }
 
-  async requestCameraStatus(): Promise<IncomingPacket> {
+  async requestCameraStatus(): Promise<Nav2IncomingMessage> {
     return this.request("get_camera_status", {}, { timeoutMs: 4000 });
   }
 
-  async requestState(): Promise<IncomingPacket> {
+  async requestState(): Promise<Nav2IncomingMessage> {
     return this.request("get_state", {}, { timeoutMs: 5000 });
   }
 
-  async requestControlLock(locked: boolean): Promise<IncomingPacket> {
+  async requestControlLock(locked: boolean): Promise<Nav2IncomingMessage> {
     return this.request("set_control_lock", { locked } as never, { timeoutMs: 5000 });
   }
 
-  async requestControlHeartbeat(): Promise<IncomingPacket> {
+  async requestControlHeartbeat(): Promise<Nav2IncomingMessage> {
     return this.request("control_heartbeat", {}, { timeoutMs: 3000 });
   }
 
@@ -92,7 +80,7 @@ export class RobotDispatcher extends DispatcherBase {
     tab: string | null;
     intervalS: number;
     topicName?: string | null;
-  }): Promise<IncomingPacket> {
+  }): Promise<Nav2IncomingMessage> {
     return this.request(
       "set_sensor_info_view",
       {
@@ -116,31 +104,31 @@ export class RobotDispatcher extends DispatcherBase {
     });
   }
 
-  subscribeState(callback: (message: IncomingPacket) => void): () => void {
+  subscribeState(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("state", callback);
   }
 
-  subscribeNavTelemetry(callback: (message: IncomingPacket) => void): () => void {
+  subscribeNavTelemetry(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_telemetry", callback);
   }
 
-  subscribeNavEvent(callback: (message: IncomingPacket) => void): () => void {
+  subscribeNavEvent(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_event", callback);
   }
 
-  subscribeNavAlerts(callback: (message: IncomingPacket) => void): () => void {
+  subscribeNavAlerts(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_alerts", callback);
   }
 
-  subscribeRobotPose(callback: (message: IncomingPacket) => void): () => void {
+  subscribeRobotPose(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("robot_pose", callback);
   }
 
-  subscribeSensorInfo(callback: (message: IncomingPacket) => void): () => void {
+  subscribeSensorInfo(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("sensor_info", callback);
   }
 
-  subscribeAck(callback: (message: IncomingPacket) => void): () => void {
+  subscribeAck(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("ack", callback);
   }
 }

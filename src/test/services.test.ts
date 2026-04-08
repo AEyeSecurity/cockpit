@@ -3,7 +3,7 @@ import { MapService } from "../packages/nav2/modules/map/service/impl/MapService
 import { MissionService } from "../packages/nav2/modules/debug/service/impl/MissionService";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
 import { ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
-import type { IncomingPacket } from "../core/types/message";
+import type { Nav2IncomingMessage } from "../packages/nav2/protocol/messages";
 
 function installStorageMock(seed: Record<string, string> = {}): void {
   if (typeof window === "undefined") return;
@@ -25,6 +25,7 @@ describe("services", () => {
     const transportManager = {
       getTrafficStats: vi.fn(() => ({ txBytes: 0, rxBytes: 0 })),
       subscribeTraffic: vi.fn(),
+      subscribeStatus: vi.fn(() => () => undefined),
       connectTransport: vi.fn(),
       disconnectTransport: vi.fn()
     };
@@ -63,6 +64,7 @@ describe("services", () => {
     const transportManager = {
       getTrafficStats: vi.fn(() => ({ txBytes: 0, rxBytes: 0 })),
       subscribeTraffic: vi.fn(),
+      subscribeStatus: vi.fn(() => () => undefined),
       connectTransport: vi.fn(),
       disconnectTransport: vi.fn()
     };
@@ -90,11 +92,11 @@ describe("services", () => {
 
   it("validates goal input in NavigationService", async () => {
     const dispatcher = {
-      requestGoal: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "navigation.goal.result",
         ok: true
       }),
-      requestControlLock: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true
       })
@@ -107,7 +109,7 @@ describe("services", () => {
 
   it("maps response payload in MapService", async () => {
     const dispatcher = {
-      requestMap: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestMap: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "map.loaded",
         ok: true,
         payload: {
@@ -124,9 +126,55 @@ describe("services", () => {
     expect(map.title).toBe("Main map");
   });
 
+  it("marks connection as lost on unexpected transport disconnect", async () => {
+    let onStatus: ((status: { connected: boolean; intentional: boolean; reason: string }) => void) | null = null;
+    const transportManager = {
+      getTrafficStats: vi.fn(() => ({ txBytes: 0, rxBytes: 0 })),
+      subscribeTraffic: vi.fn(() => () => undefined),
+      subscribeStatus: vi.fn((_transportId: string, listener: (status: { connected: boolean; intentional: boolean; reason: string }) => void) => {
+        onStatus = listener;
+        return () => undefined;
+      }),
+      connectTransport: vi.fn().mockResolvedValue(undefined),
+      disconnectTransport: vi.fn().mockResolvedValue(undefined)
+    };
+    const env = {
+      appName: "test",
+      wsUrl: "ws://env-host:9999",
+      wsRealHost: "env-real",
+      wsSimHost: "env-sim",
+      wsDefaultPort: "9999",
+      rosbridgeUrl: "",
+      httpBaseUrl: "",
+      googleMapsApiKey: "",
+      cameraIframeUrl: ""
+    };
+    const eventBus = { emit: vi.fn() };
+    const service = new ConnectionService(transportManager as never, env as never, "transport.ws.core", eventBus as never);
+
+    await service.connect();
+    onStatus?.({
+      connected: false,
+      intentional: false,
+      reason: "backend dropped"
+    });
+
+    expect(service.getState()).toMatchObject({
+      connected: false,
+      lastError: "backend dropped"
+    });
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      "console.event",
+      expect.objectContaining({
+        level: "error",
+        text: "backend dropped"
+      })
+    );
+  });
+
   it("keeps waypoint state in NavigationService and persists to localStorage", () => {
     const dispatcher = {
-      requestGoal: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "navigation.goal.result",
         ok: true
       }),
@@ -154,7 +202,7 @@ describe("services", () => {
 
   it("supports waypoint selection and selective removal", () => {
     const dispatcher = {
-      requestGoal: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "navigation.goal.result",
         ok: true
       }),
@@ -184,7 +232,7 @@ describe("services", () => {
 
   it("sends queued goals through NavigationService", async () => {
     const dispatcher = {
-      requestGoal: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "navigation.goal.result",
         ok: true
       }),
@@ -195,7 +243,7 @@ describe("services", () => {
       requestCameraPan: vi.fn(),
       requestCameraZoomToggle: vi.fn(),
       requestCameraStatus: vi.fn(),
-      requestControlLock: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true
       })
@@ -266,7 +314,7 @@ describe("services", () => {
 
   it("validates mission input in MissionService", async () => {
     const dispatcher = {
-      startMission: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      startMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "mission.start.result",
         ok: true
       }),
@@ -279,12 +327,12 @@ describe("services", () => {
 
   it("validates rosbag profile input in MissionService", async () => {
     const dispatcher = {
-      startMission: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      startMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "mission.start.result",
         ok: true
       }),
       subscribeMissionStatus: vi.fn(() => () => undefined),
-      startRosbag: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      startRosbag: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "rosbag.status.update",
         ok: true,
         payload: { active: true, profile: "core", outputPath: "/tmp/bag", logPath: "/tmp/log" } as never
@@ -302,12 +350,12 @@ describe("services", () => {
     const dispatcher = {
       requestGoal: vi.fn(),
       requestCancelGoal: vi.fn(),
-      requestManualMode: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestManualMode: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true
       }),
       requestManualCommand: vi
-        .fn<(linearX: number, angularZ: number, brake: boolean) => Promise<IncomingPacket>>()
+        .fn<(linearX: number, angularZ: number, brake: boolean) => Promise<Nav2IncomingMessage>>()
         .mockResolvedValue({
           op: "ack",
           ok: true
@@ -316,7 +364,7 @@ describe("services", () => {
       requestCameraPan: vi.fn(),
       requestCameraZoomToggle: vi.fn(),
       requestCameraStatus: vi.fn(),
-      requestControlLock: vi.fn<() => Promise<IncomingPacket>>().mockResolvedValue({
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true
       })

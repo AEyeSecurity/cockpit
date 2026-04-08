@@ -1,5 +1,4 @@
-import type { IncomingPacket, OutgoingPacket } from "../../../../../../core/types/message";
-import type { Transport, TransportContext } from "../base/Transport";
+import type { Transport, TransportContext, TransportStatus } from "../base/Transport";
 
 export interface TransportTrafficStats {
   txBytes: number;
@@ -7,6 +6,7 @@ export interface TransportTrafficStats {
 }
 
 type TrafficListener = (stats: TransportTrafficStats) => void;
+type StatusListener = (status: TransportStatus) => void;
 
 function estimateBytes(value: unknown): number {
   try {
@@ -24,6 +24,8 @@ export class TransportManager {
   private readonly transports = new Map<string, Transport>();
   private readonly trafficByTransport = new Map<string, TransportTrafficStats>();
   private readonly trafficListeners = new Map<string, Set<TrafficListener>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener>>();
+  private readonly statusBindings = new Map<string, () => void>();
 
   registerTransport(transport: Transport): void {
     if (this.transports.has(transport.id)) {
@@ -31,12 +33,16 @@ export class TransportManager {
     }
     this.transports.set(transport.id, transport);
     this.trafficByTransport.set(transport.id, { txBytes: 0, rxBytes: 0 });
+    this.bindStatus(transport);
   }
 
   unregisterTransport(transportId: string): void {
+    this.statusBindings.get(transportId)?.();
+    this.statusBindings.delete(transportId);
     this.transports.delete(transportId);
     this.trafficByTransport.delete(transportId);
     this.trafficListeners.delete(transportId);
+    this.statusListeners.delete(transportId);
   }
 
   getTransport(transportId: string): Transport | undefined {
@@ -78,7 +84,7 @@ export class TransportManager {
     await transport.disconnect();
   }
 
-  async send(transportId: string, packet: OutgoingPacket): Promise<void> {
+  async send(transportId: string, packet: unknown): Promise<void> {
     const transport = this.transports.get(transportId);
     if (!transport) {
       throw new Error(`Transport not found: ${transportId}`);
@@ -87,7 +93,7 @@ export class TransportManager {
     this.bumpTraffic(transportId, "txBytes", estimateBytes(packet));
   }
 
-  recv(transportId: string, handler: (message: IncomingPacket) => void): () => void {
+  recv(transportId: string, handler: (message: unknown) => void): () => void {
     const transport = this.transports.get(transportId);
     if (!transport) {
       throw new Error(`Transport not found: ${transportId}`);
@@ -116,6 +122,35 @@ export class TransportManager {
         this.trafficListeners.delete(transportId);
       }
     };
+  }
+
+  subscribeStatus(transportId: string, listener: StatusListener): () => void {
+    const listeners = this.statusListeners.get(transportId) ?? new Set<StatusListener>();
+    listeners.add(listener);
+    this.statusListeners.set(transportId, listeners);
+    const transport = this.transports.get(transportId);
+    if (transport) {
+      this.bindStatus(transport);
+    }
+
+    return () => {
+      const set = this.statusListeners.get(transportId);
+      if (!set) return;
+      set.delete(listener);
+      if (set.size === 0) {
+        this.statusListeners.delete(transportId);
+      }
+    };
+  }
+
+  private bindStatus(transport: Transport): void {
+    if (this.statusBindings.has(transport.id)) return;
+    const unsubscribe = transport.subscribeStatus((status) => {
+      const listeners = this.statusListeners.get(transport.id);
+      if (!listeners || listeners.size === 0) return;
+      listeners.forEach((listener) => listener(status));
+    });
+    this.statusBindings.set(transport.id, unsubscribe);
   }
 
   private resetTraffic(transportId: string): void {

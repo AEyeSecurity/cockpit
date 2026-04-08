@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { IncomingPacket, OutgoingPacket } from "../core/types/message";
 import { MetricsService } from "../packages/core/modules/metrics/service/impl/MetricsService";
-import type { Transport, TransportReceiveHandler } from "../packages/core/modules/runtime/transport/base/Transport";
+import type { Transport, TransportReceiveHandler, TransportStatusHandler } from "../packages/core/modules/runtime/transport/base/Transport";
 import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
 
 class FakeTransport implements Transport {
   readonly kind = "fake";
   private readonly handlers = new Set<TransportReceiveHandler>();
+  private readonly statusHandlers = new Set<TransportStatusHandler>();
 
   constructor(readonly id: string) {}
 
@@ -18,7 +18,7 @@ class FakeTransport implements Transport {
     return Promise.resolve();
   }
 
-  async send(_packet: OutgoingPacket): Promise<void> {
+  async send(_packet: unknown): Promise<void> {
     return Promise.resolve();
   }
 
@@ -27,7 +27,12 @@ class FakeTransport implements Transport {
     return () => this.handlers.delete(handler);
   }
 
-  emit(message: IncomingPacket): void {
+  subscribeStatus(handler: TransportStatusHandler): () => void {
+    this.statusHandlers.add(handler);
+    return () => this.statusHandlers.delete(handler);
+  }
+
+  emit(message: unknown): void {
     this.handlers.forEach((handler) => handler(message));
   }
 }
