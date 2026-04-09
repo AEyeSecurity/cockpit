@@ -5,10 +5,12 @@ import { useSlot } from "../core/contributions/useSlot";
 import { GlobalDialogHost } from "./layout/GlobalDialogHost";
 import { KeybindingHost } from "./layout/KeybindingHost";
 import { ModalHost } from "./layout/ModalHost";
+import { ZoomHost } from "./layout/ZoomHost";
 import { registerShellCommands } from "./shellCommands";
 import type { AppRuntime } from "../core/types/module";
 import { DIALOG_SERVICE_ID, type DialogService } from "../packages/core/modules/runtime/service/impl/DialogService";
 import { SYSTEM_NOTIFICATION_SERVICE_ID, type SystemNotificationService } from "../packages/core/modules/runtime/service/impl/SystemNotificationService";
+import { UiZoomController } from "./zoomController";
 
 interface AppShellProps {
   runtime: AppRuntime;
@@ -44,6 +46,7 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [consoleHeight, setConsoleHeight] = useState(220);
+  const [zoomController] = useState(() => new UiZoomController());
 
   const resolveModalId = (modalId: string): string => {
     if (modalDialogs.some((dialog) => dialog.id === modalId)) return modalId;
@@ -58,10 +61,19 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       toggleConsole: () => setConsoleCollapsed((prev) => !prev),
       openModal: (modalId: string) => setActiveModalId(resolveModalId(modalId)),
       closeModal: () => setActiveModalId(null),
-      getActiveModalId: () => activeModalId
+      getActiveModalId: () => activeModalId,
+      zoomIn: async () => {
+        await zoomController.zoomIn();
+      },
+      zoomOut: async () => {
+        await zoomController.zoomOut();
+      },
+      zoomReset: async () => {
+        await zoomController.zoomReset();
+      }
     });
     return () => disposables.forEach((d) => d.dispose());
-  }, [runtime, activeModalId, modalDialogs]);
+  }, [runtime, activeModalId, modalDialogs, zoomController]);
 
   const keybindingContext = useMemo<KeybindingContext>(
     () => ({
@@ -215,6 +227,7 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
   return (
     <div className="shell">
+      <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
       <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
       <div

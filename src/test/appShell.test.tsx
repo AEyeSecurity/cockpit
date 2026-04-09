@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AppShell } from "../app/AppShell";
+import { UI_ZOOM_STORAGE_KEY } from "../app/zoomController";
+import { ShellCommands } from "../app/shellCommands";
 import { createCommandRegistry } from "../core/commands/commandRegistry";
 import { createContributionRegistry } from "../core/contributions/contributionRegistry";
 import { createContainer } from "../core/di/container";
@@ -121,6 +123,22 @@ function createRuntime(): AppRuntime {
 }
 
 describe("AppShell", () => {
+  it("registers zoom shell commands and keybindings", async () => {
+    const runtime = createRuntime();
+    render(<AppShell runtime={runtime} />);
+
+    await waitFor(() => {
+      expect(runtime.commands.has(ShellCommands.zoomIn)).toBe(true);
+      expect(runtime.commands.has(ShellCommands.zoomOut)).toBe(true);
+      expect(runtime.commands.has(ShellCommands.zoomReset)).toBe(true);
+    });
+
+    expect(runtime.keybindings.list().some((binding) => binding.key === "ctrl+=" && binding.commandId === ShellCommands.zoomIn)).toBe(true);
+    expect(runtime.keybindings.list().some((binding) => binding.key === "ctrl+numpadadd" && binding.commandId === ShellCommands.zoomIn)).toBe(true);
+    expect(runtime.keybindings.list().some((binding) => binding.key === "ctrl+-" && binding.commandId === ShellCommands.zoomOut)).toBe(true);
+    expect(runtime.keybindings.list().some((binding) => binding.key === "ctrl+0" && binding.commandId === ShellCommands.zoomReset)).toBe(true);
+  });
+
   it("renders registered hosts and opens modal from toolbar menu", async () => {
     const runtime = createRuntime();
     render(<AppShell runtime={runtime} />);
@@ -190,6 +208,61 @@ describe("AppShell", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Conexión perdida")).not.toBeInTheDocument();
+    });
+  });
+
+  it("applies global zoom from keyboard and wheel", async () => {
+    if (typeof window.localStorage.removeItem === "function") {
+      window.localStorage.removeItem(UI_ZOOM_STORAGE_KEY);
+    }
+    document.documentElement.style.zoom = "";
+
+    const runtime = createRuntime();
+    render(<AppShell runtime={runtime} />);
+
+    await waitFor(() => {
+      expect(document.documentElement.style.zoom).toBe("1");
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, code: "Equal", key: "=", bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(document.documentElement.style.zoom).toBe("1.1");
+    });
+
+    const zoomEvent = new WheelEvent("wheel", {
+      ctrlKey: true,
+      deltaY: 100,
+      bubbles: true,
+      cancelable: true
+    });
+
+    act(() => {
+      window.dispatchEvent(zoomEvent);
+    });
+
+    expect(zoomEvent.defaultPrevented).toBe(true);
+
+    await waitFor(() => {
+      expect(document.documentElement.style.zoom).toBe("1");
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, code: "Equal", key: "=", bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(document.documentElement.style.zoom).toBe("1.1");
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, code: "Digit0", key: "0", bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(document.documentElement.style.zoom).toBe("1");
     });
   });
 });

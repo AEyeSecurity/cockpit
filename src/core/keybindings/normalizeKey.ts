@@ -9,7 +9,7 @@ const CODE_TO_KEY: Record<string, string> = {
   Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",
   Backslash: "\\", Semicolon: ";", Quote: "'", Comma: ",",
   Period: ".", Slash: "/", Backquote: "`",
-  NumpadSubtract: "-", NumpadAdd: "+", NumpadMultiply: "*", NumpadDivide: "/",
+  NumpadSubtract: "numpadsubtract", NumpadAdd: "numpadadd", NumpadMultiply: "numpadmultiply", NumpadDivide: "numpaddivide",
   Space: "space", Enter: "enter", Escape: "escape", Tab: "tab",
   Backspace: "backspace", Delete: "delete",
   ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
