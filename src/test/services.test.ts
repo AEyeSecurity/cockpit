@@ -408,6 +408,35 @@ describe("services", () => {
     expect(state.manualAngularSpeed).toBe(0.9);
   });
 
+  it("keeps control heartbeat active while locked", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispatcher = {
+        requestGoal: vi.fn(),
+        requestCancelGoal: vi.fn(),
+        requestManualMode: vi.fn(),
+        requestManualCommand: vi.fn(),
+        requestSnapshot: vi.fn(),
+        requestCameraPan: vi.fn(),
+        requestCameraZoomToggle: vi.fn(),
+        requestCameraStatus: vi.fn(),
+        requestControlHeartbeat: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+          op: "ack",
+          ok: true
+        })
+      };
+      const service = new NavigationService(dispatcher as never);
+
+      expect(service.getState().controlLocked).toBe(true);
+      vi.advanceTimersByTime(1100);
+      await Promise.resolve();
+
+      expect(dispatcher.requestControlHeartbeat).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("updates lock state from ack payloads", () => {
     const subscribers: {
       ack?: (message: Record<string, unknown>) => void;

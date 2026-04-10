@@ -1135,6 +1135,8 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
             <div className="key-value-grid">
               <span>Delta yaw</span>
               <span>{formatInfoNumber((activeSnapshot.diagnostics as Record<string, unknown> | undefined)?.yaw_delta_deg, 2)} deg</span>
+              <span>Diferencias</span>
+              <span>{formatInfoNumber((activeSnapshot.diagnostics as Record<string, unknown> | undefined)?.diferencias, 3)}</span>
               <span>ENU convention</span>
               <span>0°=E, 90°=N</span>
             </div>

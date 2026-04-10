@@ -327,6 +327,8 @@ export class NavigationService {
       manualAngularMax: this.manualAngularMax
     };
 
+    this.startControlHeartbeat();
+
     const dispatcher = this.robotDispatcher as unknown as {
       subscribeState?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeNavTelemetry?: (callback: (message: Record<string, unknown>) => void) => () => void;
@@ -941,9 +943,6 @@ export class NavigationService {
       };
       this.clearManualIntent();
       this.updateManualLoopLifecycle();
-      this.stopControlHeartbeat();
-    } else {
-      this.startControlHeartbeat();
     }
     this.emit();
   }
@@ -1008,9 +1007,6 @@ export class NavigationService {
       };
       this.clearManualIntent();
       this.updateManualLoopLifecycle();
-      this.stopControlHeartbeat();
-    } else if (!this.heartbeatTimer) {
-      this.startControlHeartbeat();
     }
     this.emit();
   }
