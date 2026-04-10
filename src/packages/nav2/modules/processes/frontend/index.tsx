@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { ShellCommands } from "../../../../../app/shellCommands";
 import type { ConnectionService, ConnectionState } from "../../navigation/service/impl/ConnectionService";
 import { ProcessesCommands } from "../commands";
 import { ProcessesDispatcher } from "../dispatcher/impl/ProcessesDispatcher";
+import { parseAnsiText } from "./ansi";
 import {
   ProcessesService,
   type ProcessStatus,
-  type ProcessViewState,
   type ProcessesState
 } from "../service/impl/ProcessesService";
 
@@ -16,6 +16,7 @@ const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.processes";
 const SERVICE_ID = "service.processes";
 const CONNECTION_SERVICE_ID = "service.connection";
+const OUTPUT_FOLLOW_THRESHOLD = 24;
 
 function statusText(status: ProcessStatus): string {
   if (status === "running") return "En ejecución";
@@ -31,7 +32,7 @@ function buttonStatusClass(status: ProcessStatus): string {
   return "process-status-idle";
 }
 
-function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
+export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<ProcessesService>(SERVICE_ID);
   let connectionService: ConnectionService | null = null;
   try {
@@ -44,6 +45,23 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [connectionState, setConnectionState] = useState<ConnectionState | null>(
     connectionService ? connectionService.getState() : null
   );
+  const [outputStream, setOutputStream] = useState<"stdout" | "stderr">("stdout");
+  const outputViewportRef = useRef<HTMLDivElement | null>(null);
+  const followOutputRef = useRef(true);
+  const outputKeyRef = useRef("");
+  const connected = connectionState ? connectionState.connected : true;
+  const visibleProcesses = state.processes.filter((entry) =>
+    entry.label.toLowerCase().includes(state.search.trim().toLowerCase())
+  );
+  const selected =
+    state.processes.find((entry) => entry.label === state.selectedProcess) ??
+    visibleProcesses[0] ??
+    null;
+  const actionLabel = selected?.running ? "Detener" : "Ejecutar";
+  const selectedOutputRaw = selected ? (outputStream === "stdout" ? selected.stdoutText : selected.stderrText) : "";
+  const outputKey = `${selected?.label ?? ""}:${outputStream}`;
+  const parsedOutput = useMemo(() => parseAnsiText(selectedOutputRaw), [selectedOutputRaw]);
+  const hasOutput = parsedOutput.plainText.length > 0;
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
   useEffect(() => {
@@ -56,16 +74,26 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       service.close();
     };
   }, [service]);
-
-  const connected = connectionState ? connectionState.connected : true;
-  const visibleProcesses = state.processes.filter((entry) =>
-    entry.label.toLowerCase().includes(state.search.trim().toLowerCase())
-  );
-  const selected =
-    state.processes.find((entry) => entry.label === state.selectedProcess) ??
-    visibleProcesses[0] ??
-    null;
-  const actionLabel = selected?.running ? "Detener" : "Ejecutar";
+  useEffect(() => {
+    if (!selected) return;
+    if (selected.stdoutText) {
+      setOutputStream("stdout");
+      return;
+    }
+    if (selected.stderrText) {
+      setOutputStream("stderr");
+    }
+  }, [selected?.label]);
+  useEffect(() => {
+    if (outputKeyRef.current === outputKey) return;
+    outputKeyRef.current = outputKey;
+    followOutputRef.current = true;
+  }, [outputKey]);
+  useLayoutEffect(() => {
+    const viewport = outputViewportRef.current;
+    if (!viewport || !followOutputRef.current) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [outputKey, selectedOutputRaw]);
 
   return (
     <div className="process-modal-root">
@@ -78,16 +106,17 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       ) : (
         <div className="process-modal-layout">
           <div className="process-modal-sidebar">
-            <input
-              value={state.search}
-              onChange={(event) => {
-                service.setSearch(event.target.value);
-              }}
-              placeholder="Buscar proceso..."
-            />
-            <div className="process-modal-sidebar-actions">
+            <div className="process-modal-search-row">
+              <input
+                value={state.search}
+                onChange={(event) => {
+                  service.setSearch(event.target.value);
+                }}
+                placeholder="Buscar proceso..."
+              />
               <button
                 type="button"
+                className="process-modal-reload-btn"
                 onClick={() => {
                   void service.refresh().catch((error) => {
                     runtime.eventBus.emit("console.event", {
@@ -114,7 +143,6 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                   >
                     {entry.label}
                   </button>
-                  <div className="process-modal-item-meta">{entry.cwd || entry.command || "Sin detalles"}</div>
                 </li>
               ))}
               {!state.loading && visibleProcesses.length === 0 ? <li className="feed-item muted">No hay procesos.</li> : null}
@@ -129,8 +157,12 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                   <span className={`process-modal-status ${buttonStatusClass(selected.status)}`}>{statusText(selected.status)}</span>
                 </div>
                 <div className="process-modal-details">
-                  <span className="info-topics-selected-badge">{selected.cwd || "cwd=n/a"}</span>
-                  <span className="info-topics-selected-badge">{selected.command || "command=n/a"}</span>
+                  <span>
+                    <strong>CWD:</strong> {selected.cwd || "n/a"}
+                  </span>
+                  <span>
+                    <strong>Process:</strong> {selected.command || "n/a"}
+                  </span>
                 </div>
                 <div className="process-modal-toggle-row">
                   <label className="check-row">
@@ -146,15 +178,83 @@ function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                   </label>
                   {selected.running ? <span className="process-modal-toggle-note">Aplica próxima ejecución.</span> : null}
                 </div>
-                <div className="panel-card process-modal-output-placeholder">
-                  <div className="stack">
-                    <strong>Características</strong>
-                    <span className="muted">Command: {selected.command || "n/a"}</span>
-                    <span className="muted">Cwd: {selected.cwd || "n/a"}</span>
-                    {selected.lastError ? <span className="status-bad">{selected.lastError}</span> : null}
+                <div className="panel-card process-modal-output-panel">
+                  <div className="process-modal-output-header">
+                    <button
+                      type="button"
+                      className={`process-modal-output-tab ${outputStream === "stdout" ? "active" : ""}`}
+                      onClick={() => {
+                        setOutputStream("stdout");
+                      }}
+                    >
+                      stdout
+                    </button>
+                    <button
+                      type="button"
+                      className={`process-modal-output-tab ${outputStream === "stderr" ? "active" : ""}`}
+                      onClick={() => {
+                        setOutputStream("stderr");
+                      }}
+                    >
+                      stderr
+                    </button>
                   </div>
+                  {hasOutput ? (
+                    <div
+                      ref={outputViewportRef}
+                      className="process-modal-output-text"
+                      data-testid="process-output-scroll"
+                      onScroll={(event) => {
+                        const target = event.currentTarget;
+                        const distance = target.scrollHeight - target.clientHeight - target.scrollTop;
+                        followOutputRef.current = distance <= OUTPUT_FOLLOW_THRESHOLD;
+                      }}
+                    >
+                      {parsedOutput.segments.map((segment, index) => (
+                        <span key={`${outputKey}-${index}`} style={segment.style}>
+                          {segment.text}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="process-modal-output-empty muted">Sin output.</div>
+                  )}
+                  {selected.lastError ? <span className="status-bad">{selected.lastError}</span> : null}
                 </div>
                 <div className="row">
+                  <button
+                    type="button"
+                    disabled={!hasOutput}
+                    onClick={() => {
+                      const clipboardApi =
+                        typeof navigator !== "undefined" && navigator.clipboard
+                          ? navigator.clipboard
+                          : null;
+                      if (!clipboardApi) {
+                        runtime.eventBus.emit("console.event", {
+                          level: "error",
+                          text: "Copy output failed: Clipboard API unavailable",
+                          timestamp: Date.now()
+                        });
+                        return;
+                      }
+                      void clipboardApi.writeText(parsedOutput.plainText).then(() => {
+                        runtime.eventBus.emit("console.event", {
+                          level: "info",
+                          text: `Output copiado: ${selected.label} (${outputStream})`,
+                          timestamp: Date.now()
+                        });
+                      }).catch((error) => {
+                        runtime.eventBus.emit("console.event", {
+                          level: "error",
+                          text: `Copy output failed: ${String(error)}`,
+                          timestamp: Date.now()
+                        });
+                      });
+                    }}
+                  >
+                    Copy
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

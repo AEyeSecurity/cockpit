@@ -52,7 +52,9 @@ describe("processes service", () => {
         cwd: "/ros2_ws",
         running: false,
         status: "idle",
-        outputEnabled: false
+        outputEnabled: true,
+        stdoutText: "",
+        stderrText: ""
       })
     ]);
   });
@@ -91,7 +93,7 @@ describe("processes service", () => {
     expect(service.getState().processes[0]?.label).toBe("second");
   });
 
-  it("starts process with configured output flag and forwards matching output", async () => {
+  it("starts process with configured output flag and stores matching output", async () => {
     const subscribers: {
       processOutput?: (message: Nav2IncomingMessage) => void;
     } = {};
@@ -138,20 +140,16 @@ describe("processes service", () => {
     });
 
     expect(dispatcher.startProcess).toHaveBeenCalledWith("healthcheck", true);
-    expect(eventBus.emit).toHaveBeenCalledWith(
-      "console.event",
-      expect.objectContaining({
-        level: "info",
-        text: "[process:healthcheck][stdout] LiDAR OK"
-      })
-    );
-    expect(eventBus.emit).toHaveBeenCalledTimes(1);
+    expect(service.getState().processes[0]?.stdoutText).toBe("LiDAR OK\n");
+    expect(service.getState().processes[0]?.stderrText).toBe("");
+    expect(eventBus.emit).not.toHaveBeenCalled();
   });
 
-  it("marks process as error on failed ack and updates final state from process_finished", async () => {
+  it("marks process as error on failed ack and keeps output after process_finished", async () => {
     const subscribers: {
       processFinished?: (message: Nav2IncomingMessage) => void;
       processExecutorState?: (message: Nav2IncomingMessage) => void;
+      processOutput?: (message: Nav2IncomingMessage) => void;
     } = {};
     const dispatcher = {
       requestProcesses: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
@@ -188,7 +186,10 @@ describe("processes service", () => {
         subscribers.processFinished = callback;
         return () => undefined;
       }),
-      subscribeProcessOutput: vi.fn(() => () => undefined)
+      subscribeProcessOutput: vi.fn((callback: (message: Nav2IncomingMessage) => void) => {
+        subscribers.processOutput = callback;
+        return () => undefined;
+      })
     };
     const service = new ProcessesService(dispatcher as never, { emit: vi.fn(), on: vi.fn() } as never);
 
@@ -196,10 +197,18 @@ describe("processes service", () => {
     await expect(service.startProcess("healthcheck")).rejects.toThrow("process already running: healthcheck");
     expect(service.getState().processes[0]?.status).toBe("error");
 
+    service.setOutputEnabled("healthcheck", true);
     await service.startProcess("healthcheck");
     subscribers.processExecutorState?.({
       op: "process_executor_state",
       process_list: [{ label: "healthcheck", command: "run", cwd: "/ros2_ws", running: true }] as never
+    });
+    subscribers.processOutput?.({
+      op: "process_output",
+      process: "healthcheck",
+      stream: "stderr",
+      data: "process exited with code 7\n",
+      requestId: "req-2"
     });
     expect(service.getState().processes[0]?.status).toBe("running");
 
@@ -216,9 +225,72 @@ describe("processes service", () => {
       expect.objectContaining({
         status: "error",
         running: false,
-        lastError: "process exited with code 7"
+        lastError: "process exited with code 7",
+        stdoutText: "",
+        stderrText: "process exited with code 7\n"
       })
     );
+  });
+
+  it("clears previous output on new process run", async () => {
+    const subscribers: {
+      processFinished?: (message: Nav2IncomingMessage) => void;
+      processOutput?: (message: Nav2IncomingMessage) => void;
+    } = {};
+    const dispatcher = {
+      requestProcesses: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "process_executor_state",
+        ok: true,
+        process_list: [{ label: "healthcheck", command: "run", cwd: "/ros2_ws", running: false }] as never
+      }),
+      reloadProcesses: vi.fn(),
+      startProcess: vi.fn<() => Promise<Nav2IncomingMessage>>()
+        .mockResolvedValueOnce({
+          op: "ack",
+          request: "start_process",
+          ok: true,
+          requestId: "req-1"
+        })
+        .mockResolvedValueOnce({
+          op: "ack",
+          request: "start_process",
+          ok: true,
+          requestId: "req-2"
+        }),
+      stopProcess: vi.fn(),
+      subscribeProcessExecutorState: vi.fn(() => () => undefined),
+      subscribeProcessFinished: vi.fn((callback: (message: Nav2IncomingMessage) => void) => {
+        subscribers.processFinished = callback;
+        return () => undefined;
+      }),
+      subscribeProcessOutput: vi.fn((callback: (message: Nav2IncomingMessage) => void) => {
+        subscribers.processOutput = callback;
+        return () => undefined;
+      })
+    };
+    const service = new ProcessesService(dispatcher as never, { emit: vi.fn(), on: vi.fn() } as never);
+
+    await service.open();
+    service.setOutputEnabled("healthcheck", true);
+    await service.startProcess("healthcheck");
+    subscribers.processOutput?.({
+      op: "process_output",
+      process: "healthcheck",
+      stream: "stdout",
+      data: "old\n",
+      requestId: "req-1"
+    });
+    subscribers.processFinished?.({
+      op: "process_finished",
+      process: "healthcheck",
+      ok: true,
+      requestId: "req-1"
+    });
+
+    await service.startProcess("healthcheck");
+
+    expect(service.getState().processes[0]?.stdoutText).toBe("");
+    expect(service.getState().processes[0]?.stderrText).toBe("");
   });
 
   it("stops running process", async () => {

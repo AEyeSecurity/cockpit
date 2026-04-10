@@ -17,6 +17,8 @@ export interface ProcessViewState extends ProcessDefinition {
   lastError: string;
   outputEnabled: boolean;
   lastRequestId: string;
+  stdoutText: string;
+  stderrText: string;
 }
 
 export interface ProcessesState {
@@ -203,7 +205,9 @@ export class ProcessesService {
       status: "running",
       lastError: "",
       running: true,
-      lastRequestId: String(response.requestId ?? "")
+      lastRequestId: String(response.requestId ?? ""),
+      stdoutText: "",
+      stderrText: ""
     });
     this.state = {
       ...this.state,
@@ -295,8 +299,10 @@ export class ProcessesService {
         ...definition,
         status,
         lastError,
-        outputEnabled: current?.outputEnabled ?? false,
-        lastRequestId: current?.lastRequestId ?? ""
+        outputEnabled: current?.outputEnabled ?? true,
+        lastRequestId: current?.lastRequestId ?? "",
+        stdoutText: current?.stdoutText ?? "",
+        stderrText: current?.stderrText ?? ""
       };
     });
     const selectedExists = nextProcesses.some((entry) => entry.label === this.state.selectedProcess);
@@ -336,16 +342,20 @@ export class ProcessesService {
     if (!process) return;
     if (requestId && process.lastRequestId && requestId !== process.lastRequestId) return;
     if (!process.outputEnabled) return;
-    this.eventBus.emit("console.event", {
-      level: stream === "stderr" ? "warn" : "info",
-      text: `[process:${label}][${stream}] ${data.replace(/\n$/, "")}`,
-      timestamp: Date.now()
+    this.setProcessState(label, {
+      stdoutText:
+        stream === "stdout" ? `${process.stdoutText}${data.endsWith("\n") ? data : `${data}\n`}` : process.stdoutText,
+      stderrText:
+        stream === "stderr" ? `${process.stderrText}${data.endsWith("\n") ? data : `${data}\n`}` : process.stderrText
     });
+    this.emit();
   }
 
   private setProcessState(
     label: string,
-    patch: Partial<Pick<ProcessViewState, "status" | "lastError" | "running" | "lastRequestId">>
+    patch: Partial<
+      Pick<ProcessViewState, "status" | "lastError" | "running" | "lastRequestId" | "stdoutText" | "stderrText">
+    >
   ): void {
     this.state = {
       ...this.state,

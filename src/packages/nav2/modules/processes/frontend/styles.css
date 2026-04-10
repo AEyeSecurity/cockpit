@@ -16,13 +16,25 @@
 .process-modal-sidebar {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
 }
 
-.process-modal-sidebar-actions {
-  display: flex;
-  justify-content: flex-end;
+.process-modal-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.process-modal-search-row input {
+  min-width: 0;
+}
+
+.process-modal-reload-btn {
+  width: auto;
+  min-width: 0;
+  justify-self: end;
 }
 
 .process-modal-list {
@@ -85,12 +97,6 @@
   color: #000000;
 }
 
-.process-modal-item-meta {
-  font-size: 12px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
 .process-modal-content {
   min-height: 0;
   display: grid;
@@ -115,6 +121,12 @@
   gap: 8px;
 }
 
+.process-modal-details span {
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .process-modal-toggle-row {
   display: flex;
   align-items: center;
@@ -137,10 +149,65 @@
   font-weight: 700;
 }
 
-.process-modal-output-placeholder {
+.process-modal-output-panel {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  align-items: start;
+}
+
+.process-modal-output-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.process-modal-output-tab {
+  width: auto;
+  min-width: 0;
+}
+
+.process-modal-output-tab.active {
+  background: var(--accent-subtle);
+  border-color: #000000;
+  color: #000000;
+}
+
+.process-modal-output-text {
+  margin: 0;
+  min-height: 0;
+  max-height: 100%;
+  display: block;
+  overflow-x: auto;
+  overflow-y: auto;
+  white-space: pre;
+  border: 1px solid var(--line);
+  background: #f6f8fa;
+  padding: 8px;
+  color: #000000;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 4;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.process-modal-output-text span,
+.process-modal-content span {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.process-modal-output-empty {
   min-height: 0;
   display: grid;
   place-items: center;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 8px;
 }
 
 @media (max-width: 980px) {

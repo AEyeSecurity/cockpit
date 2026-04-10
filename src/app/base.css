@@ -1123,6 +1123,13 @@ textarea::placeholder {
   max-height: 85vh;
 }
 
+.modal-card.modal-card-modal-processes {
+  width: 85vw;
+  max-width: 85vw;
+  height: 90vh;
+  max-height: 90vh;
+}
+
 .settings-modal-header {
   width: 100%;
   min-width: 0;
