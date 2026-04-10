@@ -2,113 +2,106 @@ import { useEffect, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import type { RobotDispatcher } from "../../navigation/dispatcher/impl/RobotDispatcher";
-import type { ConnectionState, ConnectionService } from "../../navigation/service/impl/ConnectionService";
-import type { NavigationService, NavigationState } from "../../navigation/service/impl/NavigationService";
+import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
+import type { NavigationService } from "../../navigation/service/impl/NavigationService";
+import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import { TelemetryService, type TelemetrySnapshot } from "../service/impl/TelemetryService";
 
 const SERVICE_ID = "service.telemetry";
 const DISPATCHER_ID = "dispatcher.robot";
 const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
+const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
 
 function resolveOptionalServices(runtime: ModuleContext): {
   navigation: NavigationService | null;
   connection: ConnectionService | null;
+  sensorInfo: SensorInfoService | null;
 } {
   try {
     const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
     const connection = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-    return { navigation, connection };
+    const sensorInfo = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+    return { navigation, connection, sensorInfo };
   } catch {
-    return { navigation: null, connection: null };
+    return { navigation: null, connection: null, sensorInfo: null };
   }
 }
 
-function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.services.getService<TelemetryService>(SERVICE_ID);
-  const [snapshot, setSnapshot] = useState<TelemetrySnapshot>(service.getSnapshot());
-  const services = resolveOptionalServices(runtime);
-  const [navigationState, setNavigationState] = useState<NavigationState | null>(
-    services.navigation ? services.navigation.getState() : null
-  );
-  const [connectionState, setConnectionState] = useState<ConnectionState | null>(
-    services.connection ? services.connection.getState() : null
-  );
+function formatInfoNumber(value: unknown, digits = 2): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(digits);
+}
 
-  useEffect(() => service.subscribeTelemetry((next) => setSnapshot(next)), [service]);
+function formatInfoCoordinate(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(6);
+}
+
+function formatInfoTimestamp(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "n/a";
+  return new Date(numeric).toLocaleString();
+}
+
+function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const services = resolveOptionalServices(runtime);
+  const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
+    services.sensorInfo ? services.sensorInfo.getState() : null
+  );
+  const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
+  const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
+  const pixhawkPayload = sensorInfoState?.payloads.pixhawk_gps as Record<string, unknown> | undefined;
+  const pixhawkSnapshot = (pixhawkPayload?.snapshot ?? {}) as Record<string, unknown>;
   useEffect(() => {
-    if (!services.navigation) return;
-    return services.navigation.subscribe((next) => setNavigationState(next));
-  }, [services.navigation]);
-  useEffect(() => {
-    if (!services.connection) return;
-    return services.connection.subscribe((next) => setConnectionState(next));
-  }, [services.connection]);
+    if (!services.sensorInfo) return;
+    return services.sensorInfo.subscribe((next) => setSensorInfoState(next));
+  }, [services.sensorInfo]);
 
   return (
     <div className="stack">
-      <div className="panel-card status-board">
-        <div className="status-row">
-          <strong>Connection</strong>
-          <span className={connectionState?.connected ? "status-ok" : "status-bad"}>
-            {connectionState?.connected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
-        <div className="status-row">
-          <strong>Goal</strong>
-          <span>{navigationState?.lastStatus ?? "n/a"}</span>
-        </div>
-        <div className="status-row">
-          <strong>Waypoints</strong>
-          <span>{navigationState?.waypoints.length ?? 0}</span>
-        </div>
-        <div className="status-row">
-          <strong>Manual</strong>
-          <span>{navigationState?.manualMode ? "ON" : "OFF"}</span>
-        </div>
-        <div className="status-row">
-          <strong>Camera Stream</strong>
-          <span>{navigationState?.cameraStreamConnected ? "Connected" : "Disconnected"}</span>
-        </div>
-        <div className="status-row">
-          <strong>Robot</strong>
-          <span>{snapshot.robotStatus.connected ? "Online" : "Offline"}</span>
+      <div className="panel-card">
+        <h4>Datum</h4>
+        <div className="key-value-grid">
+          <span>Status</span>
+          <span>{(generalSnapshot.datum as Record<string, unknown> | undefined)?.already_set === true ? "set" : "unset"}</span>
+          <span>Latitude</span>
+          <span>{formatInfoCoordinate((generalSnapshot.datum as Record<string, unknown> | undefined)?.datum_lat)}</span>
+          <span>Longitude</span>
+          <span>{formatInfoCoordinate((generalSnapshot.datum as Record<string, unknown> | undefined)?.datum_lon)}</span>
+          <span>Source</span>
+          <span>{String((generalSnapshot.datum as Record<string, unknown> | undefined)?.last_set_source ?? "n/a")}</span>
+          <span>Last set</span>
+          <span>{formatInfoTimestamp((generalSnapshot.datum as Record<string, unknown> | undefined)?.last_set_epoch_ms)}</span>
         </div>
       </div>
       <div className="panel-card">
-        <h4>Robot Status</h4>
-        <div className="status-grid">
-          <div>
-            <strong>Mode</strong>
-            <p className="muted">{snapshot.robotStatus.mode}</p>
-          </div>
-          <div>
-            <strong>Battery</strong>
-            <p className="muted">{Number(snapshot.robotStatus.batteryPct).toFixed(1)}%</p>
-          </div>
-          <div>
-            <strong>Alerts</strong>
-            <p className="muted">{snapshot.alerts.length} active</p>
-          </div>
-          <div>
-            <strong>Events</strong>
-            <p className="muted">{snapshot.recentEvents.length} buffered</p>
-          </div>
+        <h4>RTK Source</h4>
+        <div className="key-value-grid">
+          <span>Connected</span>
+          <span>{(generalSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.connected === true ? "yes" : "no"}</span>
+          <span>Label</span>
+          <span>{String((generalSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a")}</span>
+          <span>RTCM age</span>
+          <span>{formatInfoNumber((generalSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.rtcm_age_s, 1)} s</span>
+          <span>Received count</span>
+          <span>{formatInfoNumber((generalSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.received_count, 0)}</span>
+          <span>Last error</span>
+          <span>{String((generalSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.last_error ?? "none")}</span>
         </div>
       </div>
       <div className="panel-card">
-        <h4>Active Alerts</h4>
-        {snapshot.alerts.length === 0 ? (
-          <p className="muted">No active alerts.</p>
-        ) : (
-          <ul className="feed-list">
-            {snapshot.alerts.slice(0, 6).map((entry, index) => (
-              <li key={`${entry.timestamp}.${index}`} className="feed-item">
-                <strong>{entry.level.toUpperCase()}</strong> {entry.text}
-              </li>
-            ))}
-          </ul>
-        )}
+        <h4>Yaw Diagnostics</h4>
+        <div className="key-value-grid">
+          <span>Delta yaw</span>
+          <span>{formatInfoNumber((pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined)?.yaw_delta_deg, 2)} deg</span>
+          <span>Diferencias</span>
+          <span>{formatInfoNumber((pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined)?.diferencias, 3)}</span>
+          <span>ENU convention</span>
+          <span>0°=E, 90°=N</span>
+        </div>
       </div>
     </div>
   );
@@ -130,10 +123,10 @@ function TelemetryConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       <div className="panel-card telemetry-scroll-card">
         <h4>Recent Events</h4>
         {snapshot.recentEvents.length === 0 ? (
-          <p className="muted">No events.</p>
+            <p className="muted">No events.</p>
         ) : (
           <ul className="feed-list telemetry-scroll-list">
-            {snapshot.recentEvents.map((entry, index) => (
+            {snapshot.recentEvents.map((entry: TelemetrySnapshot["recentEvents"][number], index: number) => (
               <li key={`${entry.timestamp}.${index}`} className="feed-item">
                 <div>
                   <strong>{entry.level.toUpperCase()}</strong> {entry.text}
@@ -147,10 +140,10 @@ function TelemetryConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       <div className="panel-card telemetry-scroll-card">
         <h4>Alerts Timeline</h4>
         {snapshot.alerts.length === 0 ? (
-          <p className="muted">No alerts.</p>
+            <p className="muted">No alerts.</p>
         ) : (
           <ul className="feed-list telemetry-scroll-list">
-            {snapshot.alerts.map((entry, index) => (
+            {snapshot.alerts.map((entry: TelemetrySnapshot["alerts"][number], index: number) => (
               <li
                 key={`${entry.timestamp}.${index}`}
                 className={`feed-item ${nowMs - entry.timestamp <= 5000 ? "alert-recent" : ""}`}

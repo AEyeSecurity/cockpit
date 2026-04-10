@@ -10,6 +10,7 @@ import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
 import { MapService, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
 import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
+import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 
 const TRANSPORT_ID = "transport.ws.core";
@@ -18,6 +19,7 @@ const SERVICE_ID = "service.map";
 const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
 const TELEMETRY_SERVICE_ID = "service.telemetry";
+const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
 const GPS_NATIVE_MAX_ZOOM = 19;
 const GPS_DEFAULT_ZOOM = GPS_NATIVE_MAX_ZOOM - 3;
 const GPS_DEFAULT_CENTER: L.LatLngTuple = [-31.4201, -64.1888];
@@ -149,11 +151,21 @@ function buildWaypointIcon(index: number, yawDeg: number, draft = false, selecte
 function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
   const hasHeading = headingDeg !== null && headingDeg !== undefined && Number.isFinite(Number(headingDeg));
   const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0;
-  const cssRotationDeg = normalizeYawDeg(90 - yaw);
+  // Glyph `➤` points to the right by default; ENU yaw 0 also points East.
+  const cssRotationDeg = normalizeYawDeg(-yaw);
   const classes = hasHeading ? "robot-icon" : "robot-icon no-heading";
   return L.divIcon({
     className: "",
-    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><div class="robot-arrow"></div></div>`,
+    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><span class="robot-glyph">➤</span></div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20]
+  });
+}
+
+function buildDatumIcon(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: '<div class="datum-icon"><span class="datum-glyph">◎</span><span class="datum-label">DATUM</span></div>',
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
@@ -180,6 +192,7 @@ function LeafletMapCanvas({
   waypoints,
   selectedWaypointIndexes,
   robotPose,
+  datumPose,
   centerRequestKey,
   onQueueWaypoint,
   onToggleWaypointSelection,
@@ -196,6 +209,7 @@ function LeafletMapCanvas({
   waypoints: NavigationState["waypoints"];
   selectedWaypointIndexes: number[];
   robotPose: TelemetrySnapshot["robotPose"];
+  datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
   onQueueWaypoint: (lat: number, lon: number, yawDeg: number) => void;
   onToggleWaypointSelection: (index: number) => void;
@@ -210,6 +224,7 @@ function LeafletMapCanvas({
   const waypointLayerRef = useRef<L.LayerGroup | null>(null);
   const draftLayerRef = useRef<L.LayerGroup | null>(null);
   const robotMarkerRef = useRef<L.Marker | null>(null);
+  const datumMarkerRef = useRef<L.Marker | null>(null);
   const draftMarkerRef = useRef<L.Marker | null>(null);
   const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg: number; dragYaw: boolean } | null>(null);
   const goalCreateSessionRef = useRef<{ active: boolean; hasMoved: boolean }>({ active: false, hasMoved: false });
@@ -719,6 +734,7 @@ function LeafletMapCanvas({
       toolDraftLayerRef.current = null;
       toolDrawingsLayerRef.current = null;
       robotMarkerRef.current = null;
+      datumMarkerRef.current = null;
       draftMarkerRef.current = null;
       measurePointsRef.current = [];
     };
@@ -887,6 +903,28 @@ function LeafletMapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map) return;
+    if (!datumPose) {
+      if (datumMarkerRef.current) {
+        map.removeLayer(datumMarkerRef.current);
+        datumMarkerRef.current = null;
+      }
+      return;
+    }
+    const latLng = L.latLng(datumPose.lat, datumPose.lon);
+    if (!datumMarkerRef.current) {
+      datumMarkerRef.current = L.marker(latLng, {
+        icon: buildDatumIcon(),
+        interactive: false
+      }).addTo(map);
+      return;
+    }
+    datumMarkerRef.current.setLatLng(latLng);
+    datumMarkerRef.current.setIcon(buildDatumIcon());
+  }, [datumPose]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !robotPose || centerRequestKey <= 0) return;
     if (centerRequestHandledRef.current === centerRequestKey) return;
     centerRequestHandledRef.current = centerRequestKey;
@@ -958,6 +996,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   } catch {
     telemetryService = null;
   }
+  let sensorInfoService: SensorInfoService | null = null;
+  try {
+    sensorInfoService = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
+  } catch {
+    sensorInfoService = null;
+  }
   const [state, setState] = useState<MapWorkspaceState>(mapService.getState());
   const [mainPane, setMainPane] = useState<"map" | "camera">("map");
   const [frameSrc, setFrameSrc] = useState("");
@@ -973,6 +1017,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   );
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
+  );
+  const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
+    sensorInfoService ? sensorInfoService.getState() : null
   );
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
@@ -1002,6 +1049,10 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
   }, [telemetryService]);
+  useEffect(() => {
+    if (!sensorInfoService) return;
+    return sensorInfoService.subscribe((next) => setSensorInfoState(next));
+  }, [sensorInfoService]);
   useEffect(() => {
     const connected = connectionState?.connected === true;
     const previous = wasConnectedRef.current;
@@ -1201,6 +1252,20 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
         ? ""
         : "camera connecting";
   const toolStatusText = mainIsMap ? state.toolInfo : "Herramientas disponibles con mapa principal";
+  const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
+  const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
+  const datumFromSensor = generalSnapshot.datum as Record<string, unknown> | undefined;
+  const datumLat = Number(datumFromSensor?.datum_lat ?? state.map?.originLat ?? Number.NaN);
+  const datumLon = Number(datumFromSensor?.datum_lon ?? state.map?.originLon ?? Number.NaN);
+  const datumPose =
+    Number.isFinite(datumLat) &&
+    Number.isFinite(datumLon) &&
+    !(Math.abs(datumLat) < 1e-9 && Math.abs(datumLon) < 1e-9)
+      ? {
+          lat: datumLat,
+          lon: datumLon
+        }
+      : null;
 
   const selectTool = (tool: MapToolMode, infoLabel: string): void => {
     if (!mapToolsEnabled) {
@@ -1382,6 +1447,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               waypoints={navigationState?.waypoints ?? []}
               selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
               robotPose={telemetrySnapshot?.robotPose ?? null}
+              datumPose={datumPose}
               centerRequestKey={centerRequestKey}
               onQueueWaypoint={queueWaypointFromMap}
               onToggleWaypointSelection={toggleWaypointSelectionFromMap}

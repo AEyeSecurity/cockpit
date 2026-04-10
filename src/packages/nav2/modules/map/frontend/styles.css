@@ -358,20 +358,44 @@
   filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.55));
 }
 
-.robot-icon .robot-arrow {
-  position: absolute;
-  top: 1px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 16px;
-  height: 32px;
-  background: linear-gradient(180deg, #55cbff 0%, #0ea5e9 42%, #0284c7 100%);
-  clip-path: polygon(50% 0%, 100% 66%, 66% 62%, 50% 100%, 34% 62%, 0% 66%);
+.robot-icon .robot-glyph {
+  color: #0ea5e9;
+  font-size: 30px;
+  line-height: 1;
+  text-shadow: 0 0 2px rgba(2, 6, 23, 0.75);
+  transform: translateX(2px);
+}
+
+.robot-icon.no-heading .robot-glyph {
+  opacity: 0.55;
+}
+
+.datum-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  transform: translate(-2px, -2px);
   filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.75));
 }
 
-.robot-icon.no-heading .robot-arrow {
-  opacity: 0.55;
+.datum-glyph {
+  color: #d97706;
+  font-size: 18px;
+  line-height: 1;
+  text-shadow: 0 0 1px rgba(2, 6, 23, 0.6);
+}
+
+.datum-label {
+  margin-top: -1px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid #7c2d12;
+  background: rgba(255, 237, 213, 0.97);
+  color: #7c2d12;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 .map-toolbar-icons {
