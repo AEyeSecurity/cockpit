@@ -13,11 +13,11 @@ interface PanelProps {
 function panelIcon(panel: SidebarContribution): string {
   if (panel.icon) return panel.icon;
   const id = panel.id;
-  if (id.includes("connection")) return "🔌";
-  if (id.includes("navigation")) return "🧭";
+  if (id.includes("connection")) return "󰄍";
+  if (id.includes("navigation")) return "󱣱";
   if (id.includes("manual")) return "🎮";
   if (id.includes("camera")) return "📷";
-  if (id.includes("telemetry")) return "📡";
+  if (id.includes("telemetry")) return "";
   if (id.includes("zone")) return "🗺️";
   if (id.includes("map")) return "🗺️";
   return "🧩";

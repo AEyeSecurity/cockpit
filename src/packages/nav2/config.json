@@ -9,6 +9,7 @@
     "map_default_center_lat": -31.4201,
     "map_default_center_lon": -64.1888,
     "map_default_zoom": 16,
+    "map_default_type": "hybrid",
     "manual_linear_speed_min": 1.0,
     "manual_linear_speed_max": 4.0,
     "manual_linear_speed_default": 1.2,
@@ -68,6 +69,12 @@
         "key": "map_default_zoom",
         "label": "Map Default Zoom",
         "type": "number"
+      },
+      {
+        "key": "map_default_type",
+        "label": "Map Default Type",
+        "type": "string",
+        "placeholder": "hybrid|roadmap"
       },
       {
         "key": "manual_linear_speed_min",

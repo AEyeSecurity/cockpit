@@ -265,7 +265,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              <span className="nav-lock-btn-label">🔒 Desbloquear robot</span>
+              <span className="nav-lock-btn-label"> Desbloquear robot</span>
             </button>
           </div>
         ) : (
@@ -1254,14 +1254,14 @@ function registerSidebarPanels(ctx: ModuleContext): void {
     id: "sidebar.connection",
     slot: "sidebar",
     label: "Connection",
-    icon: "🔌",
+    icon: "󰄍",
     render: () => <ConnectionSidebarPanel runtime={ctx} />
   });
   ctx.contributions.register({
     id: "sidebar.navigation",
     slot: "sidebar",
     label: "Navigation",
-    icon: "🧭",
+    icon: "󱣱",
     render: () => <NavigationSidebarPanel runtime={ctx} />
   });
 }
