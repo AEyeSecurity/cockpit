@@ -1,5 +1,5 @@
 import type { MapToolMode, ZoneEntry } from "../service/impl/MapService";
-import { calculateProtractorAngleDeg, snapToCartesianAxis } from "./protractor";
+import { calculateProtractorAngleDeg, snapToAngleIncrement } from "./protractor";
 import {
   formatAngleDegrees,
   formatAreaSqMeters,
@@ -16,7 +16,9 @@ import {
 
 const MAP_TOOL_COLOR = "#55ff7f";
 const PROTRACTOR_MIN_ARM_METERS = 0.05;
-const PROTRACTOR_SNAP_THRESHOLD_DEG = 12;
+const ANGLE_SNAP_STEP_DEG = 10;
+const ANGLE_SNAP_THRESHOLD_DEG = 10;
+const MEASURE_LABEL_CLASS_NAME = "map-measure-label";
 
 export type ZoneEditMode = "idle" | "create" | "edit" | "delete";
 export type GoogleMapType = "hybrid" | "roadmap";
@@ -93,6 +95,9 @@ export class MapEngine {
   private readonly eventListeners: google.maps.MapsEventListener[] = [];
   private readonly zonePolygons = new Map<string, google.maps.Polygon>();
   private readonly zonePathListeners = new Map<string, google.maps.MapsEventListener[]>();
+  private readonly zoneSnapShiftSession = new Map<string, boolean>();
+  private readonly zoneDragOriginPath = new Map<string, GeoPoint[]>();
+  private readonly zonePathApplyGuard = new Set<string>();
   private readonly toolDraftOverlays: MapOverlay[] = [];
   private readonly toolDrawingOverlays: MapOverlay[] = [];
   private zoneDraftMarkers: google.maps.Marker[] = [];
@@ -160,6 +165,9 @@ export class MapEngine {
     this.setDatumPose(null);
     this.zonePathListeners.forEach((listeners) => listeners.forEach((listener) => listener.remove()));
     this.zonePathListeners.clear();
+    this.zoneSnapShiftSession.clear();
+    this.zoneDragOriginPath.clear();
+    this.zonePathApplyGuard.clear();
     this.zonePolygons.forEach((polygon) => polygon.setMap(null));
     this.zonePolygons.clear();
     this.eventListeners.forEach((listener) => listener.remove());
@@ -261,6 +269,9 @@ export class MapEngine {
       if (present.has(zoneId)) return;
       this.zonePathListeners.get(zoneId)?.forEach((listener) => listener.remove());
       this.zonePathListeners.delete(zoneId);
+      this.zoneSnapShiftSession.delete(zoneId);
+      this.zoneDragOriginPath.delete(zoneId);
+      this.zonePathApplyGuard.delete(zoneId);
       polygon.setMap(null);
       this.zonePolygons.delete(zoneId);
       if (this.activeZoneId === zoneId) {
@@ -275,6 +286,9 @@ export class MapEngine {
         if (existing) {
           this.zonePathListeners.get(zone.id)?.forEach((listener) => listener.remove());
           this.zonePathListeners.delete(zone.id);
+          this.zoneSnapShiftSession.delete(zone.id);
+          this.zoneDragOriginPath.delete(zone.id);
+          this.zonePathApplyGuard.delete(zone.id);
           existing.setMap(null);
           this.zonePolygons.delete(zone.id);
         }
@@ -471,8 +485,10 @@ export class MapEngine {
   private bindZoneEvents(zoneId: string, polygon: google.maps.Polygon): void {
     const listeners: google.maps.MapsEventListener[] = [];
     listeners.push(
-      polygon.addListener("mousedown", () => {
+      polygon.addListener("mousedown", (event: google.maps.PolyMouseEvent) => {
         this.pointerDownOnOverlay = true;
+        if (this.zoneEditMode !== "edit") return;
+        this.zoneSnapShiftSession.set(zoneId, this.isShiftPressedFromEvent(event));
       }),
       polygon.addListener("click", () => {
         if (this.zoneEditMode === "delete") {
@@ -482,22 +498,36 @@ export class MapEngine {
         if (this.zoneEditMode === "edit") {
           this.activeZoneId = zoneId;
           this.applyZoneEditState();
-          this.emitToolInfo("Edicion de zona activa. Arrastra vertices para ajustar.");
+          this.emitToolInfo("Edicion de zona activa. Shift alinea a 10°.");
           return;
         }
         if (this.zoneEditMode !== "idle") return;
         if (this.toolMode !== "idle") return;
         this.callbacks.onZoneToggle(zoneId);
       }),
-      polygon.addListener("dragend", () => this.handleZonePathEdited(zoneId, polygon)),
-      polygon.addListener("mouseup", () => this.handleZonePathEdited(zoneId, polygon))
+      polygon.addListener("dragstart", (event: google.maps.PolyMouseEvent) => {
+        if (this.zoneEditMode !== "edit") return;
+        this.zoneSnapShiftSession.set(zoneId, this.isShiftPressedFromEvent(event));
+        this.zoneDragOriginPath.set(zoneId, this.pathToGeoPoints(polygon.getPath()));
+      }),
+      polygon.addListener("dragend", () => {
+        this.handleZonePathEdited(zoneId, polygon, { kind: "drag" });
+        this.zoneDragOriginPath.delete(zoneId);
+      }),
+      polygon.addListener("mouseup", () => this.handleZonePathEdited(zoneId, polygon, { kind: "mouseup" }))
     );
 
     const path = polygon.getPath();
     listeners.push(
-      this.maps.event.addListener(path, "set_at", () => this.handleZonePathEdited(zoneId, polygon)),
-      this.maps.event.addListener(path, "insert_at", () => this.handleZonePathEdited(zoneId, polygon)),
-      this.maps.event.addListener(path, "remove_at", () => this.handleZonePathEdited(zoneId, polygon))
+      this.maps.event.addListener(path, "set_at", (index: number) =>
+        this.handleZonePathEdited(zoneId, polygon, { kind: "set_at", index: Number(index) })
+      ),
+      this.maps.event.addListener(path, "insert_at", (index: number) =>
+        this.handleZonePathEdited(zoneId, polygon, { kind: "insert_at", index: Number(index) })
+      ),
+      this.maps.event.addListener(path, "remove_at", () =>
+        this.handleZonePathEdited(zoneId, polygon, { kind: "remove_at" })
+      )
     );
 
     this.zonePathListeners.set(zoneId, listeners);
@@ -514,16 +544,41 @@ export class MapEngine {
       const editable = this.zoneEditMode === "edit" && this.activeZoneId === zoneId;
       polygon.setOptions({
         editable,
-        draggable: false,
+        draggable: editable,
         clickable: true
       });
     });
   }
 
-  private handleZonePathEdited(zoneId: string, polygon: google.maps.Polygon): void {
+  private handleZonePathEdited(
+    zoneId: string,
+    polygon: google.maps.Polygon,
+    mutation?: { kind: "set_at" | "insert_at" | "remove_at" | "drag" | "mouseup"; index?: number }
+  ): void {
     if (this.zoneEditMode !== "edit") return;
+    if (this.zonePathApplyGuard.has(zoneId)) return;
     const path = polygon.getPath();
-    this.callbacks.onZonePolygonChange(zoneId, polygonFromMvcPath(path));
+
+    if (this.zoneSnapShiftSession.get(zoneId) === true) {
+      if (mutation?.kind === "set_at" || mutation?.kind === "insert_at") {
+        const index = Number(mutation.index ?? -1);
+        this.snapZonePathVertex(path, index, zoneId);
+      } else if (mutation?.kind === "drag") {
+        const originalPath = this.zoneDragOriginPath.get(zoneId);
+        const snappedPath = originalPath ? this.snapDraggedZonePath(originalPath, this.pathToGeoPoints(path)) : null;
+        if (snappedPath && snappedPath.length === path.getLength()) {
+          this.zonePathApplyGuard.add(zoneId);
+          try {
+            polygon.setPaths(snappedPath.map((entry) => toLatLngLiteral(entry)));
+          } finally {
+            this.zonePathApplyGuard.delete(zoneId);
+          }
+        }
+      }
+    }
+
+    const finalPath = polygon.getPath();
+    this.callbacks.onZonePolygonChange(zoneId, polygonFromMvcPath(finalPath));
   }
 
   private handleMapClick(event: google.maps.MapMouseEvent): void {
@@ -531,9 +586,11 @@ export class MapEngine {
     if (!event.latLng) return;
 
     const point = toGeoPoint(event.latLng);
+    const shiftPressed = this.isShiftPressedFromEvent(event);
 
     if (this.zoneEditMode === "create" && this.toolMode === "idle") {
-      this.zoneCreatePoints.push(point);
+      const nextPoint = this.resolvePointWithSnap(this.zoneCreatePoints[this.zoneCreatePoints.length - 1] ?? null, point, shiftPressed);
+      this.zoneCreatePoints.push(nextPoint);
       this.zoneCreatePreview = null;
       this.renderZoneDraft(null);
       return;
@@ -547,21 +604,22 @@ export class MapEngine {
     }
 
     if (this.toolMode === "ruler") {
-      this.measurePoints = this.collectMeasurePoints(point);
+      const nextPoint = this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed);
+      this.measurePoints = this.collectMeasurePoints(nextPoint);
       this.measurePreviewPoint = null;
-      this.renderRuler(point);
+      this.renderRuler(null);
       return;
     }
 
     if (this.toolMode === "area") {
-      this.measurePoints = this.collectMeasurePoints(point);
+      const nextPoint = this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed);
+      this.measurePoints = this.collectMeasurePoints(nextPoint);
       this.measurePreviewPoint = null;
-      this.renderArea(point);
+      this.renderArea(null);
       return;
     }
 
     if (this.toolMode === "protractor") {
-      const shiftPressed = Boolean((event.domEvent as MouseEvent | undefined)?.shiftKey);
       if (!this.protractorVertex) {
         this.protractorVertex = point;
         this.protractorArm1 = null;
@@ -593,18 +651,18 @@ export class MapEngine {
     }
 
     const point = toGeoPoint(event.latLng);
+    const shiftPressed = this.isShiftPressedFromEvent(event);
     if (this.toolMode === "ruler") {
-      this.finalizeRuler(point);
+      this.finalizeRuler(this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed));
       return;
     }
 
     if (this.toolMode === "protractor") {
-      const shiftPressed = Boolean((event.domEvent as MouseEvent | undefined)?.shiftKey);
       this.finalizeProtractor(this.resolveProtractorPoint(point, shiftPressed));
       return;
     }
 
-    this.finalizeArea(point);
+    this.finalizeArea(this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed));
   }
 
   private handleMapMouseDown(event: google.maps.MapMouseEvent): void {
@@ -635,6 +693,7 @@ export class MapEngine {
   private handleMapMouseMove(event: google.maps.MapMouseEvent): void {
     if (!event.latLng) return;
     const point = toGeoPoint(event.latLng);
+    const shiftPressed = this.isShiftPressedFromEvent(event);
 
     if (this.goalSession.active) {
       const draft = this.goalDraft;
@@ -654,27 +713,29 @@ export class MapEngine {
     if (!this.interactive) return;
 
     if (this.zoneEditMode === "create" && this.toolMode === "idle") {
-      this.zoneCreatePreview = point;
-      this.renderZoneDraft(point);
+      const preview = this.resolvePointWithSnap(this.zoneCreatePoints[this.zoneCreatePoints.length - 1] ?? null, point, shiftPressed);
+      this.zoneCreatePreview = preview;
+      this.renderZoneDraft(preview);
       return;
     }
 
     if (this.zoneEditMode !== "idle") return;
 
     if (this.toolMode === "ruler") {
-      this.measurePreviewPoint = point;
-      this.renderRuler(point);
+      const preview = this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed);
+      this.measurePreviewPoint = preview;
+      this.renderRuler(preview);
       return;
     }
 
     if (this.toolMode === "area") {
-      this.measurePreviewPoint = point;
-      this.renderArea(point);
+      const preview = this.resolvePointWithSnap(this.measurePoints[this.measurePoints.length - 1] ?? null, point, shiftPressed);
+      this.measurePreviewPoint = preview;
+      this.renderArea(preview);
       return;
     }
 
     if (this.toolMode === "protractor") {
-      const shiftPressed = Boolean((event.domEvent as MouseEvent | undefined)?.shiftKey);
       const preview = this.resolveProtractorPoint(point, shiftPressed);
       this.measurePreviewPoint = preview;
       this.renderProtractor(preview);
@@ -791,11 +852,11 @@ export class MapEngine {
 
   private emitToolLegend(mode: MapToolMode): void {
     if (mode === "ruler") {
-      this.emitToolInfo("Regla activa. Click agrega, doble click cierra.");
+      this.emitToolInfo("Regla activa. Click agrega, doble click cierra. Shift alinea a 10°.");
       return;
     }
     if (mode === "area") {
-      this.emitToolInfo("Area activa. Click agrega, doble click cierra.");
+      this.emitToolInfo("Area activa. Click agrega, doble click cierra. Shift alinea a 10°.");
       return;
     }
     if (mode === "inspect") {
@@ -803,10 +864,107 @@ export class MapEngine {
       return;
     }
     if (mode === "protractor") {
-      this.emitToolInfo("Transportador activo. Click define vertice. Shift alinea ejes.");
+      this.emitToolInfo("Transportador activo. Click define vertice. Shift alinea a 10°.");
       return;
     }
     this.emitToolInfo("Map tools idle.");
+  }
+
+  private isShiftPressedFromEvent(event: { domEvent?: Event } | null | undefined): boolean {
+    if (!event || !event.domEvent) return false;
+    const domEvent = event.domEvent as MouseEvent | KeyboardEvent;
+    return domEvent.shiftKey === true;
+  }
+
+  private resolvePointWithSnap(anchor: GeoPoint | null, point: GeoPoint, shiftPressed: boolean): GeoPoint {
+    if (!shiftPressed || !anchor) return point;
+    return snapToAngleIncrement(anchor, point, ANGLE_SNAP_STEP_DEG, ANGLE_SNAP_THRESHOLD_DEG, PROTRACTOR_MIN_ARM_METERS);
+  }
+
+  private pathToGeoPoints(path: google.maps.MVCArray<google.maps.LatLng>): GeoPoint[] {
+    const next: GeoPoint[] = [];
+    for (let index = 0; index < path.getLength(); index += 1) {
+      const point = path.getAt(index);
+      next.push({ lat: Number(point.lat()), lng: Number(point.lng()) });
+    }
+    return next;
+  }
+
+  private createLatLng(point: GeoPoint): google.maps.LatLng {
+    const namespace = this.maps as unknown as { LatLng?: new (lat: number, lng: number) => google.maps.LatLng };
+    if (typeof namespace.LatLng === "function") {
+      return new namespace.LatLng(Number(point.lat), Number(point.lng));
+    }
+    return {
+      lat: () => Number(point.lat),
+      lng: () => Number(point.lng)
+    } as unknown as google.maps.LatLng;
+  }
+
+  private snapZonePathVertex(path: google.maps.MVCArray<google.maps.LatLng>, index: number, zoneId: string): void {
+    if (!Number.isInteger(index) || index < 0 || index >= path.getLength()) return;
+    if (path.getLength() < 2) return;
+    const previousIndex = (index - 1 + path.getLength()) % path.getLength();
+    if (previousIndex === index) return;
+
+    const anchor = toGeoPoint(path.getAt(previousIndex));
+    const rawPoint = toGeoPoint(path.getAt(index));
+    const snappedPoint = this.resolvePointWithSnap(anchor, rawPoint, true);
+    if (samePoint(rawPoint, snappedPoint)) return;
+
+    this.zonePathApplyGuard.add(zoneId);
+    try {
+      path.setAt(index, this.createLatLng(snappedPoint));
+    } finally {
+      this.zonePathApplyGuard.delete(zoneId);
+    }
+  }
+
+  private snapDraggedZonePath(originalPath: GeoPoint[], currentPath: GeoPoint[]): GeoPoint[] | null {
+    if (originalPath.length === 0 || currentPath.length === 0) return null;
+    if (originalPath.length !== currentPath.length) return null;
+
+    const originalProjected = originalPath.map((entry) => projectMercator(entry));
+    const currentProjected = currentPath.map((entry) => projectMercator(entry));
+
+    const centroid = (points: Array<{ x: number; y: number }>): { x: number; y: number } => {
+      const sum = points.reduce(
+        (acc, entry) => ({ x: acc.x + entry.x, y: acc.y + entry.y }),
+        { x: 0, y: 0 }
+      );
+      return {
+        x: sum.x / points.length,
+        y: sum.y / points.length
+      };
+    };
+
+    const originalCentroid = centroid(originalProjected);
+    const currentCentroid = centroid(currentProjected);
+    const snappedCentroid = snapToAngleIncrement(
+      unprojectMercator(originalCentroid),
+      unprojectMercator(currentCentroid),
+      ANGLE_SNAP_STEP_DEG,
+      ANGLE_SNAP_THRESHOLD_DEG,
+      PROTRACTOR_MIN_ARM_METERS
+    );
+    const snappedCentroidProjected = projectMercator(snappedCentroid);
+
+    const snappedDelta = {
+      x: snappedCentroidProjected.x - originalCentroid.x,
+      y: snappedCentroidProjected.y - originalCentroid.y
+    };
+    const currentDelta = {
+      x: currentCentroid.x - originalCentroid.x,
+      y: currentCentroid.y - originalCentroid.y
+    };
+    if (Math.hypot(snappedDelta.x - currentDelta.x, snappedDelta.y - currentDelta.y) < 1e-7) return null;
+
+    return originalProjected.map((entry) =>
+      unprojectMercator({
+        x: entry.x + snappedDelta.x,
+        y: entry.y + snappedDelta.y
+      })
+    );
   }
 
   private collectMeasurePoints(closingPoint: GeoPoint | null): GeoPoint[] {
@@ -820,9 +978,7 @@ export class MapEngine {
   }
 
   private resolveProtractorPoint(point: GeoPoint, shiftPressed: boolean): GeoPoint {
-    if (!shiftPressed) return point;
-    if (!this.protractorVertex) return point;
-    return snapToCartesianAxis(this.protractorVertex, point, PROTRACTOR_SNAP_THRESHOLD_DEG, PROTRACTOR_MIN_ARM_METERS);
+    return this.resolvePointWithSnap(this.protractorVertex, point, shiftPressed);
   }
 
   private clearOverlayList(overlays: MapOverlay[]): void {
@@ -888,6 +1044,67 @@ export class MapEngine {
     this.completedDrawingTool = tool;
   }
 
+  private addMeasureLabel(overlays: MapOverlay[], point: GeoPoint, text: string): void {
+    overlays.push(
+      new this.maps.Marker({
+        map: this.map,
+        position: toLatLngLiteral(point),
+        clickable: false,
+        icon: {
+          path: this.maps.SymbolPath.CIRCLE,
+          scale: 0,
+          fillOpacity: 0,
+          strokeOpacity: 0
+        },
+        label: {
+          text,
+          color: "#000000",
+          fontSize: "12px",
+          fontWeight: "700",
+          className: MEASURE_LABEL_CLASS_NAME
+        },
+        zIndex: 930
+      })
+    );
+  }
+
+  private segmentMidpoint(start: GeoPoint, end: GeoPoint): GeoPoint {
+    return {
+      lat: (start.lat + end.lat) / 2,
+      lng: (start.lng + end.lng) / 2
+    };
+  }
+
+  private polygonCentroid(points: GeoPoint[]): GeoPoint | null {
+    if (points.length < 3) return null;
+    const projected = points.map((entry) => projectMercator(entry));
+    let twiceArea = 0;
+    let x = 0;
+    let y = 0;
+    for (let index = 0; index < projected.length; index += 1) {
+      const current = projected[index];
+      const next = projected[(index + 1) % projected.length];
+      const cross = current.x * next.y - next.x * current.y;
+      twiceArea += cross;
+      x += (current.x + next.x) * cross;
+      y += (current.y + next.y) * cross;
+    }
+    if (Math.abs(twiceArea) < 1e-12) {
+      const fallback = projected.reduce(
+        (acc, entry) => ({ x: acc.x + entry.x, y: acc.y + entry.y }),
+        { x: 0, y: 0 }
+      );
+      return unprojectMercator({
+        x: fallback.x / projected.length,
+        y: fallback.y / projected.length
+      });
+    }
+    return unprojectMercator({
+      x: x / (3 * twiceArea),
+      y: y / (3 * twiceArea)
+    });
+  }
+
   private renderRuler(preview: GeoPoint | null): void {
     if (this.completedDrawingTool && this.completedDrawingTool !== "ruler") {
       this.clearOverlayList(this.toolDrawingOverlays);
@@ -936,12 +1153,18 @@ export class MapEngine {
     }
 
     const meters = polylineDistanceMeters(displayPoints);
+    if (displayPoints.length > 1) {
+      const last = displayPoints[displayPoints.length - 1];
+      const previous = displayPoints[displayPoints.length - 2];
+      this.addMeasureLabel(this.toolDraftOverlays, this.segmentMidpoint(previous, last), formatDistanceMeters(meters));
+    }
     this.emitToolInfo(`Ruler: ${formatDistanceMeters(meters)} (${displayPoints.length} puntos)`);
   }
 
   private finalizeRuler(closingPoint: GeoPoint | null): void {
     const points = this.collectMeasurePoints(closingPoint);
     if (points.length < 2) return;
+    const meters = polylineDistanceMeters(points);
 
     this.clearOverlayList(this.toolDrawingOverlays);
     points.forEach((point) => this.addDrawingPointMarker(point));
@@ -953,6 +1176,11 @@ export class MapEngine {
         strokeWeight: 2.5,
         clickable: false
       })
+    );
+    this.addMeasureLabel(
+      this.toolDrawingOverlays,
+      this.segmentMidpoint(points[points.length - 2], points[points.length - 1]),
+      formatDistanceMeters(meters)
     );
 
     this.markSingleDrawing("ruler");
@@ -1002,12 +1230,18 @@ export class MapEngine {
       perimeter += haversineDistanceMeters(drawPoints[drawPoints.length - 1], drawPoints[0]);
     }
     const area = drawPoints.length > 2 ? polygonAreaSqMeters(drawPoints) : 0;
+    const areaCentroid = this.polygonCentroid(drawPoints);
+    if (areaCentroid && area > 0) {
+      this.addMeasureLabel(this.toolDraftOverlays, areaCentroid, `Area ${formatAreaSqMeters(area)}`);
+    }
     this.emitToolInfo(`Area ${formatAreaSqMeters(area)} · Perim ${formatDistanceMeters(perimeter)}`);
   }
 
   private finalizeArea(closingPoint: GeoPoint | null): void {
     const points = this.collectMeasurePoints(closingPoint);
     if (points.length < 3) return;
+    const area = polygonAreaSqMeters(points);
+    const areaCentroid = this.polygonCentroid(points);
 
     this.clearOverlayList(this.toolDrawingOverlays);
     points.forEach((point) => this.addDrawingPointMarker(point));
@@ -1022,6 +1256,9 @@ export class MapEngine {
         clickable: false
       })
     );
+    if (areaCentroid && area > 0) {
+      this.addMeasureLabel(this.toolDrawingOverlays, areaCentroid, `Area ${formatAreaSqMeters(area)}`);
+    }
 
     this.markSingleDrawing("area");
     this.clearToolDraft();
@@ -1088,7 +1325,7 @@ export class MapEngine {
     const arm1 = this.protractorArm1;
 
     if (!vertex) {
-      this.emitToolInfo("Transportador activo. Click define vertice. Shift alinea ejes.");
+      this.emitToolInfo("Transportador activo. Click define vertice. Shift alinea a 10°.");
       return;
     }
 
@@ -1169,16 +1406,17 @@ export class MapEngine {
           },
           label: {
             text: angleText,
-            color: "#111827",
+            color: "#000000",
             fontSize: "11px",
-            fontWeight: "700"
+            fontWeight: "700",
+            className: MEASURE_LABEL_CLASS_NAME
           },
           zIndex: 910
         })
       );
     }
 
-    this.emitToolInfo(`Transportador ${angleText}. Click cierra. Shift alinea ejes.`);
+    this.emitToolInfo(`Transportador ${angleText}. Click cierra. Shift alinea a 10°.`);
   }
 
   private finalizeProtractor(closingPoint: GeoPoint | null): void {
@@ -1239,9 +1477,10 @@ export class MapEngine {
           },
           label: {
             text: angleText,
-            color: "#111827",
+            color: "#000000",
             fontSize: "11px",
-            fontWeight: "700"
+            fontWeight: "700",
+            className: MEASURE_LABEL_CLASS_NAME
           },
           zIndex: 910
         })
@@ -1340,7 +1579,7 @@ export class MapEngine {
       });
     }
 
-    this.emitToolInfo("Modo zona crear. Click agrega vertices, doble click cierra.");
+    this.emitToolInfo("Modo zona crear. Click agrega vertices, doble click cierra. Shift alinea a 10°.");
   }
 
   private finalizeZoneCreate(): void {

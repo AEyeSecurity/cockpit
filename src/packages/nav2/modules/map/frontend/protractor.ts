@@ -2,6 +2,7 @@ import { projectMercator, type GeoPoint, unprojectMercator } from "./mapGeometry
 
 const DEFAULT_MIN_ARM_METERS = 0.05;
 const DEFAULT_SNAP_THRESHOLD_DEG = 12;
+const DEFAULT_SNAP_STEP_DEG = 12;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -55,6 +56,16 @@ export function snapToCartesianAxis(
   thresholdDeg = DEFAULT_SNAP_THRESHOLD_DEG,
   minArmMeters = DEFAULT_MIN_ARM_METERS
 ): GeoPoint {
+  return snapToAngleIncrement(vertex, rawPoint, 90, thresholdDeg, minArmMeters);
+}
+
+export function snapToAngleIncrement(
+  vertex: GeoPoint,
+  rawPoint: GeoPoint,
+  stepDeg = DEFAULT_SNAP_STEP_DEG,
+  thresholdDeg = DEFAULT_SNAP_THRESHOLD_DEG,
+  minArmMeters = DEFAULT_MIN_ARM_METERS
+): GeoPoint {
   const origin = projectMercator(vertex);
   const target = projectMercator(rawPoint);
   const dx = target.x - origin.x;
@@ -62,19 +73,13 @@ export function snapToCartesianAxis(
   const length = Math.hypot(dx, dy);
   if (!Number.isFinite(length) || length < minArmMeters) return rawPoint;
 
+  const step = Number.isFinite(stepDeg) ? Math.max(0.0001, Math.abs(stepDeg)) : DEFAULT_SNAP_STEP_DEG;
   const angleDeg = normalizeAngleDeg((Math.atan2(dy, dx) * 180) / Math.PI);
-  const axisCandidates = [0, 90, 180, 270];
-  let closestAxisDeg = axisCandidates[0];
+  const snapIndex = Math.round(angleDeg / step);
+  const candidateCount = Math.max(1, Math.round(360 / step));
+  const rawCandidateDeg = snapIndex * step;
+  const closestAxisDeg = normalizeAngleDeg(rawCandidateDeg % (candidateCount * step));
   let closestDistanceDeg = shortestAngleDistanceDeg(angleDeg, closestAxisDeg);
-  for (let index = 1; index < axisCandidates.length; index += 1) {
-    const candidate = axisCandidates[index];
-    const distance = shortestAngleDistanceDeg(angleDeg, candidate);
-    if (distance < closestDistanceDeg) {
-      closestDistanceDeg = distance;
-      closestAxisDeg = candidate;
-    }
-  }
-
   if (closestDistanceDeg > thresholdDeg) return rawPoint;
   const snappedRad = (closestAxisDeg * Math.PI) / 180;
   return unprojectMercator({

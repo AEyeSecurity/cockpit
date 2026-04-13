@@ -38,7 +38,11 @@ describe("services", () => {
       rosbridgeUrl: "",
       httpBaseUrl: "",
       googleMapsApiKey: "",
-      cameraIframeUrl: ""
+      cameraIframeUrl: "",
+      rosboardIframeUrlReal: "",
+      rosboardIframeUrlSim: "",
+      rosboardProbeTimeoutMs: 3000,
+      rosboardLoadTimeoutMs: 7000
     };
     const eventBus = { emit: vi.fn() };
     const service = new ConnectionService(transportManager as never, env as never, "transport.ws.core", eventBus as never, {
@@ -77,7 +81,11 @@ describe("services", () => {
       rosbridgeUrl: "",
       httpBaseUrl: "",
       googleMapsApiKey: "",
-      cameraIframeUrl: ""
+      cameraIframeUrl: "",
+      rosboardIframeUrlReal: "",
+      rosboardIframeUrlSim: "",
+      rosboardProbeTimeoutMs: 3000,
+      rosboardLoadTimeoutMs: 7000
     };
     const eventBus = { emit: vi.fn() };
     const service = new ConnectionService(transportManager as never, env as never, "transport.ws.core", eventBus as never, {
@@ -149,7 +157,11 @@ describe("services", () => {
       rosbridgeUrl: "",
       httpBaseUrl: "",
       googleMapsApiKey: "",
-      cameraIframeUrl: ""
+      cameraIframeUrl: "",
+      rosboardIframeUrlReal: "",
+      rosboardIframeUrlSim: "",
+      rosboardProbeTimeoutMs: 3000,
+      rosboardLoadTimeoutMs: 7000
     };
     const eventBus = { emit: vi.fn() };
     const service = new ConnectionService(transportManager as never, env as never, "transport.ws.core", eventBus as never);

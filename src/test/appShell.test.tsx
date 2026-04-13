@@ -101,7 +101,11 @@ function createRuntime(): AppRuntime {
       rosbridgeUrl: "",
       httpBaseUrl: "",
       googleMapsApiKey: "",
-      cameraIframeUrl: ""
+      cameraIframeUrl: "",
+      rosboardIframeUrlReal: "",
+      rosboardIframeUrlSim: "",
+      rosboardProbeTimeoutMs: 3000,
+      rosboardLoadTimeoutMs: 7000
     },
     moduleConfig: { modules: {}, packages: {}, source: "default" },
     container: createContainer(),

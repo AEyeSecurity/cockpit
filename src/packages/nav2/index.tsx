@@ -4,6 +4,7 @@ import { createMapModule } from "./modules/map/frontend";
 import { createNavigationModule } from "./modules/navigation/frontend";
 import { createProcessesModule } from "./modules/processes/frontend";
 import { createTelemetryModule } from "./modules/telemetry/frontend";
+import { createVisualizationModule } from "./modules/visualization/frontend";
 
 export function createPackage(): CockpitPackage {
   return {
@@ -15,6 +16,7 @@ export function createPackage(): CockpitPackage {
       createTelemetryModule(),
       createProcessesModule(),
       createMapModule(),
+      createVisualizationModule(),
       createDebugModule()
     ]
   };

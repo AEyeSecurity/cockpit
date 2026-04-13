@@ -8,6 +8,10 @@ export interface EnvConfig {
   httpBaseUrl: string;
   googleMapsApiKey: string;
   cameraIframeUrl: string;
+  rosboardIframeUrlReal: string;
+  rosboardIframeUrlSim: string;
+  rosboardProbeTimeoutMs: number;
+  rosboardLoadTimeoutMs: number;
   cameraProbeTimeoutMs?: number;
   cameraLoadTimeoutMs?: number;
 }
@@ -33,6 +37,10 @@ export function loadEnvConfig(env: ImportMetaEnv = import.meta.env): EnvConfig {
     httpBaseUrl: env.VITE_HTTP_BASE_URL ?? "http://localhost:8080",
     googleMapsApiKey: env.VITE_GOOGLE_MAPS_API_KEY ?? "",
     cameraIframeUrl: env.VITE_CAMERA_IFRAME_URL ?? "http://100.111.4.7:8889/cam3/",
+    rosboardIframeUrlReal: env.VITE_ROSBOARD_IFRAME_URL_REAL ?? "",
+    rosboardIframeUrlSim: env.VITE_ROSBOARD_IFRAME_URL_SIM ?? "",
+    rosboardProbeTimeoutMs: parsePositiveInt(env.VITE_ROSBOARD_PROBE_TIMEOUT_MS, 3000),
+    rosboardLoadTimeoutMs: parsePositiveInt(env.VITE_ROSBOARD_LOAD_TIMEOUT_MS, 7000),
     cameraProbeTimeoutMs: parsePositiveInt(env.VITE_CAMERA_PROBE_TIMEOUT_MS, 3000),
     cameraLoadTimeoutMs: parsePositiveInt(env.VITE_CAMERA_LOAD_TIMEOUT_MS, 7000)
   };
