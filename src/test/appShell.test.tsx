@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { useEffect } from "react";
+import { describe, expect, it, vi } from "vitest";
 import { AppShell } from "../app/AppShell";
 import { UI_ZOOM_STORAGE_KEY } from "../app/zoomController";
 import { ShellCommands } from "../app/shellCommands";
@@ -156,6 +157,84 @@ describe("AppShell", () => {
 
     expect(await screen.findByText("Test Modal")).toBeInTheDocument();
     expect(screen.getByText("Modal Body")).toBeInTheDocument();
+  });
+
+  it("keeps workspace views mounted and toggles visibility/active context", async () => {
+    const runtime = createRuntime();
+    runtime.contributions.unregister("workspace.one");
+
+    const onMountOne = vi.fn();
+    const onUnmountOne = vi.fn();
+    const onMountTwo = vi.fn();
+    const onUnmountTwo = vi.fn();
+
+    const WorkspaceProbe = ({
+      id,
+      active,
+      onMount,
+      onUnmount
+    }: {
+      id: string;
+      active: boolean;
+      onMount: () => void;
+      onUnmount: () => void;
+    }): JSX.Element => {
+      useEffect(() => {
+        onMount();
+        return () => onUnmount();
+      }, [onMount, onUnmount]);
+      return <div data-testid={id}>{active ? "active" : "inactive"}</div>;
+    };
+
+    runtime.contributions.register({
+      id: "workspace.one",
+      slot: "workspace",
+      label: "Workspace One",
+      render: (ctx) => (
+        <WorkspaceProbe
+          id="workspace-one-probe"
+          active={ctx?.active === true}
+          onMount={onMountOne}
+          onUnmount={onUnmountOne}
+        />
+      )
+    });
+    runtime.contributions.register({
+      id: "workspace.two",
+      slot: "workspace",
+      label: "Workspace Two",
+      render: (ctx) => (
+        <WorkspaceProbe
+          id="workspace-two-probe"
+          active={ctx?.active === true}
+          onMount={onMountTwo}
+          onUnmount={onUnmountTwo}
+        />
+      )
+    });
+
+    render(<AppShell runtime={runtime} />);
+
+    expect(onMountOne).toHaveBeenCalledTimes(1);
+    expect(onMountTwo).toHaveBeenCalledTimes(1);
+    expect(onUnmountOne).not.toHaveBeenCalled();
+    expect(onUnmountTwo).not.toHaveBeenCalled();
+
+    const onePane = screen.getByTestId("workspace-one-probe").closest(".workspace-view-pane");
+    const twoPane = screen.getByTestId("workspace-two-probe").closest(".workspace-view-pane");
+    expect(onePane?.hasAttribute("hidden")).toBe(false);
+    expect(twoPane?.hasAttribute("hidden")).toBe(true);
+    expect(screen.getByTestId("workspace-one-probe")).toHaveTextContent("active");
+    expect(screen.getByTestId("workspace-two-probe")).toHaveTextContent("inactive");
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace Two" }));
+
+    expect(onePane?.hasAttribute("hidden")).toBe(true);
+    expect(twoPane?.hasAttribute("hidden")).toBe(false);
+    expect(screen.getByTestId("workspace-one-probe")).toHaveTextContent("inactive");
+    expect(screen.getByTestId("workspace-two-probe")).toHaveTextContent("active");
+    expect(onUnmountOne).not.toHaveBeenCalled();
+    expect(onUnmountTwo).not.toHaveBeenCalled();
   });
 
   it("opens modal directly from toolbar button without dropdown", async () => {

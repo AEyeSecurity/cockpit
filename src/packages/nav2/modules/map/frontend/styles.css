@@ -200,6 +200,11 @@
   background: #2f2828;
 }
 
+.map-workspace-root .map-stage .stage-pane.is-hidden,
+.google-host-wrap.is-hidden {
+  display: none;
+}
+
 .map-workspace-root .map-stage .stage-pane > h4 {
   margin: 0;
   padding: 6px 8px;
@@ -207,12 +212,6 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
-}
-
-.map-workspace-root .map-stage .stage-pane.mini {
-  width: min(420px, 38%);
-  min-width: 260px;
-  aspect-ratio: 16 / 10;
 }
 
 .map-pane-canvas {

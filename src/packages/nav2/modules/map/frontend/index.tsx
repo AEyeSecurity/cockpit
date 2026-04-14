@@ -98,7 +98,8 @@ function toMapErrorText(error: unknown): string {
   return String(error);
 }
 
-function GoogleMapCanvas({
+export function GoogleMapCanvas({
+  active,
   state,
   mapService,
   runtime,
@@ -122,6 +123,7 @@ function GoogleMapCanvas({
   initialCenterLon,
   initialZoom
 }: {
+  active: boolean;
   state: MapWorkspaceState;
   mapService: MapService;
   runtime: ModuleContext;
@@ -147,8 +149,10 @@ function GoogleMapCanvas({
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<MapEngine | null>(null);
+  const loadInFlightRef = useRef(false);
+  const unmountedRef = useRef(false);
   const centerRequestHandledRef = useRef(0);
-  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">(active ? "loading" : "idle");
   const [loadError, setLoadError] = useState("");
 
   const callbacksRef = useRef<{
@@ -179,21 +183,47 @@ function GoogleMapCanvas({
     onZoneToggle
   };
 
+  useEffect(
+    () => () => {
+      unmountedRef.current = true;
+      if (engineRef.current) {
+        engineRef.current.destroy();
+        engineRef.current = null;
+      }
+    },
+    []
+  );
+
   useEffect(() => {
+    if (!active) {
+      if (!engineRef.current && loadState !== "error") {
+        setLoadState("idle");
+      }
+      return;
+    }
+    if (engineRef.current || loadInFlightRef.current) {
+      if (engineRef.current) {
+        setLoadState("ready");
+      }
+      return;
+    }
+
     const apiKey = String(runtime.env.googleMapsApiKey ?? "").trim();
     if (!apiKey) {
       setLoadState("error");
       setLoadError("Missing VITE_GOOGLE_MAPS_API_KEY. Map disabled.");
       return;
     }
+    if (!hostRef.current) return;
 
     let cancelled = false;
+    loadInFlightRef.current = true;
     setLoadState("loading");
     setLoadError("");
 
     void loadGoogleMapsApi(apiKey)
       .then((maps) => {
-        if (cancelled) return;
+        if (cancelled || unmountedRef.current) return;
         if (!hostRef.current) {
           setLoadState("error");
           setLoadError("Map host unavailable");
@@ -229,7 +259,7 @@ function GoogleMapCanvas({
           initialCenterLat,
           initialCenterLon,
           initialZoom,
-          interactive,
+          interactive: active ? interactive : false,
           mapType,
           callbacks
         });
@@ -238,95 +268,105 @@ function GoogleMapCanvas({
         setLoadState("ready");
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (cancelled || unmountedRef.current) return;
         setLoadState("error");
         setLoadError(toMapErrorText(error));
+      })
+      .finally(() => {
+        loadInFlightRef.current = false;
       });
 
     return () => {
       cancelled = true;
-      if (engineRef.current) {
-        engineRef.current.destroy();
-        engineRef.current = null;
-      }
     };
-  }, [mapService, runtime.env.googleMapsApiKey, runtime.eventBus]);
+  }, [active, mapService, runtime.env.googleMapsApiKey, runtime.eventBus]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
-    engine.setInteractive(interactive);
-  }, [interactive]);
+    engine.setInteractive(active ? interactive : false);
+  }, [active, interactive]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setMapType(mapType);
-  }, [mapType]);
+  }, [active, mapType]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setToolMode(state.toolMode);
-  }, [state.toolMode]);
+  }, [active, state.toolMode]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setGoalMode(goalMode);
-  }, [goalMode]);
+  }, [active, goalMode]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setZoneEditMode(zoneEditMode);
-  }, [zoneEditMode]);
+  }, [active, zoneEditMode]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setZones(state.zones);
-  }, [state.zones]);
+  }, [active, state.zones]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setWaypoints(waypoints, selectedWaypointIndexes);
-  }, [waypoints, selectedWaypointIndexes]);
+  }, [active, waypoints, selectedWaypointIndexes]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setRobotPose(robotPose ? { lat: robotPose.lat, lon: robotPose.lon, headingDeg: robotPose.headingDeg } : null);
-  }, [robotPose]);
+  }, [active, robotPose]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setDatumPose(datumPose);
-  }, [datumPose]);
+  }, [active, datumPose]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     if (!state.map) return;
     engine.setMapOrigin(state.map.mapId, state.map.originLat, state.map.originLon);
-  }, [state.map?.mapId, state.map?.originLat, state.map?.originLon]);
+  }, [active, state.map?.mapId, state.map?.originLat, state.map?.originLon]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     if (!robotPose || centerRequestKey <= 0) return;
     if (centerRequestHandledRef.current === centerRequestKey) return;
     centerRequestHandledRef.current = centerRequestKey;
     engine.centerOnRobot(17);
-  }, [centerRequestKey, robotPose]);
+  }, [active, centerRequestKey, robotPose]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (!active) return;
     engine.setInitialView(initialCenterLat, initialCenterLon, initialZoom);
-  }, [initialCenterLat, initialCenterLon, initialZoom]);
+  }, [active, initialCenterLat, initialCenterLon, initialZoom]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -343,7 +383,7 @@ function GoogleMapCanvas({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (state.toolMode !== "idle" || goalMode || zoneEditMode === "create") {
+    if (active && (state.toolMode !== "idle" || goalMode || zoneEditMode === "create")) {
       host.classList.add("map-tool-pointer");
     } else {
       host.classList.remove("map-tool-pointer");
@@ -351,18 +391,18 @@ function GoogleMapCanvas({
     return () => {
       host.classList.remove("map-tool-pointer");
     };
-  }, [goalMode, state.toolMode, zoneEditMode]);
+  }, [active, goalMode, state.toolMode, zoneEditMode]);
 
   return (
-    <div className="google-host-wrap">
+    <div className={`google-host-wrap ${active ? "" : "is-hidden"}`}>
       <div ref={hostRef} className="google-host map-host-canvas" />
-      {loadState === "loading" ? <div className="map-overlay-message">Loading Google Maps...</div> : null}
-      {loadState === "error" ? <div className="map-overlay-message error">{loadError || "Google Maps unavailable"}</div> : null}
+      {active && loadState === "loading" ? <div className="map-overlay-message">Loading Google Maps...</div> : null}
+      {active && loadState === "error" ? <div className="map-overlay-message error">{loadError || "Google Maps unavailable"}</div> : null}
     </div>
   );
 }
 
-function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
+export function MapWorkspaceView({ runtime, active = true }: { runtime: ModuleContext; active?: boolean }): JSX.Element {
   const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
   const mapService = runtime.services.getService<MapService>(SERVICE_ID);
 
@@ -395,7 +435,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }
 
   const [state, setState] = useState<MapWorkspaceState>(mapService.getState());
-  const [mainPane, setMainPane] = useState<"map" | "camera">("map");
+  const [mainPane, setMainPane] = useState<"map" | "camera">(() =>
+    connectionService?.isCameraEnabled() ? "camera" : "map"
+  );
   const [frameSrc, setFrameSrc] = useState("");
   const [frameReady, setFrameReady] = useState(false);
   const [cameraStreamPending, setCameraStreamPending] = useState<"idle" | "connecting">("idle");
@@ -521,10 +563,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
 
   useEffect(() => {
     return runtime.eventBus.on(NAV_EVENTS.swapWorkspaceRequest, () => {
+      if (!active) return;
       if (connectionState?.preset === "sim") return;
       setMainPane((current) => (current === "map" ? "camera" : "map"));
     });
-  }, [connectionState?.preset, runtime]);
+  }, [active, connectionState?.preset, runtime]);
 
   useEffect(() => {
     return () => {
@@ -537,6 +580,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
 
   const isSimPreset = connectionState?.preset === "sim";
   const cameraPaneAvailable = !isSimPreset;
+  const workspaceActive = active;
   const mainIsMap = !cameraPaneAvailable || mainPane === "map";
   const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
   const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
@@ -547,8 +591,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const initialCenterLon = initialCenter[1];
   const initialZoom = parseZoom(nav2Config);
   const cameraStreamConnected = navigationState?.cameraStreamConnected === true;
-  const mapInteractive = mainIsMap;
-  const mapToolsEnabled = mainIsMap;
+  const mapInteractive = workspaceActive && mainIsMap;
+  const mapToolsEnabled = workspaceActive && mainIsMap;
 
   const clearCameraLoadTimer = (): void => {
     if (!cameraLoadTimerRef.current) return;
@@ -585,11 +629,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     clearCameraLoadTimer();
     setCameraConnectError("");
 
-    if (!cameraStreamConnected || !cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
+    if (!workspaceActive || mainIsMap || !cameraStreamConnected || !cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
       setFrameSrc("");
       setFrameReady(false);
       setCameraStreamPending("idle");
-      if (!cameraEnabled && cameraStreamConnected) {
+      if ((!workspaceActive || mainIsMap || !cameraEnabled) && cameraStreamConnected) {
         navigationService?.setCameraStreamConnected(false);
       }
       return;
@@ -665,6 +709,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       clearCameraLoadTimer();
     };
   }, [
+    workspaceActive,
+    mainIsMap,
     cameraEnabled,
     cameraPaneAvailable,
     cameraStreamConnected,
@@ -1033,9 +1079,10 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       </div>
 
       <div className={`stage map-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
-        <section className={`stage-pane ${mainIsMap ? "main" : "mini"} map-stage-pane`}>
+        <section className={`stage-pane main map-stage-pane ${mainIsMap ? "" : "is-hidden"}`}>
           <div className="map-canvas map-pane-canvas">
             <GoogleMapCanvas
+              active={workspaceActive && mainIsMap}
               state={state}
               mapService={mapService}
               runtime={runtime}
@@ -1063,7 +1110,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
         </section>
 
         {cameraPaneAvailable ? (
-          <section className={`stage-pane ${mainIsMap ? "mini" : "main"} map-camera-stage-pane`}>
+          <section className={`stage-pane main map-camera-stage-pane ${mainIsMap ? "is-hidden" : ""}`}>
             <h4>Camera</h4>
             <div className="camera-frame-wrap">
               <iframe
@@ -1103,8 +1150,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
             </button>
           ) : null}
         </div>
-
-        {cameraPaneAvailable && !mainIsMap ? <div className="stage-gps-mini-badge">Map minimapa</div> : null}
       </div>
     </div>
   );
@@ -1132,7 +1177,7 @@ export function createMapModule(): CockpitModule {
         id: "workspace.map",
         slot: "workspace",
         label: "Map",
-        render: () => <MapWorkspaceView runtime={ctx} />
+        render: (workspaceCtx) => <MapWorkspaceView runtime={ctx} active={workspaceCtx?.active ?? true} />
       });
     }
   };

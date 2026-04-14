@@ -9,8 +9,6 @@ interface WorkspacePanelProps {
 }
 
 export function WorkspacePanel({ views, activeViewId, onSelectView, children }: WorkspacePanelProps): JSX.Element {
-  const activeView = views.find((v) => v.id === activeViewId) ?? null;
-
   return (
     <main className="workspace-column">
       <section className="workspace-selector">
@@ -26,7 +24,22 @@ export function WorkspacePanel({ views, activeViewId, onSelectView, children }: 
         ))}
       </section>
       <section className="workspace-view">
-        {activeView ? activeView.render() : "No workspace view registered."}
+        <div className="workspace-view-stack">
+          {views.map((view) => {
+            const active = view.id === activeViewId;
+            return (
+              <div
+                key={view.id}
+                className={`workspace-view-pane ${active ? "is-active" : "is-inactive"}`}
+                hidden={!active}
+                aria-hidden={!active}
+              >
+                {view.render({ active })}
+              </div>
+            );
+          })}
+          {views.length === 0 ? "No workspace view registered." : null}
+        </div>
       </section>
       {children}
     </main>

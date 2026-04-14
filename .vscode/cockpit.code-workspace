@@ -107,7 +107,7 @@
 				"label": "📦 Tauri: Compilar",
 				"detail": "Compila el bundle desktop con Tauri",
 				"type": "shell",
-				"command": "npm run tauri:build",
+				"command": "npm run tauri:build && [ $USER = 'gmorini' ] && cp src-tauri/target/release/bundle/appimage/Cockpit_0.1.0_amd64.AppImage ~/.local/bin/cockpit || echo 'No se copió el AppImage'",
 				"group": "build",
 				"problemMatcher": []
 			}
