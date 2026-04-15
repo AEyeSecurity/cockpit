@@ -133,7 +133,7 @@
   overflow: hidden;
 }
 
-.google-host {
+.leaflet-host {
   width: 100%;
   height: 100%;
   min-height: 300px;
@@ -168,8 +168,6 @@
   min-width: 0;
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
 }
 
 .map-workspace-root .map-canvas {
@@ -180,7 +178,7 @@
   border-radius: 0;
 }
 
-.map-workspace-root .google-host {
+.map-workspace-root .leaflet-host {
   min-height: 0;
 }
 
@@ -256,6 +254,25 @@
   display: grid;
   gap: 6px;
   min-width: 170px;
+}
+
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-content-wrapper {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #2f2828;
+  color: var(--text);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-content {
+  margin: 8px 10px;
+  color: var(--text);
+}
+
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-tip {
+  background: #2f2828;
+  border: 1px solid var(--line);
+  box-shadow: none;
 }
 
 .map-inspect-popup .coords {
@@ -386,7 +403,6 @@
   width: auto;
   flex-wrap: wrap;
   gap: var(--map-tools-gap);
-  align-items: center;
 }
 
 .map-toolbar-icons button {
@@ -400,57 +416,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.map-toolbar-separator {
-  width: 1px;
-  height: 22px;
-  background: var(--line);
-  margin: 0 2px;
-}
-
-.map-type-toggle {
-  margin-right: 8px;
-}
-
-.map-type-toggle button {
-  width: auto;
-  min-width: 42px;
-  max-width: none;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.google-host-wrap {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.google-host {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.map-overlay-message {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  background: rgba(246, 248, 250, 0.86);
-  border: 1px solid var(--line);
-}
-
-.map-overlay-message.error {
-  color: #7f1d1d;
-  background: rgba(254, 242, 242, 0.94);
 }
 
 .camera-frame-wrap {
@@ -547,8 +512,9 @@
 }
 
 .map-tool-pointer,
-.map-tool-pointer .gm-style,
-.map-tool-pointer .gm-style * {
+.map-tool-pointer .leaflet-interactive,
+.map-tool-pointer .leaflet-container,
+.map-tool-pointer .leaflet-pane {
   cursor: pointer !important;
 }
 
@@ -619,7 +585,8 @@
 
 .map-tool-status,
 .map-measure-tooltip,
-.map-inspect-popup {
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-content-wrapper,
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-tip {
   background: var(--panel);
   border-color: var(--line);
   color: var(--text);

@@ -181,7 +181,7 @@ export function createTelemetryModule(): CockpitModule {
         id: "sidebar.telemetry",
         slot: "sidebar",
         label: "Telemetry",
-        icon: "",
+        icon: "📡",
         render: () => <TelemetrySidebarPanel runtime={ctx} />
       });
 

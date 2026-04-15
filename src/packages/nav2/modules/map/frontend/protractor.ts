@@ -1,4 +1,4 @@
-import { projectMercator, type GeoPoint, unprojectMercator } from "./mapGeometry";
+import L from "leaflet";
 
 const DEFAULT_MIN_ARM_METERS = 0.05;
 const DEFAULT_SNAP_THRESHOLD_DEG = 12;
@@ -19,14 +19,14 @@ function shortestAngleDistanceDeg(a: number, b: number): number {
 }
 
 export function calculateProtractorAngleDeg(
-  vertex: GeoPoint,
-  armA: GeoPoint,
-  armB: GeoPoint,
+  vertex: L.LatLng,
+  armA: L.LatLng,
+  armB: L.LatLng,
   minArmMeters = DEFAULT_MIN_ARM_METERS
 ): number | null {
-  const origin = projectMercator(vertex);
-  const first = projectMercator(armA);
-  const second = projectMercator(armB);
+  const origin = L.CRS.EPSG3857.project(vertex);
+  const first = L.CRS.EPSG3857.project(armA);
+  const second = L.CRS.EPSG3857.project(armB);
 
   const vectorA = {
     x: first.x - origin.x,
@@ -50,13 +50,13 @@ export function calculateProtractorAngleDeg(
 }
 
 export function snapToCartesianAxis(
-  vertex: GeoPoint,
-  rawPoint: GeoPoint,
+  vertex: L.LatLng,
+  rawPoint: L.LatLng,
   thresholdDeg = DEFAULT_SNAP_THRESHOLD_DEG,
   minArmMeters = DEFAULT_MIN_ARM_METERS
-): GeoPoint {
-  const origin = projectMercator(vertex);
-  const target = projectMercator(rawPoint);
+): L.LatLng {
+  const origin = L.CRS.EPSG3857.project(vertex);
+  const target = L.CRS.EPSG3857.project(rawPoint);
   const dx = target.x - origin.x;
   const dy = target.y - origin.y;
   const length = Math.hypot(dx, dy);
@@ -77,8 +77,6 @@ export function snapToCartesianAxis(
 
   if (closestDistanceDeg > thresholdDeg) return rawPoint;
   const snappedRad = (closestAxisDeg * Math.PI) / 180;
-  return unprojectMercator({
-    x: origin.x + Math.cos(snappedRad) * length,
-    y: origin.y + Math.sin(snappedRad) * length
-  });
+  const snappedPoint = new L.Point(origin.x + Math.cos(snappedRad) * length, origin.y + Math.sin(snappedRad) * length);
+  return L.CRS.EPSG3857.unproject(snappedPoint);
 }
