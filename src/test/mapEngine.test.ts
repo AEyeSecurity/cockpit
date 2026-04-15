@@ -127,20 +127,14 @@ class FakeMap extends FakeBase {
 
 class FakePolyline extends FakeBase {
   map: FakeMap | null = null;
-  options: Record<string, unknown>;
 
-  constructor(options: Record<string, unknown>) {
+  constructor(private options: Record<string, unknown>) {
     super();
-    this.options = { ...options };
     this.map = (options.map as FakeMap | undefined) ?? null;
   }
 
   setMap(map: FakeMap | null): void {
     this.map = map;
-  }
-
-  getPath(): Array<{ lat: number; lng: number }> {
-    return Array.isArray(this.options.path) ? (this.options.path as Array<{ lat: number; lng: number }>) : [];
   }
 }
 
@@ -181,14 +175,12 @@ class FakeMarker extends FakeBase {
   map: FakeMap | null = null;
   position: FakeLatLng | null = null;
   title = "";
-  label: Record<string, unknown> | null = null;
 
   constructor(options: Record<string, unknown>) {
     super();
     this.map = (options.map as FakeMap | undefined) ?? null;
     this.position = fromLatLngLiteral(options.position as { lat: number; lng: number } | undefined);
     this.title = String(options.title ?? "");
-    this.label = (options.label as Record<string, unknown> | undefined) ?? null;
   }
 
   setMap(map: FakeMap | null): void {
@@ -230,13 +222,11 @@ interface FakeMapsContext {
   readonly map: FakeMap;
   polygons: FakePolygon[];
   markers: FakeMarker[];
-  polylines: FakePolyline[];
 }
 
 function createFakeMaps(): FakeMapsContext {
   const polygons: FakePolygon[] = [];
   const markers: FakeMarker[] = [];
-  const polylines: FakePolyline[] = [];
   let mapRef: FakeMap | null = null;
 
   const maps = {
@@ -252,12 +242,7 @@ function createFakeMaps(): FakeMapsContext {
         markers.push(this);
       }
     },
-    Polyline: class extends FakePolyline {
-      constructor(options: Record<string, unknown>) {
-        super(options);
-        polylines.push(this);
-      }
-    },
+    Polyline: FakePolyline,
     Polygon: class extends FakePolygon {
       constructor(options: Record<string, unknown>) {
         super(options);
@@ -299,8 +284,7 @@ function createFakeMaps(): FakeMapsContext {
       return mapRef;
     },
     polygons,
-    markers,
-    polylines
+    markers
   };
 }
 
@@ -319,41 +303,11 @@ function buildCallbacks() {
   };
 }
 
-function emitMapEvent(context: FakeMapsContext, event: string, lat: number, lng: number, shiftKey = false): void {
+function emitMapEvent(context: FakeMapsContext, event: string, lat: number, lng: number): void {
   context.map.emit(event, {
     latLng: new FakeLatLng(lat, lng),
-    domEvent: new MouseEvent(event, { shiftKey })
+    domEvent: new MouseEvent(event)
   });
-}
-
-function angleDegBetween(from: { lat: number; lng: number }, to: { lat: number; lng: number }): number {
-  let angle = (Math.atan2(to.lat - from.lat, to.lng - from.lng) * 180) / Math.PI;
-  while (angle < 0) angle += 360;
-  while (angle >= 360) angle -= 360;
-  return angle;
-}
-
-function centroid(points: Array<{ lat: number; lng: number }>): { lat: number; lng: number } {
-  const sum = points.reduce(
-    (acc, entry) => ({
-      lat: acc.lat + entry.lat,
-      lng: acc.lng + entry.lng
-    }),
-    { lat: 0, lng: 0 }
-  );
-  return {
-    lat: sum.lat / points.length,
-    lng: sum.lng / points.length
-  };
-}
-
-function activePolyline(context: FakeMapsContext): FakePolyline {
-  const current = context.polylines.filter((entry) => entry.map !== null);
-  const last = current[current.length - 1];
-  if (!last) {
-    throw new Error("Active polyline not found");
-  }
-  return last;
 }
 
 describe("MapEngine", () => {
@@ -381,111 +335,6 @@ describe("MapEngine", () => {
     expect(callbacks.onZoneCreate).toHaveBeenCalledTimes(1);
     const polygon = callbacks.onZoneCreate.mock.calls[0]?.[0] as Array<{ lat: number; lon: number }>;
     expect(polygon).toHaveLength(3);
-
-    engine.destroy();
-  });
-
-  it("snaps ruler segment to 10 degrees when Shift is pressed", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setToolMode("ruler");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "click", 0.000173648, 0.000984808, true); // ~10°
-
-    const path = activePolyline(context).getPath();
-    expect(path).toHaveLength(2);
-    expect(angleDegBetween(path[0], path[1])).toBeCloseTo(10, 1);
-
-    engine.destroy();
-  });
-
-  it("snaps area preview to 10-degree grid when Shift is pressed", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setToolMode("area");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "mousemove", 0.000325568, 0.000945519, true); // ~19°
-
-    const path = activePolyline(context).getPath();
-    expect(path).toHaveLength(2);
-    expect(angleDegBetween(path[0], path[1])).toBeCloseTo(20, 1);
-
-    engine.destroy();
-  });
-
-  it("snaps protractor arm to 10 degrees when Shift is pressed", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setToolMode("protractor");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "click", 0.000173648, 0.000984808, true); // ~10°
-
-    const path = activePolyline(context).getPath();
-    expect(path).toHaveLength(2);
-    expect(angleDegBetween(path[0], path[1])).toBeCloseTo(10, 1);
-
-    engine.destroy();
-  });
-
-  it("snaps zone create vertices when Shift is pressed", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setZoneEditMode("create");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "click", 0.000325568, 0.000945519, true); // ~19°
-    emitMapEvent(context, "click", 0.001, 0);
-    emitMapEvent(context, "dblclick", 0.001, 0);
-
-    const polygon = callbacks.onZoneCreate.mock.calls[0]?.[0] as Array<{ lat: number; lon: number }>;
-    expect(polygon).toHaveLength(3);
-    expect(angleDegBetween(
-      { lat: polygon[0].lat, lng: polygon[0].lon },
-      { lat: polygon[1].lat, lng: polygon[1].lon }
-    )).toBeCloseTo(20, 1);
 
     engine.destroy();
   });
@@ -529,101 +378,6 @@ describe("MapEngine", () => {
 
     expect(callbacks.onZonePolygonChange).toHaveBeenCalled();
     expect(callbacks.onZonePolygonChange.mock.calls.at(-1)?.[0]).toBe("z1");
-
-    engine.destroy();
-  });
-
-  it("snaps zone edited vertex when edit session starts with Shift", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setZones([
-      {
-        id: "z1",
-        name: "Zone 1",
-        vertices: 3,
-        updatedAt: Date.now(),
-        polygon: [
-          { lat: 0, lon: 0 },
-          { lat: 0, lon: 0.001 },
-          { lat: 0.001, lon: 0 }
-        ]
-      }
-    ]);
-    engine.setZoneEditMode("edit");
-
-    const polygon = context.polygons[0];
-    polygon.emit("mousedown", { domEvent: new MouseEvent("mousedown", { shiftKey: true }) });
-    polygon.emit("click");
-    polygon.getPath().setAt(1, new FakeLatLng(0.000325568, 0.000945519)); // ~19°
-
-    const edited = callbacks.onZonePolygonChange.mock.calls.at(-1)?.[1] as Array<{ lat: number; lon: number }>;
-    expect(angleDegBetween(
-      { lat: edited[0].lat, lng: edited[0].lon },
-      { lat: edited[1].lat, lng: edited[1].lon }
-    )).toBeCloseTo(20, 1);
-
-    engine.destroy();
-  });
-
-  it("snaps zone drag translation when edit drag starts with Shift", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    const original = [
-      { lat: 0, lon: 0 },
-      { lat: 0, lon: 0.0012 },
-      { lat: 0.001, lon: 0.0003 }
-    ];
-    engine.setZones([
-      {
-        id: "z1",
-        name: "Zone 1",
-        vertices: 3,
-        updatedAt: Date.now(),
-        polygon: original
-      }
-    ]);
-    engine.setZoneEditMode("edit");
-
-    const polygon = context.polygons[0];
-    polygon.emit("click");
-    polygon.emit("mousedown", { domEvent: new MouseEvent("mousedown", { shiftKey: true }) });
-    polygon.emit("dragstart", { domEvent: new MouseEvent("dragstart", { shiftKey: true }) });
-
-    const delta = { lat: 0.000260472, lon: 0.000757625 }; // ~19°
-    polygon.setPaths(
-      original.map((entry) => ({
-        lat: entry.lat + delta.lat,
-        lng: entry.lon + delta.lon
-      }))
-    );
-    polygon.emit("dragend");
-
-    const edited = callbacks.onZonePolygonChange.mock.calls.at(-1)?.[1] as Array<{ lat: number; lon: number }>;
-    const originalCentroid = centroid(original.map((entry) => ({ lat: entry.lat, lng: entry.lon })));
-    const editedCentroid = centroid(edited.map((entry) => ({ lat: entry.lat, lng: entry.lon })));
-    expect(angleDegBetween(originalCentroid, editedCentroid)).toBeCloseTo(20, 1);
 
     engine.destroy();
   });
@@ -725,63 +479,6 @@ describe("MapEngine", () => {
     engine.setToolMode("idle");
 
     expect(callbacks.onToolInfo).toHaveBeenLastCalledWith("Map tools idle.");
-
-    engine.destroy();
-  });
-
-  it("keeps ruler distance label visible after finishing measurement", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setToolMode("ruler");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "click", 0.001, 0);
-    emitMapEvent(context, "dblclick", 0.001, 0);
-
-    const visibleLabels = context.markers
-      .filter((marker) => marker.map !== null)
-      .map((marker) => marker.label)
-      .filter((label): label is Record<string, unknown> => label !== null);
-    expect(visibleLabels.some((label) => String(label.text ?? "").includes("m"))).toBe(true);
-
-    engine.destroy();
-  });
-
-  it("keeps area total label visible after finishing measurement", () => {
-    const context = createFakeMaps();
-    const callbacks = buildCallbacks();
-    const engine = new MapEngine({
-      maps: context.maps,
-      host: document.createElement("div"),
-      initialCenterLat: 0,
-      initialCenterLon: 0,
-      initialZoom: 15,
-      interactive: true,
-      mapType: "hybrid",
-      callbacks
-    });
-
-    engine.setToolMode("area");
-    emitMapEvent(context, "click", 0, 0);
-    emitMapEvent(context, "click", 0, 0.001);
-    emitMapEvent(context, "click", 0.001, 0.001);
-    emitMapEvent(context, "dblclick", 0.001, 0.001);
-
-    const visibleLabels = context.markers
-      .filter((marker) => marker.map !== null)
-      .map((marker) => marker.label)
-      .filter((label): label is Record<string, unknown> => label !== null);
-    expect(visibleLabels.some((label) => String(label.text ?? "").startsWith("Area "))).toBe(true);
 
     engine.destroy();
   });

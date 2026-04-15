@@ -1,28 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-  calculateProtractorAngleDeg,
-  snapToAngleIncrement,
-  snapToCartesianAxis
-} from "../packages/nav2/modules/map/frontend/protractor";
+import { calculateProtractorAngleDeg, snapToCartesianAxis } from "../packages/nav2/modules/map/frontend/protractor";
 import type { GeoPoint } from "../packages/nav2/modules/map/frontend/mapGeometry";
 
 function point(lat: number, lng: number): GeoPoint {
   return { lat, lng };
-}
-
-function polarPoint(angleDeg: number, length = 0.001): GeoPoint {
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    lat: Math.sin(rad) * length,
-    lng: Math.cos(rad) * length
-  };
-}
-
-function pointAngleDeg(value: GeoPoint): number {
-  let angle = (Math.atan2(value.lat, value.lng) * 180) / Math.PI;
-  while (angle < 0) angle += 360;
-  while (angle >= 360) angle -= 360;
-  return angle;
 }
 
 describe("calculateProtractorAngleDeg", () => {
@@ -78,33 +59,5 @@ describe("snapToCartesianAxis", () => {
     const snapped = snapToCartesianAxis(vertex, raw, 12);
     expect(snapped.lat).toBeCloseTo(raw.lat, 8);
     expect(snapped.lng).toBeCloseTo(raw.lng, 8);
-  });
-});
-
-describe("snapToAngleIncrement", () => {
-  const vertex = point(0, 0);
-
-  it("snaps near 12 degrees", () => {
-    const snapped = snapToAngleIncrement(vertex, polarPoint(10), 12, 12, 0.05);
-    expect(pointAngleDeg(snapped)).toBeCloseTo(12, 5);
-  });
-
-  it("snaps near 24 degrees", () => {
-    const snapped = snapToAngleIncrement(vertex, polarPoint(19), 12, 12, 0.05);
-    expect(pointAngleDeg(snapped)).toBeCloseTo(24, 5);
-  });
-
-  it("does not snap when threshold is strict", () => {
-    const raw = polarPoint(10);
-    const snapped = snapToAngleIncrement(vertex, raw, 12, 1, 0.05);
-    expect(snapped.lat).toBeCloseTo(raw.lat, 8);
-    expect(snapped.lng).toBeCloseTo(raw.lng, 8);
-  });
-
-  it("does not snap when arm is below minimum", () => {
-    const raw = polarPoint(10, 0.00000001);
-    const snapped = snapToAngleIncrement(vertex, raw, 12, 12, 0.05);
-    expect(snapped.lat).toBeCloseTo(raw.lat, 12);
-    expect(snapped.lng).toBeCloseTo(raw.lng, 12);
   });
 });

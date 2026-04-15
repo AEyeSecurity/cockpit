@@ -240,6 +240,7 @@ summary:focus-visible {
   border-radius: 12px;
   background: #f3f9ff;
   display: flex;
+  gap: 8px;
   /* padding: 5px; */
 }
 
