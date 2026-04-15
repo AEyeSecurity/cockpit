@@ -825,22 +825,6 @@ body,
   overflow: auto;
 }
 
-.workspace-view-stack {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.workspace-view-pane {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.workspace-view-pane[hidden] {
-  display: none !important;
-}
-
 .splitter-horizontal {
   height: 4px;
   cursor: row-resize;

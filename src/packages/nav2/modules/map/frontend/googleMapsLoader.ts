@@ -7,10 +7,6 @@ declare global {
 const SCRIPT_ID = "cockpit-google-maps-script";
 let loaderPromise: Promise<typeof google.maps> | null = null;
 
-// Google Maps JS API already relies on browser HTTP cache for tiles and SDK assets.
-// We intentionally avoid custom tile caching (Service Worker / CacheStorage) to stay
-// aligned with provider policies and prevent duplicated cache layers.
-
 export class GoogleMapsLoadError extends Error {
   constructor(message: string) {
     super(message);
@@ -69,7 +65,9 @@ export function loadGoogleMapsApi(apiKey: string): Promise<typeof google.maps> {
     script.onerror = () => {
       reject(new GoogleMapsLoadError("Google Maps script failed to load"));
     };
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&callback=${callbackName}`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+      key
+    )}&v=weekly&libraries=geometry&callback=${callbackName}`;
 
     if (!existing) {
       document.head.appendChild(script);
