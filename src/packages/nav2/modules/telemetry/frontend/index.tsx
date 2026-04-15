@@ -46,7 +46,7 @@ function formatInfoTimestamp(value: unknown): string {
   return new Date(numeric).toLocaleString();
 }
 
-function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const services = resolveOptionalServices(runtime);
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     services.sensorInfo ? services.sensorInfo.getState() : null
@@ -55,9 +55,20 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
   const pixhawkPayload = sensorInfoState?.payloads.pixhawk_gps as Record<string, unknown> | undefined;
   const pixhawkSnapshot = (pixhawkPayload?.snapshot ?? {}) as Record<string, unknown>;
+  const diagnosticsSnapshot = ((generalSnapshot.diagnostics as Record<string, unknown> | undefined) ??
+    (pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined) ??
+    {}) as Record<string, unknown>;
   useEffect(() => {
     if (!services.sensorInfo) return;
     return services.sensorInfo.subscribe((next) => setSensorInfoState(next));
+  }, [services.sensorInfo]);
+  useEffect(() => {
+    const sensorInfo = services.sensorInfo;
+    if (!sensorInfo) return;
+    void sensorInfo.open().then(() => sensorInfo.setActiveTab("general"));
+    return () => {
+      void sensorInfo.close();
+    };
   }, [services.sensorInfo]);
 
   return (
@@ -96,9 +107,9 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
         <h4>Yaw Diagnostics</h4>
         <div className="key-value-grid">
           <span>Delta yaw</span>
-          <span>{formatInfoNumber((pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined)?.yaw_delta_deg, 2)} deg</span>
+          <span>{formatInfoNumber(diagnosticsSnapshot.yaw_delta_deg, 2)} deg</span>
           <span>Diferencias</span>
-          <span>{formatInfoNumber((pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined)?.diferencias, 3)}</span>
+          <span>{formatInfoNumber(diagnosticsSnapshot.diferencias, 3)}</span>
           <span>ENU convention</span>
           <span>0°=E, 90°=N</span>
         </div>
