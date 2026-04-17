@@ -241,7 +241,12 @@ describe("services", () => {
         op: "navigation.goal.result",
         ok: true
       }),
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      }),
       requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
       requestManualMode: vi.fn(),
       requestManualCommand: vi.fn(),
       requestSnapshot: vi.fn(),
@@ -259,6 +264,90 @@ describe("services", () => {
     const sent = await service.sendQueuedGoal({ x: 0, y: 0, yawDeg: 0 });
     expect(sent.sentCount).toBe(1);
     expect(dispatcher.requestGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends route missions through NavigationService", async () => {
+    const dispatcher = {
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "navigation.goal.result",
+        ok: true
+      }),
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 5
+      }),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.queueWaypoint({ x: 3, y: 4, yawDeg: 0 });
+    service.queueWaypoint({ x: 5, y: 6, yawDeg: 5 });
+
+    const started = await service.sendRouteMission();
+
+    expect(started.inputCount).toBe(2);
+    expect(started.expandedCount).toBe(5);
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies route mission state from backend messages", () => {
+    let onState: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeState: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onState = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    onState?.({
+      op: "state",
+      route_mission: {
+        active: true,
+        paused: false,
+        loop: true,
+        status: "route active (1->4)",
+        input_waypoint_count: 3,
+        expanded_waypoint_count: 7,
+        active_chunk_size: 4,
+        mission_waypoints: [{ lat: 1, lon: 2, yaw_deg: 3 }],
+        active_chunk_waypoints: [{ lat: 4, lon: 5, yaw_deg: 6 }]
+      }
+    });
+
+    expect(service.getState().routeMission).toMatchObject({
+      active: true,
+      loop: true,
+      expandedWaypointCount: 7,
+      activeChunkSize: 4
+    });
+    expect(service.getState().routeMission.missionWaypoints[0]).toMatchObject({
+      x: 1,
+      y: 2,
+      yawDeg: 3
+    });
   });
 
   it("toggles goal mode in NavigationService state", () => {
@@ -292,17 +381,17 @@ describe("services", () => {
     };
     const service = new NavigationService(dispatcher as never, {
       linearSpeed: 1.2,
-      angularSpeed: 0.4,
+      steeringAngleDeg: 18,
       loopIntervalMs: 50
     });
     service.applyRuntimeDefaults({
       linearSpeed: 2.4,
-      angularSpeed: 0.9,
+      steeringAngleDeg: 30,
       loopIntervalMs: 90
     });
     const state = service.getState();
     expect(state.manualLinearSpeed).toBe(2.4);
-    expect(state.manualAngularSpeed).toBe(0.9);
+    expect(state.manualSteeringAngleDeg).toBe(30);
   });
 
   it("persists zone state in MapService local storage adapter", () => {
@@ -377,12 +466,13 @@ describe("services", () => {
     await service.unlockControls();
     await service.setManualMode(true);
     service.setManualKeyState("w", true);
+    service.setManualKeyState("a", true);
     await Promise.resolve();
     expect(dispatcher.requestManualCommand).toHaveBeenCalled();
     const calls = dispatcher.requestManualCommand.mock.calls;
     const [linearX, angularZ, brake] = calls[calls.length - 1] ?? [];
     expect(Number(linearX)).toBeGreaterThan(0);
-    expect(Number(angularZ)).toBe(0);
+    expect(Number(angularZ)).toBeCloseTo(0.415, 3);
     expect(brake).toBe(false);
     await service.setManualMode(false);
   });
@@ -400,12 +490,12 @@ describe("services", () => {
     };
     const service = new NavigationService(dispatcher as never, {
       linearSpeed: 2.4,
-      angularSpeed: 0.9,
+      steeringAngleDeg: 30,
       loopIntervalMs: 70
     });
     const state = service.getState();
     expect(state.manualLinearSpeed).toBe(2.4);
-    expect(state.manualAngularSpeed).toBe(0.9);
+    expect(state.manualSteeringAngleDeg).toBe(30);
   });
 
   it("keeps control heartbeat active while locked", async () => {

@@ -6,6 +6,25 @@ export interface GoalInput {
   yawDeg: number;
 }
 
+export interface RouteMissionWaypoint extends GoalInput {}
+
+export interface RouteMissionStateData {
+  active: boolean;
+  paused: boolean;
+  loop: boolean;
+  status: string;
+  inputWaypointCount: number;
+  expandedWaypointCount: number;
+  currentStartIndex: number;
+  currentTargetIndex: number;
+  activeChunkSize: number;
+  legSpacingM: number;
+  chunkSpanM: number;
+  chunkMaxWaypoints: number;
+  missionWaypoints: RouteMissionWaypoint[];
+  activeChunkWaypoints: RouteMissionWaypoint[];
+}
+
 export interface ManualCommandInput {
   linearX: number;
   angularZ: number;
@@ -36,15 +55,16 @@ export interface NavigationState {
   waypoints: GoalInput[];
   selectedWaypointIndexes: number[];
   loopRoute: boolean;
+  routeMission: RouteMissionStateData;
   goalMode: boolean;
   manualMode: boolean;
   manualDisablePending: boolean;
   manualLinearSpeed: number;
-  manualAngularSpeed: number;
+  manualSteeringAngleDeg: number;
   manualLinearMin: number;
   manualLinearMax: number;
-  manualAngularMin: number;
-  manualAngularMax: number;
+  manualSteeringAngleMinDeg: number;
+  manualSteeringAngleMaxDeg: number;
   manualCommand: {
     linearX: number;
     angularZ: number;
@@ -62,23 +82,36 @@ export interface NavigationState {
 type NavigationListener = (state: NavigationState) => void;
 
 const WAYPOINT_STORAGE_KEY = "cockpit.navigation.waypoints.v1";
+const MAX_WAYPOINTS = 200;
 const DEFAULT_MANUAL_LINEAR_MIN = 1.0;
 const DEFAULT_MANUAL_LINEAR_MAX = 4.0;
 const DEFAULT_MANUAL_LINEAR_SPEED = 1.2;
-const DEFAULT_MANUAL_ANGULAR_MIN = 0.1;
-const DEFAULT_MANUAL_ANGULAR_MAX = 1.2;
-const DEFAULT_MANUAL_ANGULAR_SPEED = 0.4;
+const DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG = 1.0;
+const DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG = 30.0;
+const DEFAULT_MANUAL_STEERING_ANGLE_DEG = 18.0;
+const MANUAL_ACKERMANN_WHEELBASE_M = 0.94;
+const MANUAL_STEERING_FALLBACK_SPEED_MPS = 0.5;
 const MANUAL_LOOP_INTERVAL_MS = 50;
 const navigationMemoryStorage = new Map<string, string>();
 
+function ackermannYawRateFromSteering(linearX: number, steerDeg: number): number {
+  const requestedSteerDeg = Number.isFinite(steerDeg) ? steerDeg : 0;
+  if (Math.abs(requestedSteerDeg) <= 1.0e-6) return 0;
+  const steeringRad = (requestedSteerDeg * Math.PI) / 180.0;
+  const signedSpeed = Number.isFinite(linearX) ? linearX : 0;
+  const referenceSpeed =
+    Math.abs(signedSpeed) > 1.0e-3 ? signedSpeed : MANUAL_STEERING_FALLBACK_SPEED_MPS;
+  return (referenceSpeed * Math.tan(steeringRad)) / MANUAL_ACKERMANN_WHEELBASE_M;
+}
+
 export interface NavigationManualDefaults {
   linearSpeed: number;
-  angularSpeed: number;
+  steeringAngleDeg: number;
   loopIntervalMs: number;
   linearMin: number;
   linearMax: number;
-  angularMin: number;
-  angularMax: number;
+  steeringAngleMinDeg: number;
+  steeringAngleMaxDeg: number;
 }
 
 function clampInRange(value: unknown, fallback: number, min: number, max: number): number {
@@ -144,7 +177,7 @@ function parseStoredWaypoints(raw: string): GoalInput[] {
   if (!Array.isArray(parsed)) {
     throw new Error("Invalid waypoint payload");
   }
-  return parsed.map((entry) => parseGoal(entry)).slice(0, 40);
+  return parsed.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS);
 }
 
 function sanitizeSelection(selection: number[], max: number): number[] {
@@ -182,6 +215,74 @@ function messageCandidates(message: Record<string, unknown>): Record<string, unk
   return [direct, payload, directState, directTelemetry, payloadState, payloadTelemetry].filter(
     (entry): entry is Record<string, unknown> => entry !== null
   );
+}
+
+function createDefaultRouteMission(): RouteMissionStateData {
+  return {
+    active: false,
+    paused: false,
+    loop: false,
+    status: "idle",
+    inputWaypointCount: 0,
+    expandedWaypointCount: 0,
+    currentStartIndex: 0,
+    currentTargetIndex: 0,
+    activeChunkSize: 0,
+    legSpacingM: 0,
+    chunkSpanM: 0,
+    chunkMaxWaypoints: 0,
+    missionWaypoints: [],
+    activeChunkWaypoints: []
+  };
+}
+
+function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  const lat = Number(value.lat ?? value.x);
+  const lon = Number(value.lon ?? value.y);
+  const yawDeg = Number(value.yaw_deg ?? value.yawDeg ?? 0);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+    return null;
+  }
+  return {
+    x: lat,
+    y: lon,
+    yawDeg
+  };
+}
+
+function parseRouteMissionState(message: Record<string, unknown>): RouteMissionStateData | null {
+  const candidate = messageCandidates(message)
+    .map((entry) => asRecord(entry.route_mission))
+    .find((entry): entry is Record<string, unknown> => entry !== null);
+  if (!candidate) return null;
+
+  const missionWaypoints = Array.isArray(candidate.mission_waypoints)
+    ? candidate.mission_waypoints.map((entry) => parseRouteWaypoint(entry)).filter((entry): entry is RouteMissionWaypoint => entry !== null)
+    : [];
+  const activeChunkWaypoints = Array.isArray(candidate.active_chunk_waypoints)
+    ? candidate.active_chunk_waypoints
+        .map((entry) => parseRouteWaypoint(entry))
+        .filter((entry): entry is RouteMissionWaypoint => entry !== null)
+    : [];
+
+  return {
+    active: candidate.active === true,
+    paused: candidate.paused === true,
+    loop: candidate.loop === true,
+    status: String(candidate.status ?? "idle"),
+    inputWaypointCount: Number(candidate.input_waypoint_count ?? 0) || 0,
+    expandedWaypointCount: Number(candidate.expanded_waypoint_count ?? 0) || 0,
+    currentStartIndex: Number(candidate.current_start_index ?? 0) || 0,
+    currentTargetIndex: Number(candidate.current_target_index ?? 0) || 0,
+    activeChunkSize: Number(candidate.active_chunk_size ?? activeChunkWaypoints.length) || 0,
+    legSpacingM: Number(candidate.leg_spacing_m ?? 0) || 0,
+    chunkSpanM: Number(candidate.chunk_span_m ?? 0) || 0,
+    chunkMaxWaypoints: Number(candidate.chunk_max_waypoints ?? 0) || 0,
+    missionWaypoints,
+    activeChunkWaypoints
+  };
 }
 
 function isLegacyLockAliasMessage(message: Record<string, unknown>): boolean {
@@ -252,21 +353,22 @@ export class NavigationService {
   private manualLoopIntervalMs: number;
   private manualLinearMin = DEFAULT_MANUAL_LINEAR_MIN;
   private manualLinearMax = DEFAULT_MANUAL_LINEAR_MAX;
-  private manualAngularMin = DEFAULT_MANUAL_ANGULAR_MIN;
-  private manualAngularMax = DEFAULT_MANUAL_ANGULAR_MAX;
+  private manualSteeringAngleMinDeg = DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG;
+  private manualSteeringAngleMaxDeg = DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG;
   private state: NavigationState = {
     waypoints: [],
     selectedWaypointIndexes: [],
     loopRoute: true,
+    routeMission: createDefaultRouteMission(),
     goalMode: false,
     manualMode: false,
     manualDisablePending: false,
     manualLinearSpeed: DEFAULT_MANUAL_LINEAR_SPEED,
-    manualAngularSpeed: DEFAULT_MANUAL_ANGULAR_SPEED,
+    manualSteeringAngleDeg: DEFAULT_MANUAL_STEERING_ANGLE_DEG,
     manualLinearMin: DEFAULT_MANUAL_LINEAR_MIN,
     manualLinearMax: DEFAULT_MANUAL_LINEAR_MAX,
-    manualAngularMin: DEFAULT_MANUAL_ANGULAR_MIN,
-    manualAngularMax: DEFAULT_MANUAL_ANGULAR_MAX,
+    manualSteeringAngleMinDeg: DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG,
+    manualSteeringAngleMaxDeg: DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG,
     manualCommand: {
       linearX: 0,
       angularZ: 0
@@ -293,38 +395,38 @@ export class NavigationService {
       DEFAULT_MANUAL_LINEAR_MIN,
       DEFAULT_MANUAL_LINEAR_MAX
     );
-    const angularRange = normalizeRange(
-      manualDefaults?.angularMin,
-      manualDefaults?.angularMax,
-      DEFAULT_MANUAL_ANGULAR_MIN,
-      DEFAULT_MANUAL_ANGULAR_MAX
+    const steeringAngleRange = normalizeRange(
+      manualDefaults?.steeringAngleMinDeg,
+      manualDefaults?.steeringAngleMaxDeg,
+      DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG,
+      DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG
     );
     this.manualLinearMin = linearRange.min;
     this.manualLinearMax = linearRange.max;
-    this.manualAngularMin = angularRange.min;
-    this.manualAngularMax = angularRange.max;
+    this.manualSteeringAngleMinDeg = steeringAngleRange.min;
+    this.manualSteeringAngleMaxDeg = steeringAngleRange.max;
     const safeLinearSpeed = clampInRange(
       manualDefaults?.linearSpeed,
       DEFAULT_MANUAL_LINEAR_SPEED,
       this.manualLinearMin,
       this.manualLinearMax
     );
-    const safeAngularSpeed = clampInRange(
-      manualDefaults?.angularSpeed,
-      DEFAULT_MANUAL_ANGULAR_SPEED,
-      this.manualAngularMin,
-      this.manualAngularMax
+    const safeSteeringAngleDeg = clampInRange(
+      manualDefaults?.steeringAngleDeg,
+      DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+      this.manualSteeringAngleMinDeg,
+      this.manualSteeringAngleMaxDeg
     );
     this.manualLoopIntervalMs = clampManualLoopIntervalMs(manualDefaults?.loopIntervalMs);
 
     this.state = {
       ...this.state,
       manualLinearSpeed: safeLinearSpeed,
-      manualAngularSpeed: safeAngularSpeed,
+      manualSteeringAngleDeg: safeSteeringAngleDeg,
       manualLinearMin: this.manualLinearMin,
       manualLinearMax: this.manualLinearMax,
-      manualAngularMin: this.manualAngularMin,
-      manualAngularMax: this.manualAngularMax
+      manualSteeringAngleMinDeg: this.manualSteeringAngleMinDeg,
+      manualSteeringAngleMaxDeg: this.manualSteeringAngleMaxDeg
     };
 
     this.startControlHeartbeat();
@@ -338,10 +440,12 @@ export class NavigationService {
     dispatcher.subscribeState?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeNavTelemetry?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeAck?.((message) => {
       const request = String(message.request ?? "").trim();
@@ -351,6 +455,7 @@ export class NavigationService {
         startUnlockGrace: isSetControlLockAck
       });
       this.applyManualControlPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeNavEvent?.((message) => {
       const fromEvent = extractControlLockFromNavEvent(message);
@@ -362,6 +467,11 @@ export class NavigationService {
     return {
       ...this.state,
       waypoints: this.state.waypoints.map((waypoint) => ({ ...waypoint })),
+      routeMission: {
+        ...this.state.routeMission,
+        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => ({ ...waypoint })),
+        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => ({ ...waypoint }))
+      },
       selectedWaypointIndexes: [...this.state.selectedWaypointIndexes],
       manualCommand: { ...this.state.manualCommand },
       manualKeys: { ...this.state.manualKeys },
@@ -400,7 +510,7 @@ export class NavigationService {
     const parsed = parseGoal(input);
     this.state = {
       ...this.state,
-      waypoints: [...this.state.waypoints, parsed].slice(-40),
+      waypoints: [...this.state.waypoints, parsed].slice(-MAX_WAYPOINTS),
       selectedWaypointIndexes: [],
       lastStatus: "Waypoint added"
     };
@@ -568,7 +678,7 @@ export class NavigationService {
         } satisfies GoalInput;
       })
       .filter((entry): entry is GoalInput => entry !== null)
-      .slice(0, 40);
+      .slice(0, MAX_WAYPOINTS);
 
     this.state = {
       ...this.state,
@@ -670,6 +780,60 @@ export class NavigationService {
     };
   }
 
+  async sendRouteMission(options?: {
+    legSpacingM?: number;
+    chunkSpanM?: number;
+    chunkMaxWaypoints?: number;
+  }): Promise<{ inputCount: number; expandedCount: number; loopRoute: boolean }> {
+    if (this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    if (this.state.manualMode) {
+      this.state = {
+        ...this.state,
+        manualDisablePending: true,
+        lastStatus: "Disabling manual mode to start route..."
+      };
+      this.emit();
+      await this.setManualMode(false);
+    }
+
+    const queued = this.state.waypoints.map((entry) => parseGoal(entry));
+    if (queued.length === 0) {
+      throw new Error("No waypoint queued");
+    }
+
+    const payload: Record<string, unknown> = {
+      waypoints: queued.map((entry) => ({
+        lat: entry.x,
+        lon: entry.y,
+        yaw_deg: entry.yawDeg
+      })),
+      loop: this.state.loopRoute
+    };
+    if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
+    if (options?.chunkSpanM !== undefined) payload.chunk_span_m = Number(options.chunkSpanM);
+    if (options?.chunkMaxWaypoints !== undefined) payload.chunk_max_waypoints = Number(options.chunkMaxWaypoints);
+
+    const response = await this.robotDispatcher.requestRouteMission(payload as never);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Route mission dispatch failed"));
+    }
+
+    const inputCount = Number(response.input_waypoint_count ?? queued.length) || queued.length;
+    const expandedCount = Number(response.expanded_waypoint_count ?? queued.length) || queued.length;
+    this.state = {
+      ...this.state,
+      lastStatus: `Route mission sent (${inputCount} → ${expandedCount})`
+    };
+    this.emit();
+    return {
+      inputCount,
+      expandedCount,
+      loopRoute: this.state.loopRoute
+    };
+  }
+
   async sendGoal(input: GoalInput): Promise<void> {
     if (this.state.controlLocked) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
@@ -700,6 +864,26 @@ export class NavigationService {
     this.state = {
       ...this.state,
       lastStatus: "Goal cancelled"
+    };
+    this.emit();
+  }
+
+  async cancelRouteMission(): Promise<void> {
+    const response = await this.robotDispatcher.requestCancelRouteMission();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Cancel route failed");
+    }
+    this.state = {
+      ...this.state,
+      lastStatus: "Route mission cancelled",
+      routeMission: {
+        ...this.state.routeMission,
+        active: false,
+        paused: false,
+        status: "route cancelled",
+        activeChunkSize: 0,
+        activeChunkWaypoints: []
+      }
     };
     this.emit();
   }
@@ -801,13 +985,22 @@ export class NavigationService {
     this.emit();
   }
 
-  setManualAngularSpeed(value: number): void {
-    const clamped = clampInRange(value, this.state.manualAngularSpeed, this.manualAngularMin, this.manualAngularMax);
+  setManualSteeringAngleDeg(value: number): void {
+    const clamped = clampInRange(
+      value,
+      this.state.manualSteeringAngleDeg,
+      this.manualSteeringAngleMinDeg,
+      this.manualSteeringAngleMaxDeg
+    );
     this.state = {
       ...this.state,
-      manualAngularSpeed: clamped
+      manualSteeringAngleDeg: clamped
     };
     this.emit();
+  }
+
+  setManualAngularSpeed(value: number): void {
+    this.setManualSteeringAngleDeg(value);
   }
 
   applyRuntimeDefaults(defaults: Partial<NavigationManualDefaults>): void {
@@ -817,45 +1010,56 @@ export class NavigationService {
       DEFAULT_MANUAL_LINEAR_MIN,
       DEFAULT_MANUAL_LINEAR_MAX
     );
-    const nextAngularRange = normalizeRange(
-      defaults.angularMin ?? this.manualAngularMin,
-      defaults.angularMax ?? this.manualAngularMax,
-      DEFAULT_MANUAL_ANGULAR_MIN,
-      DEFAULT_MANUAL_ANGULAR_MAX
+    const nextSteeringAngleRange = normalizeRange(
+      defaults.steeringAngleMinDeg ?? this.manualSteeringAngleMinDeg,
+      defaults.steeringAngleMaxDeg ?? this.manualSteeringAngleMaxDeg,
+      DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG,
+      DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG
     );
     const nextLinear =
       defaults.linearSpeed !== undefined
         ? clampInRange(defaults.linearSpeed, this.state.manualLinearSpeed, nextLinearRange.min, nextLinearRange.max)
         : clampInRange(this.state.manualLinearSpeed, DEFAULT_MANUAL_LINEAR_SPEED, nextLinearRange.min, nextLinearRange.max);
-    const nextAngular =
-      defaults.angularSpeed !== undefined
-        ? clampInRange(defaults.angularSpeed, this.state.manualAngularSpeed, nextAngularRange.min, nextAngularRange.max)
-        : clampInRange(this.state.manualAngularSpeed, DEFAULT_MANUAL_ANGULAR_SPEED, nextAngularRange.min, nextAngularRange.max);
+    const nextSteeringAngleDeg =
+      defaults.steeringAngleDeg !== undefined
+        ? clampInRange(
+            defaults.steeringAngleDeg,
+            this.state.manualSteeringAngleDeg,
+            nextSteeringAngleRange.min,
+            nextSteeringAngleRange.max
+          )
+        : clampInRange(
+            this.state.manualSteeringAngleDeg,
+            DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+            nextSteeringAngleRange.min,
+            nextSteeringAngleRange.max
+          );
     const nextLoopInterval =
       defaults.loopIntervalMs !== undefined ? clampManualLoopIntervalMs(defaults.loopIntervalMs) : this.manualLoopIntervalMs;
 
     const rangesChanged =
       nextLinearRange.min !== this.manualLinearMin ||
       nextLinearRange.max !== this.manualLinearMax ||
-      nextAngularRange.min !== this.manualAngularMin ||
-      nextAngularRange.max !== this.manualAngularMax;
-    const speedChanged = nextLinear !== this.state.manualLinearSpeed || nextAngular !== this.state.manualAngularSpeed;
+      nextSteeringAngleRange.min !== this.manualSteeringAngleMinDeg ||
+      nextSteeringAngleRange.max !== this.manualSteeringAngleMaxDeg;
+    const speedChanged =
+      nextLinear !== this.state.manualLinearSpeed || nextSteeringAngleDeg !== this.state.manualSteeringAngleDeg;
     const intervalChanged = nextLoopInterval !== this.manualLoopIntervalMs;
     if (!speedChanged && !intervalChanged && !rangesChanged) return;
 
     this.manualLoopIntervalMs = nextLoopInterval;
     this.manualLinearMin = nextLinearRange.min;
     this.manualLinearMax = nextLinearRange.max;
-    this.manualAngularMin = nextAngularRange.min;
-    this.manualAngularMax = nextAngularRange.max;
+    this.manualSteeringAngleMinDeg = nextSteeringAngleRange.min;
+    this.manualSteeringAngleMaxDeg = nextSteeringAngleRange.max;
     this.state = {
       ...this.state,
       manualLinearSpeed: nextLinear,
-      manualAngularSpeed: nextAngular,
+      manualSteeringAngleDeg: nextSteeringAngleDeg,
       manualLinearMin: this.manualLinearMin,
       manualLinearMax: this.manualLinearMax,
-      manualAngularMin: this.manualAngularMin,
-      manualAngularMax: this.manualAngularMax
+      manualSteeringAngleMinDeg: this.manualSteeringAngleMinDeg,
+      manualSteeringAngleMaxDeg: this.manualSteeringAngleMaxDeg
     };
     if (intervalChanged && this.manualLoopTimer) {
       clearInterval(this.manualLoopTimer);
@@ -1044,6 +1248,18 @@ export class NavigationService {
     this.emit();
   }
 
+  private applyRouteMissionPayload(message: Record<string, unknown>): void {
+    const routeMission = parseRouteMissionState(message);
+    if (!routeMission) return;
+    const routeStatus = routeMission.status.trim();
+    this.state = {
+      ...this.state,
+      routeMission,
+      lastStatus: routeStatus.length > 0 ? routeStatus : this.state.lastStatus
+    };
+    this.emit();
+  }
+
   private clearManualIntent(): void {
     this.state = {
       ...this.state,
@@ -1119,10 +1335,8 @@ export class NavigationService {
       const left = this.state.manualKeys.a ? 1 : 0;
       const right = this.state.manualKeys.d ? 1 : 0;
       linear = (forward - reverse) * this.state.manualLinearSpeed;
-      angular = (left - right) * this.state.manualAngularSpeed;
-      if (linear < 0) {
-        angular = -angular;
-      }
+      const steeringAngleDeg = (left - right) * this.state.manualSteeringAngleDeg;
+      angular = ackermannYawRateFromSteering(linear, steeringAngleDeg);
     }
 
     if (Math.abs(linear) < 1e-3) linear = 0;
