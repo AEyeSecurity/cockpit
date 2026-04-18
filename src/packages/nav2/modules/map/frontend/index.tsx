@@ -1240,6 +1240,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [mainPane, setMainPane] = useState<"map" | "camera">("map");
   const [frameSrc, setFrameSrc] = useState("");
   const [frameReady, setFrameReady] = useState(false);
+  const [snapSrc, setSnapSrc] = useState("");
   const [cameraStreamPending, setCameraStreamPending] = useState<"idle" | "connecting">("idle");
   const [cameraConnectError, setCameraConnectError] = useState("");
   const [centerRequestKey, setCenterRequestKey] = useState(0);
@@ -1380,99 +1381,35 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }, [cameraPaneAvailable, mainPane]);
 
   useEffect(() => {
-    cameraStreamSeqRef.current += 1;
-    clearCameraLoadTimer();
-    setCameraConnectError("");
-
-    if (!cameraStreamConnected || !cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
-      setFrameSrc("");
+    if (!cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
+      setSnapSrc("");
       setFrameReady(false);
-      setCameraStreamPending("idle");
-      if (!cameraEnabled && cameraStreamConnected) {
-        navigationService?.setCameraStreamConnected(false);
-      }
       return;
     }
 
-    const sequence = cameraStreamSeqRef.current;
-    let cancelled = false;
-    setCameraStreamPending("connecting");
     setFrameReady(false);
+    const snapUrl = cameraUrl.replace(/\/?$/, "/snap.jpg");
+    let cancelled = false;
 
-    const connectStream = async (): Promise<void> => {
-      let probeOk = true;
-      let probeError = "";
-      let controller: AbortController | null = null;
-      let probeTimeoutId: ReturnType<typeof setTimeout> | null = null;
-      try {
-        if (typeof AbortController !== "undefined") {
-          controller = new AbortController();
-          probeTimeoutId = setTimeout(() => {
-            controller?.abort();
-          }, cameraProbeTimeoutMs);
-        }
-        await fetch(cameraUrl, {
-          method: "GET",
-          mode: "no-cors",
-          cache: "no-store",
-          signal: controller?.signal
-        });
-      } catch (error) {
-        probeOk = false;
-        probeError = error instanceof Error && error.name === "AbortError" ? "probe timeout" : "probe failed";
-      } finally {
-        if (probeTimeoutId) {
-          clearTimeout(probeTimeoutId);
-        }
-      }
+    function pollNext(): void {
+      if (cancelled) return;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        setSnapSrc(img.src);
+        setFrameReady(true);
+        pollNext();
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        setTimeout(pollNext, 300);
+      };
+      img.src = `${snapUrl}?_=${Date.now()}`;
+    }
 
-      if (cancelled || sequence !== cameraStreamSeqRef.current) return;
-      if (!probeOk) {
-        setCameraConnectError(probeError);
-        setCameraStreamPending("idle");
-        setFrameSrc("");
-        setFrameReady(false);
-        navigationService?.setCameraStreamConnected(false);
-        runtime.eventBus.emit("console.event", {
-          level: "warn",
-          text: `Camera connection failed (${probeError})`,
-          timestamp: Date.now()
-        });
-        return;
-      }
-
-      const separator = cameraUrl.includes("?") ? "&" : "?";
-      setFrameSrc(`${cameraUrl}${separator}_ts=${Date.now()}`);
-      cameraLoadTimerRef.current = setTimeout(() => {
-        if (sequence !== cameraStreamSeqRef.current) return;
-        setCameraConnectError("stream timeout");
-        setCameraStreamPending("idle");
-        setFrameSrc("");
-        setFrameReady(false);
-        navigationService?.setCameraStreamConnected(false);
-        runtime.eventBus.emit("console.event", {
-          level: "warn",
-          text: "Camera stream timeout",
-          timestamp: Date.now()
-        });
-      }, cameraLoadTimeoutMs);
-    };
-
-    void connectStream();
-    return () => {
-      cancelled = true;
-      clearCameraLoadTimer();
-    };
-  }, [
-    cameraEnabled,
-    cameraPaneAvailable,
-    cameraStreamConnected,
-    cameraUrl,
-    cameraLoadTimeoutMs,
-    cameraProbeTimeoutMs,
-    navigationService,
-    runtime.eventBus
-  ]);
+    pollNext();
+    return () => { cancelled = true; };
+  }, [cameraEnabled, cameraPaneAvailable, cameraUrl]);
 
   useEffect(() => {
     if (mainIsMap) return;
@@ -1483,9 +1420,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     ? connectionState?.preset === "sim"
       ? "camera disabled in sim"
       : "camera unavailable"
-    : !cameraStreamConnected
-      ? "camara desconectada"
-      : cameraStreamPending === "connecting"
+    : cameraStreamPending === "connecting"
         ? "camera connecting"
         : cameraConnectError
           ? `camera ${cameraConnectError}`
@@ -1718,31 +1653,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           <section className={`stage-pane ${mainIsMap ? "mini" : "main"} map-camera-stage-pane`}>
             <h4>Camera</h4>
             <div className="camera-frame-wrap">
-              <iframe
-                className="camera-frame"
-                src={frameSrc}
-                title="Vista de cámara"
-                loading="lazy"
-                onLoad={() => {
-                  if (!(navigationService?.getState().cameraStreamConnected === true)) return;
-                  clearCameraLoadTimer();
-                  setFrameReady(true);
-                  setCameraConnectError("");
-                  setCameraStreamPending("idle");
-                }}
-                onError={() => {
-                  clearCameraLoadTimer();
-                  setFrameReady(false);
-                  setCameraConnectError("load error");
-                  setCameraStreamPending("idle");
-                  navigationService?.setCameraStreamConnected(false);
-                  runtime.eventBus.emit("console.event", {
-                    level: "warn",
-                    text: "Camera frame load error",
-                    timestamp: Date.now()
-                  });
-                }}
-              />
+              {snapSrc ? (
+                <img
+                  className="camera-frame"
+                  src={snapSrc}
+                  alt="camera"
+                  draggable={false}
+                />
+              ) : null}
               {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
             </div>
           </section>

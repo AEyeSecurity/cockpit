@@ -1,4 +1,5 @@
 import type { CockpitPackage } from "../../core/types/module";
+import { createCameraModule } from "./modules/camera/frontend";
 import { createDebugModule } from "./modules/debug/frontend";
 import { createMapModule } from "./modules/map/frontend";
 import { createNavigationModule } from "./modules/navigation/frontend";
@@ -15,6 +16,7 @@ export function createPackage(): CockpitPackage {
       createTelemetryModule(),
       createProcessesModule(),
       createMapModule(),
+      createCameraModule(),
       createDebugModule()
     ]
   };

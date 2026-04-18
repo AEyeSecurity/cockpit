@@ -1,0 +1,320 @@
+/* =============================================================================
+   Camera Vision Workspace View — styles.css
+   Integrates visually with the existing cockpit style (dark/industrial).
+   Uses the same CSS variables as base.css and other module stylesheets.
+============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   Root layout
+--------------------------------------------------------------------------- */
+
+.cv-root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, #ffffff);
+}
+
+/* Body: camera viewport + right panel side by side */
+.cv-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Camera viewport (left, grows to fill available space)
+--------------------------------------------------------------------------- */
+
+.cv-viewport {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: #0a1520;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Actual image element */
+.cv-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Canvas for bounding-box overlay, sits precisely on top of the image */
+.cv-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* No-signal / disconnected state */
+.cv-no-signal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  color: var(--muted, #888);
+  padding: 24px;
+  text-align: center;
+}
+
+.cv-no-signal-icon {
+  font-size: 40px;
+  opacity: 0.35;
+  line-height: 1;
+}
+
+.cv-no-signal-text {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  color: var(--text, #000);
+  opacity: 0.65;
+}
+
+.cv-no-signal-hint {
+  font-size: 11px;
+  color: var(--muted, #888);
+  opacity: 0.7;
+  max-width: 240px;
+  line-height: 1.4;
+}
+
+/* ---------------------------------------------------------------------------
+   Right panel (detection list + status)
+--------------------------------------------------------------------------- */
+
+.cv-panel {
+  width: 200px;
+  min-width: 180px;
+  max-width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line, #000);
+  background: var(--panel, #ffffff);
+  overflow: hidden;
+}
+
+.cv-panel-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line, #000);
+}
+
+.cv-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #555);
+  background: var(--panel-muted, #efefef);
+  border-bottom: 1px solid var(--line, #000);
+  flex-shrink: 0;
+}
+
+.cv-panel-empty {
+  padding: 10px 10px;
+  font-size: 12px;
+  color: var(--muted, #777);
+  font-style: italic;
+}
+
+/* Detections panel: scrollable */
+.cv-panel-detections {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cv-det-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+  max-height: 100%;
+}
+
+.cv-det-count {
+  background: var(--accent, #0056d6);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 6px;
+  line-height: 1.4;
+}
+
+.cv-det-item {
+  padding: 5px 10px 4px;
+  border-bottom: 1px solid var(--panel-muted, #efefef);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cv-det-item:last-child {
+  border-bottom: none;
+}
+
+.cv-det-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cv-det-index {
+  font-size: 10px;
+  color: var(--muted, #777);
+  min-width: 14px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.cv-det-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text, #000);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+}
+
+.cv-det-conf {
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-det-conf.cv-conf-high { color: var(--good, #1a7f37); }
+.cv-det-conf.cv-conf-mid  { color: var(--warn, #9a6700); }
+.cv-det-conf.cv-conf-low  { color: var(--bad, #cf222e); }
+
+/* Confidence bar */
+.cv-conf-bar-track {
+  height: 3px;
+  background: var(--panel-inset, #e3e3e3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.cv-conf-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 120ms ease;
+}
+
+.cv-conf-bar.cv-conf-high { background: var(--good, #1a7f37); }
+.cv-conf-bar.cv-conf-mid  { background: var(--warn, #9a6700); }
+.cv-conf-bar.cv-conf-low  { background: var(--bad, #cf222e); }
+
+/* ---------------------------------------------------------------------------
+   Status panel
+--------------------------------------------------------------------------- */
+
+.cv-panel-status {
+  flex-shrink: 0;
+}
+
+.cv-status-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 8px;
+  padding: 8px 10px;
+  align-items: center;
+}
+
+.cv-status-key {
+  font-size: 11px;
+  color: var(--muted, #666);
+  white-space: nowrap;
+}
+
+.cv-status-val {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text, #000);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cv-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-align: right;
+  display: inline-block;
+  justify-self: end;
+}
+
+.cv-status-ok {
+  background: var(--good-subtle, #dafbe1);
+  color: var(--good, #1a7f37);
+  border: 1px solid var(--good, #1a7f37);
+}
+
+.cv-status-off {
+  background: var(--panel-inset, #e3e3e3);
+  color: var(--muted, #555);
+  border: 1px solid var(--line, #ccc);
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive: narrow workspace (< 500px wide)
+   Collapse the right panel into a bottom strip
+--------------------------------------------------------------------------- */
+
+@media (max-width: 500px) {
+  .cv-body {
+    flex-direction: column;
+  }
+
+  .cv-panel {
+    width: 100%;
+    max-width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--line, #000);
+    flex-direction: row;
+    height: auto;
+    max-height: 120px;
+  }
+
+  .cv-panel-detections {
+    flex: 1;
+  }
+
+  .cv-panel-status {
+    width: 160px;
+    flex-shrink: 0;
+    border-top: none;
+    border-left: 1px solid var(--line, #000);
+  }
+}

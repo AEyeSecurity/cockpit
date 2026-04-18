@@ -91,7 +91,7 @@ function buildConnectionPresetDefaults(ctx: ModuleContext, config: Nav2RuntimeCo
   real: { host: string; port: string };
   sim: { host: string; port: string };
 } {
-  const wsRealHostFallback = ctx.env.wsRealHost ?? "100.111.4.7";
+  const wsRealHostFallback = ctx.env.wsRealHost ?? "localhost";
   const wsSimHostFallback = ctx.env.wsSimHost ?? "localhost";
   const wsPortFallback = ctx.env.wsDefaultPort ?? "8766";
   return {
@@ -130,6 +130,21 @@ function formatControlLockReason(reason: string): string {
     LOCKED: "Robot bloqueado"
   };
   return labels[normalized] ?? `Robot bloqueado: ${normalized}`;
+}
+
+function formatRecordingSummary(state: NavigationState): string {
+  const bits = [`Recorder: ${state.recording.active ? "recording" : "idle"}`, `count=${state.recording.count}`];
+  if (!state.recording.active && state.recording.lastMessage) {
+    bits.push(state.recording.lastMessage);
+  }
+  return bits.join(" · ");
+}
+
+function formatPatrolSummary(state: NavigationState): string {
+  const currentDisplay = state.patrolLoop.currentWaypoint >= 0 ? state.patrolLoop.currentWaypoint + 1 : "-";
+  const totalDisplay = state.patrolLoop.totalWaypoints > 0 ? state.patrolLoop.totalWaypoints : 0;
+  const labelSuffix = state.patrolLoop.label ? ` · ${state.patrolLoop.label}` : "";
+  return `Patrol: ${state.patrolLoop.active ? "active" : "idle"} · wp=${currentDisplay}/${totalDisplay}${labelSuffix}`;
 }
 
 function getMapService(runtime: ModuleContext): MapService | null {
@@ -431,6 +446,111 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           />
           Loop route
         </label>
+        <div className="stack nav-route-tools">
+          <div className="nav-route-grid">
+            <button
+              type="button"
+              className={state.recording.active ? "active" : ""}
+              onClick={async () => {
+                try {
+                  await service.startRecording();
+                  emitInfo("Waypoint recording started");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Start recording failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              title="Iniciar grabacion de waypoints"
+            >
+              Start Rec
+            </button>
+            <button
+              type="button"
+              className="danger-btn"
+              onClick={async () => {
+                try {
+                  await service.stopRecording();
+                  emitInfo("Waypoint recording stopped");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Stop recording failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              title="Detener grabacion y guardar"
+            >
+              Stop Rec
+            </button>
+            <button
+              type="button"
+              className="nav-route-wide"
+              onClick={async () => {
+                try {
+                  await service.clearRecording();
+                  emitInfo("Waypoint recording cleared");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Clear recording failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              title="Limpiar sesion grabada"
+            >
+              Clear Rec
+            </button>
+            <button
+              type="button"
+              className="nav-legacy-send-btn"
+              onClick={async () => {
+                try {
+                  await service.startPatrol();
+                  emitInfo("Loop patrol started");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Start patrol failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              title="Iniciar patrulla"
+            >
+              Start Patrol
+            </button>
+            <button
+              type="button"
+              className="danger-btn"
+              onClick={async () => {
+                try {
+                  await service.stopPatrol();
+                  emitInfo("Loop patrol stopped");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Stop patrol failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              title="Detener patrulla"
+            >
+              Stop Patrol
+            </button>
+          </div>
+          <div className={`status-pill nav-route-status ${state.recording.active ? "ok" : ""}`.trim()}>
+            {formatRecordingSummary(state)}
+          </div>
+          <div className={`status-pill nav-route-status ${state.patrolLoop.active ? "ok" : ""}`.trim()}>
+            {formatPatrolSummary(state)}
+          </div>
+        </div>
       </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
@@ -1525,10 +1645,10 @@ function registerCommands(
   ctx.keybindings.register({ key: "s:up", commandId: NavigationCommands.manualKeySUp, source: "default" });
   ctx.keybindings.register({ key: "d:up", commandId: NavigationCommands.manualKeyDUp, source: "default" });
   ctx.keybindings.register({ key: "space:up", commandId: NavigationCommands.manualBrakeUp, source: "default" });
-  ctx.keybindings.register({ key: "up", commandId: NavigationCommands.panCameraUp, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "down", commandId: NavigationCommands.panCameraDown, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "left", commandId: NavigationCommands.panCameraLeft, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "right", commandId: NavigationCommands.panCameraRight, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+up", commandId: NavigationCommands.panCameraUp, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+down", commandId: NavigationCommands.panCameraDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+left", commandId: NavigationCommands.panCameraLeft, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+right", commandId: NavigationCommands.panCameraRight, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "escape", commandId: NavigationCommands.dismissEscape, source: "default", when: "!modalOpen", weight: -1 });
 }
 

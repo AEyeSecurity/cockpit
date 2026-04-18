@@ -594,7 +594,7 @@
 }
 
 .map-measure-tooltip {
-  border-color: #55ff7f;
+  border-color: var(--good);
 }
 
 .map-inspect-popup .coords,
@@ -623,10 +623,16 @@
   background: #dcdcdc;
 }
 
+.map-toolbar button.active {
+  background: var(--good-subtle);
+  border-color: var(--good);
+  color: var(--good);
+}
+
 .map-workspace-toolbar .map-toolbar button.active {
-  background: #55ff7f;
-  border-color: #000000;
-  color: #000000;
+  background: var(--good-subtle);
+  border-color: var(--good);
+  color: var(--good);
 }
 
 .map-workspace-toolbar .map-toolbar button:disabled,
