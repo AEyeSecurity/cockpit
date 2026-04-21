@@ -185,6 +185,118 @@ function formatControlLockReason(reason: string): string {
   return labels[normalized] ?? `Robot bloqueado: ${normalized}`;
 }
 
+function cleanRouteStatus(status: string): string {
+  return status.replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
+}
+
+function formatRouteStatus(status: string): string {
+  const normalized = cleanRouteStatus(status);
+  if (!normalized || normalized === "idle") return "Idle";
+  if (normalized === "route starting") return "Starting route";
+  if (normalized.startsWith("route active")) return "Following route";
+  if (normalized === "route completed") return "Route complete";
+  if (normalized === "route cancelled") return "Route cancelled";
+  if (normalized === "route paused by manual takeover") return "Paused by manual";
+  if (normalized.startsWith("route failed")) return "Route error";
+  return status.trim();
+}
+
+function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
+  const status = cleanRouteStatus(routeMission.status);
+  if (routeMission.paused || status.includes("paused")) return "paused";
+  if (status.includes("failed") || status.includes("abort")) return "error";
+  if (status.includes("completed")) return "done";
+  if (status.includes("cancelled")) return "idle";
+  if (routeMission.active || status.includes("active") || status.includes("starting")) return "active";
+  return "idle";
+}
+
+function buildNavigationStatus(
+  state: NavigationState,
+  telemetry: TelemetrySnapshot | null
+): {
+  title: string;
+  detail: string;
+  tone: "active" | "paused" | "done" | "error" | "idle" | "manual";
+  progressPct: number;
+  showProgress: boolean;
+  segmentText: string;
+  routeMetaText: string;
+} {
+  const routeMission = state.routeMission;
+  const tone = routeTone(routeMission);
+  const expandedCount = Math.max(0, Math.round(routeMission.expandedWaypointCount));
+  const status = cleanRouteStatus(routeMission.status);
+  const startIndex = Math.max(0, Math.round(routeMission.currentStartIndex));
+  const routeProgressCount =
+    expandedCount > 0
+      ? status.includes("completed")
+        ? expandedCount
+        : Math.min(expandedCount, startIndex)
+      : 0;
+  const progressPct = expandedCount > 0 ? Math.min(100, Math.max(0, (routeProgressCount / expandedCount) * 100)) : 0;
+  const hasRouteHistory = expandedCount > 0 || routeMission.inputWaypointCount > 0 || cleanRouteStatus(routeMission.status) !== "idle";
+  const routeMetaText =
+    expandedCount > 0
+      ? `${routeProgressCount}/${expandedCount} route points${routeMission.loop ? " · loop" : ""}`
+      : routeMission.loop
+        ? "Loop route"
+        : "";
+  const segmentText =
+    routeMission.activeChunkSize > 0
+      ? `Segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1} · ${routeMission.activeChunkSize} pts`
+      : routeMission.currentTargetIndex > 0
+        ? `Last segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1}`
+        : "";
+
+  if (state.manualMode || state.manualDisablePending) {
+    return {
+      title: state.manualDisablePending ? "Leaving manual control" : "Manual control",
+      detail: routeMission.paused ? "Route paused" : "Operator control",
+      tone: "manual",
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
+
+  if (tone !== "idle" || hasRouteHistory) {
+    return {
+      title: tone === "paused" ? "Route paused" : formatRouteStatus(routeMission.status),
+      detail: routeMission.loop ? "Mission loop enabled" : tone === "done" ? "Final brake expected" : "Route mission",
+      tone,
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
+
+  if (telemetry?.goalActive) {
+    return {
+      title: state.loopRoute ? "Loop goal active" : "Goal active",
+      detail: "Send navigation",
+      tone: "active",
+      progressPct: 0,
+      showProgress: false,
+      segmentText: "",
+      routeMetaText: ""
+    };
+  }
+
+  const lastResult = String(telemetry?.navResultText ?? state.lastStatus ?? "").trim();
+  return {
+    title: lastResult && lastResult !== "idle" ? formatRouteStatus(lastResult) : "Ready",
+    detail: "No active navigation",
+    tone: "idle",
+    progressPct: 0,
+    showProgress: false,
+    segmentText: "",
+    routeMetaText: ""
+  };
+}
+
 function getMapService(runtime: ModuleContext): MapService | null {
   try {
     return runtime.services.getService<MapService>(MAP_SERVICE_ID);
@@ -288,12 +400,21 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const telemetryService = getTelemetryService(runtime);
   const [state, setState] = useState<NavigationState>(service.getState());
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
+    telemetryService ? telemetryService.getSnapshot() : null
+  );
   const selectedCount = state.selectedWaypointIndexes.length;
   const lockReasonText = formatControlLockReason(state.controlLockReason);
   const routeMission = state.routeMission;
+  const navigationStatus = buildNavigationStatus(state, telemetrySnapshot);
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
+  useEffect(() => {
+    if (!telemetryService) return;
+    return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
+  }, [telemetryService]);
 
   const emitInfo = (text: string): void => {
     runtime.eventBus.emit("console.event", {
@@ -385,7 +506,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 try {
                   const sent = await service.sendQueuedGoal();
                   const sentCount = sent.sentCount;
-                  emitInfo(`Goal dispatch sent (${sentCount} waypoint${sentCount > 1 ? "s" : ""})`);
+                  emitInfo(`Send navigation requested (${sentCount} waypoint${sentCount > 1 ? "s" : ""})`);
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
                     level: "error",
@@ -405,7 +526,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 try {
                   const started = await service.sendRouteMission();
                   emitInfo(
-                    `Route mission sent (${started.inputCount} waypoint${started.inputCount > 1 ? "s" : ""}, expanded=${started.expandedCount})`
+                    `Route mission started (${started.inputCount} waypoint${started.inputCount > 1 ? "s" : ""}, ${started.expandedCount} route points)`
                   );
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
@@ -425,7 +546,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               onClick={async () => {
                 try {
                   await service.cancelGoal();
-                  emitInfo("Goal cancelled");
+                  emitInfo("Navigation cancelled");
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
                     level: "error",
@@ -443,7 +564,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               onClick={async () => {
                 try {
                   await service.cancelRouteMission();
-                  emitInfo("Route mission cancelled");
+                  emitInfo("Route mission cancel requested");
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
                     level: "error",
@@ -508,7 +629,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 const next = !state.manualMode;
                 try {
                   await service.setManualMode(next);
-                  emitInfo(next ? "Manual mode enabled" : "Manual mode disabled");
+                  emitInfo(next ? "Manual control enabled" : "Manual control disabled");
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
                     level: "error",
@@ -531,20 +652,27 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           />
           Loop route
         </label>
-        <p className="muted nav-legacy-text">
-          Mission:{" "}
-          {routeMission.active
-            ? routeMission.paused
-              ? "paused"
-              : "active"
-            : routeMission.paused
-              ? "paused"
-              : "idle"}
-          {` · ${routeMission.status || "idle"}`}
-        </p>
-        <p className="muted nav-legacy-text">
-          Expanded route: {routeMission.expandedWaypointCount} · Active chunk: {routeMission.activeChunkSize}
-        </p>
+        <div className={`nav-mission-status tone-${navigationStatus.tone}`}>
+          <div className="nav-mission-status-main">
+            <span className="nav-mission-dot" />
+            <div className="nav-mission-copy">
+              <strong>{navigationStatus.title}</strong>
+              <span>{navigationStatus.detail}</span>
+            </div>
+          </div>
+          {navigationStatus.showProgress ? (
+            <div className="nav-route-progress" aria-label="Route progress">
+              <span style={{ width: `${navigationStatus.progressPct}%` }} />
+            </div>
+          ) : null}
+          {navigationStatus.routeMetaText || navigationStatus.segmentText ? (
+            <div className="nav-route-meta">
+              {navigationStatus.routeMetaText ? <span>{navigationStatus.routeMetaText}</span> : null}
+              {navigationStatus.segmentText ? <span>{navigationStatus.segmentText}</span> : null}
+            </div>
+          ) : null}
+        </div>
+        {state.controlLocked ? <p className="muted nav-legacy-text">{lockReasonText}</p> : null}
       </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <DatumSidebarSection runtime={runtime} />

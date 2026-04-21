@@ -109,6 +109,7 @@ describe("services", () => {
 
   it("maps response payload in MapService", async () => {
     const dispatcher = {
+      subscribe: vi.fn(() => () => undefined),
       requestMap: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "map.loaded",
         ok: true,
@@ -395,7 +396,7 @@ describe("services", () => {
   });
 
   it("persists zone state in MapService local storage adapter", () => {
-    const service = new MapService({ requestMap: vi.fn() } as never);
+    const service = new MapService({ requestMap: vi.fn(), subscribe: vi.fn(() => () => undefined) } as never);
     service.addZone("A");
     const savedCount = service.persistZonesToStorage();
     expect(savedCount).toBe(1);
