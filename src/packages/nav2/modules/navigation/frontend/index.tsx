@@ -30,6 +30,9 @@ interface Nav2RuntimeConfig {
   manual_linear_speed_min?: unknown;
   manual_linear_speed_max?: unknown;
   manual_linear_speed_default?: unknown;
+  manual_steering_angle_min_deg?: unknown;
+  manual_steering_angle_max_deg?: unknown;
+  manual_steering_angle_default_deg?: unknown;
   manual_angular_speed_min?: unknown;
   manual_angular_speed_max?: unknown;
   manual_angular_speed_default?: unknown;
@@ -39,9 +42,15 @@ interface Nav2RuntimeConfig {
 interface ManualSpeedLimits {
   linearMin: number;
   linearMax: number;
-  angularMin: number;
-  angularMax: number;
+  steeringAngleMinDeg: number;
+  steeringAngleMaxDeg: number;
 }
+
+const MANUAL_ACKERMANN_WHEELBASE_M = 0.94;
+const DEFAULT_MANUAL_LINEAR_SPEED = 1.2;
+const DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG = 1.0;
+const DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG = 30.0;
+const DEFAULT_MANUAL_STEERING_ANGLE_DEG = 18.0;
 
 function readNav2Config(ctx: ModuleContext): Nav2RuntimeConfig {
   return ctx.getPackageConfig<Record<string, unknown>>("nav2") as Nav2RuntimeConfig;
@@ -70,21 +79,65 @@ function parseLoopIntervalMs(value: unknown, fallback: number): number {
   return Math.max(20, Math.round(parsed));
 }
 
+function yawRateToSteeringDeg(angularSpeed: number, referenceSpeed: number): number {
+  const angular = Number(angularSpeed);
+  const speed = Math.abs(Number(referenceSpeed));
+  if (!Number.isFinite(angular) || !Number.isFinite(speed) || speed <= 1.0e-6) {
+    return DEFAULT_MANUAL_STEERING_ANGLE_DEG;
+  }
+  return (Math.atan((Math.abs(angular) * MANUAL_ACKERMANN_WHEELBASE_M) / speed) * 180.0) / Math.PI;
+}
+
 function parseManualSpeedLimits(config: Nav2RuntimeConfig): ManualSpeedLimits {
   const linearMinCandidate = Number(config.manual_linear_speed_min);
   const linearMaxCandidate = Number(config.manual_linear_speed_max);
-  const angularMinCandidate = Number(config.manual_angular_speed_min);
-  const angularMaxCandidate = Number(config.manual_angular_speed_max);
   const linearMin = Number.isFinite(linearMinCandidate) ? linearMinCandidate : 1.0;
   const linearMax = Number.isFinite(linearMaxCandidate) ? linearMaxCandidate : 4.0;
-  const angularMin = Number.isFinite(angularMinCandidate) ? angularMinCandidate : 0.1;
-  const angularMax = Number.isFinite(angularMaxCandidate) ? angularMaxCandidate : 1.2;
+  const defaultLinearSpeed = parseNumberInRange(
+    config.manual_linear_speed_default,
+    DEFAULT_MANUAL_LINEAR_SPEED,
+    linearMin,
+    linearMax
+  );
+  const steeringAngleMinCandidate = Number(config.manual_steering_angle_min_deg);
+  const steeringAngleMaxCandidate = Number(config.manual_steering_angle_max_deg);
+  const legacyAngularMinCandidate = Number(config.manual_angular_speed_min);
+  const legacyAngularMaxCandidate = Number(config.manual_angular_speed_max);
+  const steeringAngleMin = Number.isFinite(steeringAngleMinCandidate)
+    ? steeringAngleMinCandidate
+    : Number.isFinite(legacyAngularMinCandidate)
+      ? yawRateToSteeringDeg(legacyAngularMinCandidate, defaultLinearSpeed)
+      : DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG;
+  const steeringAngleMax = Number.isFinite(steeringAngleMaxCandidate)
+    ? steeringAngleMaxCandidate
+    : Number.isFinite(legacyAngularMaxCandidate)
+      ? yawRateToSteeringDeg(legacyAngularMaxCandidate, defaultLinearSpeed)
+      : DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG;
   return {
     linearMin: linearMax > linearMin ? linearMin : 1.0,
     linearMax: linearMax > linearMin ? linearMax : 4.0,
-    angularMin: angularMax > angularMin ? angularMin : 0.1,
-    angularMax: angularMax > angularMin ? angularMax : 1.2
+    steeringAngleMinDeg:
+      steeringAngleMax > steeringAngleMin ? steeringAngleMin : DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG,
+    steeringAngleMaxDeg:
+      steeringAngleMax > steeringAngleMin ? steeringAngleMax : DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG
   };
+}
+
+function parseDefaultSteeringAngleDeg(config: Nav2RuntimeConfig, limits: ManualSpeedLimits): number {
+  const defaultLinearSpeed = parseNumberInRange(
+    config.manual_linear_speed_default,
+    DEFAULT_MANUAL_LINEAR_SPEED,
+    limits.linearMin,
+    limits.linearMax
+  );
+  return parseNumberInRange(
+    config.manual_steering_angle_default_deg,
+    Number.isFinite(Number(config.manual_angular_speed_default))
+      ? yawRateToSteeringDeg(Number(config.manual_angular_speed_default), defaultLinearSpeed)
+      : DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+    limits.steeringAngleMinDeg,
+    limits.steeringAngleMaxDeg
+  );
 }
 
 function buildConnectionPresetDefaults(ctx: ModuleContext, config: Nav2RuntimeConfig): {
@@ -232,6 +285,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const [state, setState] = useState<NavigationState>(service.getState());
   const selectedCount = state.selectedWaypointIndexes.length;
   const lockReasonText = formatControlLockReason(state.controlLockReason);
+  const routeMission = state.routeMission;
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
 
@@ -340,6 +394,27 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             </button>
             <button
               type="button"
+              className="nav-legacy-send-btn"
+              onClick={async () => {
+                try {
+                  const started = await service.sendRouteMission();
+                  emitInfo(
+                    `Route mission sent (${started.inputCount} waypoint${started.inputCount > 1 ? "s" : ""}, expanded=${started.expandedCount})`
+                  );
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Route mission failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              disabled={state.waypoints.length === 0}
+            >
+              🛣 Route
+            </button>
+            <button
+              type="button"
               className="danger-btn nav-legacy-cancel-btn"
               onClick={async () => {
                 try {
@@ -355,6 +430,25 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
             >
               ⊗ Cancel
+            </button>
+            <button
+              type="button"
+              className="danger-btn nav-legacy-cancel-btn"
+              onClick={async () => {
+                try {
+                  await service.cancelRouteMission();
+                  emitInfo("Route mission cancelled");
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Cancel route failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              disabled={!routeMission.active && !routeMission.paused}
+            >
+              ⏹ Route
             </button>
             <button
               type="button"
@@ -431,6 +525,20 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           />
           Loop route
         </label>
+        <p className="muted nav-legacy-text">
+          Mission:{" "}
+          {routeMission.active
+            ? routeMission.paused
+              ? "paused"
+              : "active"
+            : routeMission.paused
+              ? "paused"
+              : "idle"}
+          {` · ${routeMission.status || "idle"}`}
+        </p>
+        <p className="muted nav-legacy-text">
+          Expanded route: {routeMission.expandedWaypointCount} · Active chunk: {routeMission.activeChunkSize}
+        </p>
       </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
@@ -460,14 +568,14 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
           />
         </label>
         <label className="range-row">
-          Angular speed (rad/s): {state.manualAngularSpeed.toFixed(2)}
+          Steering angle (deg): {state.manualSteeringAngleDeg.toFixed(1)}
           <input
             type="range"
-            min={state.manualAngularMin}
-            max={state.manualAngularMax}
-            step={0.01}
-            value={state.manualAngularSpeed}
-            onChange={(event) => service.setManualAngularSpeed(Number(event.target.value))}
+            min={state.manualSteeringAngleMinDeg}
+            max={state.manualSteeringAngleMaxDeg}
+            step={0.5}
+            value={state.manualSteeringAngleDeg}
+            onChange={(event) => service.setManualSteeringAngleDeg(Number(event.target.value))}
           />
         </label>
       </PanelSection>
@@ -1198,13 +1306,14 @@ function registerDispatcher(ctx: ModuleContext): RobotDispatcher {
 function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): NavigationService {
   const config = readNav2Config(ctx);
   const limits = parseManualSpeedLimits(config);
+  const defaultSteeringAngleDeg = parseDefaultSteeringAngleDeg(config, limits);
   const navigationService = new NavigationService(dispatcher, {
     linearMin: limits.linearMin,
     linearMax: limits.linearMax,
-    angularMin: limits.angularMin,
-    angularMax: limits.angularMax,
+    steeringAngleMinDeg: limits.steeringAngleMinDeg,
+    steeringAngleMaxDeg: limits.steeringAngleMaxDeg,
     linearSpeed: parseNumberInRange(config.manual_linear_speed_default, 1.2, limits.linearMin, limits.linearMax),
-    angularSpeed: parseNumberInRange(config.manual_angular_speed_default, 0.4, limits.angularMin, limits.angularMax),
+    steeringAngleDeg: defaultSteeringAngleDeg,
     loopIntervalMs: parseLoopIntervalMs(config.manual_loop_interval_ms, 50)
   });
   ctx.services.registerService({
@@ -1228,14 +1337,15 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     if (packageId !== "nav2") return;
     const nextConfig = (payload.config ?? {}) as Nav2RuntimeConfig;
     const nextLimits = parseManualSpeedLimits(nextConfig);
+    const nextDefaultSteeringAngleDeg = parseDefaultSteeringAngleDeg(nextConfig, nextLimits);
     connectionService.applyPresetDefaults(buildConnectionPresetDefaults(ctx, nextConfig));
     navigationService.applyRuntimeDefaults({
       linearMin: nextLimits.linearMin,
       linearMax: nextLimits.linearMax,
-      angularMin: nextLimits.angularMin,
-      angularMax: nextLimits.angularMax,
+      steeringAngleMinDeg: nextLimits.steeringAngleMinDeg,
+      steeringAngleMaxDeg: nextLimits.steeringAngleMaxDeg,
       linearSpeed: parseNumberInRange(nextConfig.manual_linear_speed_default, 1.2, nextLimits.linearMin, nextLimits.linearMax),
-      angularSpeed: parseNumberInRange(nextConfig.manual_angular_speed_default, 0.4, nextLimits.angularMin, nextLimits.angularMax),
+      steeringAngleDeg: nextDefaultSteeringAngleDeg,
       loopIntervalMs: parseLoopIntervalMs(nextConfig.manual_loop_interval_ms, 50)
     });
   });

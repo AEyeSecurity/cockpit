@@ -16,8 +16,16 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_goal_ll", goal, { timeoutMs: 5000 });
   }
 
+  async requestRouteMission(goal: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("set_route_ll", goal, { timeoutMs: 7000 });
+  }
+
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_goal", {}, { timeoutMs: 5000 });
+  }
+
+  async requestCancelRouteMission(): Promise<Nav2IncomingMessage> {
+    return this.request("cancel_route", {}, { timeoutMs: 5000 });
   }
 
   async requestManualMode(enabled: boolean): Promise<Nav2IncomingMessage> {
