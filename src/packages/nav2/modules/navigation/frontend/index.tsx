@@ -6,7 +6,7 @@ import type { CockpitModule, ModuleContext } from "../../../../../core/types/mod
 import { RobotDispatcher } from "../dispatcher/impl/RobotDispatcher";
 import { ConnectionService, type ConnectionState } from "../service/impl/ConnectionService";
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
-import { MapService, type MapWorkspaceState } from "../../map/service/impl/MapService";
+import { MapService, type DatumProfilesState, type MapWorkspaceState } from "../../map/service/impl/MapService";
 import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
@@ -203,6 +203,12 @@ function formatInfoCoordinate(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "n/a";
   return numeric.toFixed(6);
+}
+
+function formatDatumCoordinate(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(7);
 }
 
 function formatInfoTimestamp(value: unknown): string {
@@ -541,6 +547,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </p>
       </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
+      <DatumSidebarSection runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
       <CameraSidebarPanel runtime={runtime} />
     </div>
@@ -579,6 +586,189 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
           />
         </label>
       </PanelSection>
+    </div>
+  );
+}
+
+function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Element | null {
+  const mapService = getMapService(runtime);
+  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(
+    mapService ? mapService.getDatumProfilesState() : null
+  );
+  const [form, setForm] = useState({
+    name: "",
+    lat: "",
+    lon: "",
+    yawDeg: "0",
+    notes: ""
+  });
+
+  useEffect(() => {
+    if (!mapService) return;
+    void mapService
+      .getDatums()
+      .then((next) => setDatumProfiles(next))
+      .catch((error) => {
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: `Datums unavailable: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+  }, [mapService, runtime.eventBus]);
+  useEffect(() => {
+    if (!mapService) return;
+    return mapService.subscribeDatumProfiles((next) => setDatumProfiles(next));
+  }, [mapService]);
+
+  if (!mapService) return null;
+
+  const emit = (level: "info" | "warn" | "error", text: string): void => {
+    runtime.eventBus.emit("console.event", {
+      level,
+      text,
+      timestamp: Date.now()
+    });
+  };
+
+  const refreshDatums = async (): Promise<void> => {
+    const next = await mapService.getDatums();
+    setDatumProfiles(next);
+  };
+
+  const captureGpsDatum = (): void => {
+    const yawDeg = Number(form.yawDeg);
+    void mapService
+      .captureCurrentGpsDatumOnBackend({
+        name: form.name.trim() || `GPS ${new Date().toLocaleString()}`,
+        yawDeg: Number.isFinite(yawDeg) ? yawDeg : 0,
+        notes: form.notes,
+        select: true
+      })
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum GPS guardado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Capture datum failed: ${String(error)}`));
+  };
+
+  const saveManualDatum = (): void => {
+    const lat = Number(form.lat);
+    const lon = Number(form.lon);
+    const yawDeg = Number(form.yawDeg);
+    if (!form.name.trim() || !Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+      emit("error", "Datum manual invalido: nombre, lat, lon y yaw numericos son requeridos");
+      return;
+    }
+    void mapService
+      .saveDatumOnBackend({
+        name: form.name,
+        lat,
+        lon,
+        yawDeg,
+        notes: form.notes,
+        select: true
+      })
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum manual guardado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Save datum failed: ${String(error)}`));
+  };
+
+  const selectDatum = (id: string): void => {
+    void mapService
+      .selectDatumOnBackend(id)
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum seleccionado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Select datum failed: ${String(error)}`));
+  };
+
+  const runtimeDatum = datumProfiles?.runtime;
+  const selected = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+
+  return (
+    <div className="stack">
+      <PanelCollapsibleSection title="Datums">
+        <div className="datum-sidebar-status">
+          <div>
+            <span>Runtime</span>
+            <strong>{formatDatumCoordinate(runtimeDatum?.lat)}, {formatDatumCoordinate(runtimeDatum?.lon)}</strong>
+          </div>
+          <div className={datumProfiles?.pendingRestart ? "datum-sidebar-badge pending" : "datum-sidebar-badge"}>
+            {datumProfiles?.pendingRestart ? "Pendiente de restart ROS" : "Aplicado"}
+          </div>
+          <p className="muted nav-legacy-text">
+            Seleccionado: {selected?.name ?? "n/a"}
+          </p>
+        </div>
+        <div className="datum-sidebar-form">
+          <input
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Nombre"
+          />
+          <input
+            value={form.yawDeg}
+            onChange={(event) => setForm((current) => ({ ...current, yawDeg: event.target.value }))}
+            placeholder="Yaw deg"
+          />
+          <input
+            value={form.lat}
+            onChange={(event) => setForm((current) => ({ ...current, lat: event.target.value }))}
+            placeholder="Lat manual"
+          />
+          <input
+            value={form.lon}
+            onChange={(event) => setForm((current) => ({ ...current, lon: event.target.value }))}
+            placeholder="Lon manual"
+          />
+          <input
+            value={form.notes}
+            onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+            placeholder="Notas"
+          />
+        </div>
+        <div className="datum-sidebar-actions">
+          <button type="button" onClick={captureGpsDatum}>
+            Capturar GPS
+          </button>
+          <button type="button" onClick={saveManualDatum}>
+            Guardar manual
+          </button>
+          <button type="button" onClick={() => void refreshDatums().catch((error) => emit("warn", `Refresh datums failed: ${String(error)}`))}>
+            Refrescar
+          </button>
+        </div>
+        <div className="datum-sidebar-list">
+          {(datumProfiles?.datums ?? []).map((entry) => (
+            <div key={entry.id} className={entry.id === datumProfiles?.selectedId ? "datum-sidebar-row selected" : "datum-sidebar-row"}>
+              <button type="button" onClick={() => selectDatum(entry.id)} title="Seleccionar para proximo launch ROS">
+                {entry.id === datumProfiles?.selectedId ? "●" : "○"}
+              </button>
+              <span>
+                <strong>{entry.name}</strong>
+                <small>{formatDatumCoordinate(entry.lat)}, {formatDatumCoordinate(entry.lon)} · yaw {entry.yawDeg.toFixed(1)}°</small>
+              </span>
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={() => {
+                  void mapService
+                    .deleteDatumOnBackend(entry.id)
+                    .then((next) => setDatumProfiles(next))
+                    .catch((error) => emit("error", `Delete datum failed: ${String(error)}`));
+                }}
+                title="Eliminar datum"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      </PanelCollapsibleSection>
     </div>
   );
 }

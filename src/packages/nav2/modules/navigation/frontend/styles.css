@@ -190,6 +190,118 @@ pre {
   padding: 4px 6px;
 }
 
+.datum-sidebar-status {
+  display: grid;
+  gap: 6px;
+}
+
+.datum-sidebar-status > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.datum-sidebar-status span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.datum-sidebar-status strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.datum-sidebar-badge {
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  background: #f6f8fa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.datum-sidebar-badge.pending {
+  border-color: #b45309;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.datum-sidebar-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.datum-sidebar-form input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: #000000;
+}
+
+.datum-sidebar-form input:last-child {
+  grid-column: 1 / -1;
+}
+
+.datum-sidebar-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.datum-sidebar-actions button,
+.datum-sidebar-row button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  background: #e6eef7;
+  color: var(--text);
+  font-weight: 700;
+  padding: 4px 6px;
+}
+
+.datum-sidebar-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  max-height: clamp(140px, 24vh, 280px);
+  overflow: auto;
+}
+
+.datum-sidebar-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.datum-sidebar-row.selected {
+  border-color: #0969da;
+  background: #ddf4ff;
+}
+
+.datum-sidebar-row span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.datum-sidebar-row strong,
+.datum-sidebar-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.datum-sidebar-row small {
+  color: #57606a;
+  font-size: 11px;
+}
+
 .connection-footer-status-badge {
   display: inline-flex;
   align-items: center;
