@@ -43,6 +43,20 @@ function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
   return (
     <div className="record-modal">
+      <div className="record-modal-copy">
+        <span className="record-modal-kicker">Mission Recorder</span>
+        <h3 className="record-modal-title">Rosbag Capture</h3>
+        <p className="record-modal-subtitle">
+          Iniciá o detené la grabación operativa sin salir del cockpit.
+        </p>
+      </div>
+      <div className="record-modal-status-card">
+        <span className={`record-status-dot ${status.active ? "recording" : "stopped"}`} aria-hidden="true" />
+        <div className="record-modal-status-copy">
+          <strong>{status.active ? "Recording active" : "Recorder idle"}</strong>
+          <span>Profile {status.profile}</span>
+        </div>
+      </div>
       <button
         type="button"
         className={stateClassName}
@@ -61,12 +75,125 @@ function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           }
         }}
       >
-        {status.active ? "grabando" : "detenido"}
+        <span className="record-toggle-btn-copy">
+          <span className="record-toggle-btn-label">{status.active ? "Detener grabación" : "Iniciar grabación"}</span>
+          <span className="record-toggle-btn-meta">{status.active ? "Cerrar rosbag actual" : "Crear nueva captura"}</span>
+        </span>
       </button>
       <p className={`record-status-legend ${status.active ? "recording" : "stopped"}`}>
         Estado: {stateText}
       </p>
+      <div className="record-modal-meta">
+        <div className="record-meta-card">
+          <span className="record-meta-label">Output</span>
+          <strong className="record-meta-value">{status.outputPath || "n/a"}</strong>
+        </div>
+        <div className="record-meta-card">
+          <span className="record-meta-label">Log</span>
+          <strong className="record-meta-value">{status.logPath || "n/a"}</strong>
+        </div>
+      </div>
       {error ? <p className="muted">Error: {error}</p> : null}
+    </div>
+  );
+}
+
+function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const missionService = runtime.services.getService<MissionService>(SERVICE_ID);
+  const [status, setStatus] = useState<RosbagStatus>({
+    active: false,
+    profile: "core",
+    outputPath: "n/a",
+    logPath: "n/a"
+  });
+
+  useEffect(() => {
+    const unsubscribe = missionService.subscribeRosbagStatus((next) => {
+      setStatus(next);
+    });
+    void missionService
+      .getRosbagStatus()
+      .then((next) => {
+        setStatus(next);
+      })
+      .catch(() => {
+        // Optional backend capability.
+      });
+    return unsubscribe;
+  }, [missionService]);
+
+  return (
+    <div className="stack debug-sidebar-panel">
+      <div className="panel-card debug-sidebar-hero">
+        <span className="debug-sidebar-kicker">Diagnostics</span>
+        <div className="debug-sidebar-header">
+          <h3>Debug</h3>
+          <span className={`status-pill ${status.active ? "ok" : ""}`}>
+            {status.active ? "Recording" : "Idle"}
+          </span>
+        </div>
+        <p className="muted debug-sidebar-copy">
+          Accedé a captura operativa y diagnóstico del stack sin salir del panel lateral.
+        </p>
+        <div className="debug-sidebar-actions">
+          <button
+            type="button"
+            aria-label="Open Recorder"
+            className="button-primary button-tile"
+            onClick={() => {
+              void runtime.commands.execute(OPEN_RECORD_MODAL_COMMAND_ID);
+            }}
+          >
+            <span className="button-face">
+              <span className="button-face-icon" aria-hidden="true">
+                ⏺
+              </span>
+              <span className="button-face-copy">
+                <span className="button-face-label">Recorder</span>
+                <span className="button-face-meta">Open rosbag capture controls</span>
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Open Debug Info"
+            className="button-secondary button-tile"
+            onClick={() => {
+              void runtime.commands.execute(NavigationCommands.openInfoModal);
+            }}
+          >
+            <span className="button-face">
+              <span className="button-face-icon" aria-hidden="true">
+                ℹ
+              </span>
+              <span className="button-face-copy">
+                <span className="button-face-label">Info</span>
+                <span className="button-face-meta">Open navigation diagnostics</span>
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
+      <div className="panel-card debug-sidebar-status-grid">
+        <div className="debug-sidebar-stat">
+          <span className="debug-sidebar-stat-label">Profile</span>
+          <strong className="debug-sidebar-stat-value">{status.profile}</strong>
+        </div>
+        <div className="debug-sidebar-stat">
+          <span className="debug-sidebar-stat-label">Recorder</span>
+          <strong className="debug-sidebar-stat-value">{status.active ? "Active" : "Stopped"}</strong>
+        </div>
+      </div>
+      <div className="panel-card debug-sidebar-paths">
+        <div className="debug-sidebar-path">
+          <span className="debug-sidebar-path-label">Output</span>
+          <strong className="debug-sidebar-path-value">{status.outputPath || "n/a"}</strong>
+        </div>
+        <div className="debug-sidebar-path">
+          <span className="debug-sidebar-path-label">Log</span>
+          <strong className="debug-sidebar-path-value">{status.logPath || "n/a"}</strong>
+        </div>
+      </div>
     </div>
   );
 }
@@ -108,21 +235,12 @@ export function createDebugModule(): CockpitModule {
       );
 
       ctx.contributions.register({
-        id: "toolbar.debug",
-        slot: "toolbar",
+        id: "sidebar.debug",
+        slot: "sidebar",
         label: "Debug",
-        items: [
-          {
-            id: "debug.open-record-modal",
-            label: "Grabación",
-            commandId: OPEN_RECORD_MODAL_COMMAND_ID
-          },
-          {
-            id: "debug.open-info-modal",
-            label: "Información",
-            commandId: NavigationCommands.openInfoModal
-          }
-        ]
+        icon: "🛠️",
+        order: 100,
+        render: () => <DebugSidebarPanel runtime={ctx} />
       });
     }
   };

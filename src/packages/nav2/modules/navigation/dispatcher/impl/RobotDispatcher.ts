@@ -16,8 +16,16 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_goal_ll", goal, { timeoutMs: 5000 });
   }
 
+  async requestRouteMission(goal: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("set_route_ll", goal, { timeoutMs: 7000 });
+  }
+
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_goal", {}, { timeoutMs: 5000 });
+  }
+
+  async requestCancelRouteMission(): Promise<Nav2IncomingMessage> {
+    return this.request("cancel_route", {}, { timeoutMs: 5000 });
   }
 
   async requestManualMode(enabled: boolean): Promise<Nav2IncomingMessage> {
@@ -49,6 +57,26 @@ export class RobotDispatcher extends Nav2DispatcherBase {
 
   async requestLoadWaypointsFile(): Promise<Nav2IncomingMessage> {
     return this.request("load_waypoints_file", {}, { timeoutMs: 7000 });
+  }
+
+  async requestStartRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("start_recording", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStopRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("stop_recording", {}, { timeoutMs: 7000 });
+  }
+
+  async requestClearRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("clear_recording", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStartPatrol(): Promise<Nav2IncomingMessage> {
+    return this.request("start_patrol", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStopPatrol(): Promise<Nav2IncomingMessage> {
+    return this.request("stop_patrol", {}, { timeoutMs: 5000 });
   }
 
   async requestCameraPan(angleDeg: number): Promise<Nav2IncomingMessage> {
@@ -114,6 +142,14 @@ export class RobotDispatcher extends Nav2DispatcherBase {
 
   subscribeNavEvent(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_event", callback);
+  }
+
+  subscribeRecordingCount(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("recording_count", callback);
+  }
+
+  subscribePatrolStatus(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("patrol_status", callback);
   }
 
   subscribeNavAlerts(callback: (message: Nav2IncomingMessage) => void): () => void {

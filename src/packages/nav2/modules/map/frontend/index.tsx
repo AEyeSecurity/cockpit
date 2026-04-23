@@ -1527,6 +1527,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     <div className="map-workspace-root">
       <div className="map-workspace-toolbar">
         <div className="map-workspace-toolbar-left">
+          <div className="map-toolbar-copy">
+            <span className="map-toolbar-kicker">Spatial Operations</span>
+            <div className="map-toolbar-title-row">
+              <strong className="map-toolbar-title">Navigation Map</strong>
+              <span className="map-toolbar-hint">1 Ruler 2 Area 3 Inspect 4 Protractor</span>
+            </div>
+          </div>
           <div className="map-toolbar map-toolbar-icons">
             <button
               type="button"
@@ -1623,7 +1630,10 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           </div>
         </div>
         <div className="map-workspace-toolbar-right">
-          <div className="map-tool-status">{toolStatusText}</div>
+          <div className="map-tool-status">
+            <span className="map-tool-status-label">Tool status</span>
+            <strong className="map-tool-status-value">{toolStatusText}</strong>
+          </div>
         </div>
       </div>
       <div className={`stage map-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>

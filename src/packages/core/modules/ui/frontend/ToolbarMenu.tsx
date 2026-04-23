@@ -42,7 +42,13 @@ export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
   return (
     <header ref={rootRef} className="top-toolbar">
       <div className="toolbar-left">
-        <img src={logo} alt={runtime.env.appName} className="app-logo" />
+        <div className="toolbar-brand">
+          <img src={logo} alt={runtime.env.appName} className="app-logo" />
+          <div className="toolbar-brand-copy">
+            <strong>{runtime.env.appName}</strong>
+            <span>robotics control surface</span>
+          </div>
+        </div>
         <nav className="toolbar-menus">
           {menus.map((menu) => (
             <div key={menu.id} className={`toolbar-menu ${openMenuId === menu.id ? "open" : ""}`}>

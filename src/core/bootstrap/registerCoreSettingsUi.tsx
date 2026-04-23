@@ -245,11 +245,110 @@ function resolveActivePackage(runtime: AppRuntime, activeTab: SettingsTabId): Lo
   return runtime.packages.find((entry) => entry.id === packageId) ?? null;
 }
 
-function SettingsModalHeader({ runtime, close }: { runtime: AppRuntime; close: () => void }): JSX.Element {
+function fieldTypeLabel(type: PackageSettingFieldSchema["type"]): string {
+  const labels: Record<PackageSettingFieldSchema["type"], string> = {
+    string: "text",
+    number: "number",
+    boolean: "toggle",
+    json: "json"
+  };
+  return labels[type];
+}
+
+function SettingsFieldCard({
+  scopeId,
+  field,
+  value,
+  error,
+  onChange
+}: {
+  scopeId: string;
+  field: PackageSettingFieldSchema;
+  value: DraftValue;
+  error?: string;
+  onChange: (value: DraftValue) => void;
+}): JSX.Element {
+  const inputId = `${scopeId}-${field.key}`;
+  const descriptionId = field.description ? `${inputId}-description` : undefined;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;
+
+  return (
+    <div className={`settings-row settings-field-card${error ? " settings-field-card-error" : ""}`}>
+      <div className="settings-field-main">
+        <div className="settings-field-head">
+          <label htmlFor={inputId} className="settings-key">
+            {field.label}
+          </label>
+          <span className="settings-field-type">{fieldTypeLabel(field.type)}</span>
+        </div>
+        {field.description ? (
+          <p id={descriptionId} className="muted settings-description">
+            {field.description}
+          </p>
+        ) : null}
+      </div>
+      <div className="settings-value-column settings-value-column-rich">
+        {field.type === "boolean" ? (
+          <label className="settings-boolean-toggle settings-boolean-toggle-rich" htmlFor={inputId}>
+            <input
+              id={inputId}
+              type="checkbox"
+              checked={value === true}
+              aria-describedby={describedBy}
+              onChange={(event) => onChange(event.target.checked)}
+            />
+            <span className="settings-toggle-visual" aria-hidden="true">
+              <span className="settings-toggle-thumb" />
+            </span>
+            <span className="settings-toggle-copy">
+              <span className="settings-toggle-state">{value === true ? "Enabled" : "Disabled"}</span>
+              <span className="settings-toggle-caption">Boolean control</span>
+            </span>
+          </label>
+        ) : field.type === "json" ? (
+          <textarea
+            id={inputId}
+            className={error ? "input-error" : ""}
+            value={String(value ?? "")}
+            placeholder={field.placeholder}
+            rows={4}
+            spellCheck={false}
+            aria-describedby={describedBy}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : (
+          <input
+            id={inputId}
+            className={error ? "input-error" : ""}
+            value={String(value ?? "")}
+            placeholder={field.placeholder}
+            aria-describedby={describedBy}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )}
+        {error ? (
+          <p id={errorId} className="muted settings-error">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SettingsModalHeader({ runtime }: { runtime: AppRuntime; close: () => void }): JSX.Element {
   const state = useSettingsUi(runtime);
 
   return (
     <div className="settings-modal-header">
+      <div className="settings-header-copy">
+        <span className="settings-header-kicker">Configuration Surface</span>
+        <div className="settings-header-title-block">
+          <strong className="settings-header-title">System Settings</strong>
+          <span className="settings-header-subtitle">Global notifications and package runtime controls.</span>
+        </div>
+      </div>
       <div className="console-tabs settings-header-tabs">
         <button
           type="button"
@@ -299,110 +398,49 @@ function SettingsModalBody({ runtime }: { runtime: AppRuntime }): JSX.Element {
         </div>
       );
     }
+
     const globalValidation = applySchemaValidation(
       state.globalEditor.drafts,
       state.globalConfig,
       GLOBAL_SETTINGS_PACKAGE
     );
+
     return (
       <div className="stack settings-modal-layout">
         <div className="panel-card">
+          <div className="settings-section-intro">
+            <span className="settings-section-kicker">Global</span>
+            <h4>Notifications and runtime reminders</h4>
+            <p className="muted">Control alert cadence, obstacle keywords and loss-of-connection behavior.</p>
+          </div>
           <div className="settings-table">
             {listedFields(GLOBAL_SETTINGS_PACKAGE).map((field) => (
-              <div key={field.key} className="settings-row">
-                <label htmlFor={`global-${field.key}`} className="settings-key">
-                  {field.label}
-                </label>
-                <div className="settings-value-column">
-                  {field.type === "boolean" ? (
-                    <label className="settings-boolean-toggle" htmlFor={`global-${field.key}`}>
-                      <input
-                        id={`global-${field.key}`}
-                        type="checkbox"
-                        checked={state.globalEditor!.drafts[field.key] === true}
-                        onChange={(event) => {
-                          const nextDrafts = {
-                            ...state.globalEditor!.drafts,
-                            [field.key]: event.target.checked
-                          };
-                          const validation = applySchemaValidation(
-                            nextDrafts,
-                            state.globalConfig!,
-                            GLOBAL_SETTINGS_PACKAGE
-                          );
-                          updateSettingsUiState((current) => ({
-                            ...current,
-                            footerNotice: "",
-                            globalEditor: {
-                              drafts: nextDrafts,
-                              errors: validation.errors
-                            }
-                          }));
-                        }}
-                      />
-                      <span>{state.globalEditor!.drafts[field.key] === true ? "true" : "false"}</span>
-                    </label>
-                  ) : field.type === "json" ? (
-                    <textarea
-                      id={`global-${field.key}`}
-                      className={state.globalEditor!.errors[field.key] ? "input-error" : ""}
-                      value={String(state.globalEditor!.drafts[field.key] ?? "")}
-                      placeholder={field.placeholder}
-                      rows={3}
-                      spellCheck={false}
-                      onChange={(event) => {
-                        const nextDrafts = {
-                          ...state.globalEditor!.drafts,
-                          [field.key]: event.target.value
-                        };
-                        const validation = applySchemaValidation(
-                          nextDrafts,
-                          state.globalConfig!,
-                          GLOBAL_SETTINGS_PACKAGE
-                        );
-                        updateSettingsUiState((current) => ({
-                          ...current,
-                          footerNotice: "",
-                          globalEditor: {
-                            drafts: nextDrafts,
-                            errors: validation.errors
-                          }
-                        }));
-                      }}
-                    />
-                  ) : (
-                    <input
-                      id={`global-${field.key}`}
-                      className={state.globalEditor!.errors[field.key] ? "input-error" : ""}
-                      value={String(state.globalEditor!.drafts[field.key] ?? "")}
-                      placeholder={field.placeholder}
-                      onChange={(event) => {
-                        const nextDrafts = {
-                          ...state.globalEditor!.drafts,
-                          [field.key]: event.target.value
-                        };
-                        const validation = applySchemaValidation(
-                          nextDrafts,
-                          state.globalConfig!,
-                          GLOBAL_SETTINGS_PACKAGE
-                        );
-                        updateSettingsUiState((current) => ({
-                          ...current,
-                          footerNotice: "",
-                          globalEditor: {
-                            drafts: nextDrafts,
-                            errors: validation.errors
-                          }
-                        }));
-                      }}
-                    />
-                  )}
-                  {field.description ? <p className="muted settings-description">{field.description}</p> : null}
-                  {state.globalEditor!.errors[field.key] ? (
-                    <p className="muted settings-error">{state.globalEditor!.errors[field.key]}</p>
-                  ) : null}
-                </div>
-              </div>
+              <SettingsFieldCard
+                key={field.key}
+                scopeId="global"
+                field={field}
+                value={state.globalEditor!.drafts[field.key]}
+                error={state.globalEditor!.errors[field.key]}
+                onChange={(nextValue) => {
+                  const nextDrafts = {
+                    ...state.globalEditor!.drafts,
+                    [field.key]: nextValue
+                  };
+                  const validation = applySchemaValidation(
+                    nextDrafts,
+                    state.globalConfig!,
+                    GLOBAL_SETTINGS_PACKAGE
+                  );
+                  updateSettingsUiState((current) => ({
+                    ...current,
+                    footerNotice: "",
+                    globalEditor: {
+                      drafts: nextDrafts,
+                      errors: validation.errors
+                    }
+                  }));
+                }}
+              />
             ))}
           </div>
           {Object.keys(globalValidation.errors).length > 0 ? (
@@ -420,88 +458,35 @@ function SettingsModalBody({ runtime }: { runtime: AppRuntime }): JSX.Element {
   return (
     <div className="stack settings-modal-layout">
       <div className="panel-card">
+        <div className="settings-section-intro">
+          <span className="settings-section-kicker">Package</span>
+          <h4>{activePackage.settingsSchema.title}</h4>
+          <p className="muted">Runtime values for package `{activePackage.id}`.</p>
+        </div>
         <div className="settings-table">
           {fields.map((field) => (
-            <div key={field.key} className="settings-row">
-              <label htmlFor={`pkg-${activePackage.id}-${field.key}`} className="settings-key">
-                {field.label}
-              </label>
-              <div className="settings-value-column">
-                {field.type === "boolean" ? (
-                  <label className="settings-boolean-toggle" htmlFor={`pkg-${activePackage.id}-${field.key}`}>
-                    <input
-                      id={`pkg-${activePackage.id}-${field.key}`}
-                      type="checkbox"
-                      checked={editorState.drafts[field.key] === true}
-                      onChange={(event) => {
-                        const nextDrafts = { ...editorState.drafts, [field.key]: event.target.checked };
-                        const validation = applySchemaValidation(nextDrafts, config, activePackage);
-                        updateSettingsUiState((current) => ({
-                          ...current,
-                          footerNotice: "",
-                          editorByPackage: {
-                            ...current.editorByPackage,
-                            [activePackage.id]: {
-                              drafts: nextDrafts,
-                              errors: validation.errors
-                            }
-                          }
-                        }));
-                      }}
-                    />
-                    <span>{editorState.drafts[field.key] === true ? "true" : "false"}</span>
-                  </label>
-                ) : field.type === "json" ? (
-                  <textarea
-                    id={`pkg-${activePackage.id}-${field.key}`}
-                    className={editorState.errors[field.key] ? "input-error" : ""}
-                    value={String(editorState.drafts[field.key] ?? "")}
-                    placeholder={field.placeholder}
-                    rows={3}
-                    spellCheck={false}
-                    onChange={(event) => {
-                      const nextDrafts = { ...editorState.drafts, [field.key]: event.target.value };
-                      const validation = applySchemaValidation(nextDrafts, config, activePackage);
-                      updateSettingsUiState((current) => ({
-                        ...current,
-                        footerNotice: "",
-                        editorByPackage: {
-                          ...current.editorByPackage,
-                          [activePackage.id]: {
-                            drafts: nextDrafts,
-                            errors: validation.errors
-                          }
-                        }
-                      }));
-                    }}
-                  />
-                ) : (
-                  <input
-                    id={`pkg-${activePackage.id}-${field.key}`}
-                    className={editorState.errors[field.key] ? "input-error" : ""}
-                    value={String(editorState.drafts[field.key] ?? "")}
-                    placeholder={field.placeholder}
-                    onChange={(event) => {
-                      const nextDrafts = { ...editorState.drafts, [field.key]: event.target.value };
-                      const validation = applySchemaValidation(nextDrafts, config, activePackage);
-                      updateSettingsUiState((current) => ({
-                        ...current,
-                        footerNotice: "",
-                        editorByPackage: {
-                          ...current.editorByPackage,
-                          [activePackage.id]: {
-                            drafts: nextDrafts,
-                            errors: validation.errors
-                          }
-                        }
-                      }));
-                    }}
-                  />
-                )}
-                {field.description ? <p className="muted settings-description">{field.description}</p> : null}
-                {editorState.errors[field.key] ? <p className="muted settings-error">{editorState.errors[field.key]}</p> : null}
-              </div>
-            </div>
+            <SettingsFieldCard
+              key={field.key}
+              scopeId={`pkg-${activePackage.id}`}
+              field={field}
+              value={editorState.drafts[field.key]}
+              error={editorState.errors[field.key]}
+              onChange={(nextValue) => {
+                const nextDrafts = { ...editorState.drafts, [field.key]: nextValue };
+                const validation = applySchemaValidation(nextDrafts, config, activePackage);
+                updateSettingsUiState((current) => ({
+                  ...current,
+                  footerNotice: "",
+                  editorByPackage: {
+                    ...current.editorByPackage,
+                    [activePackage.id]: {
+                      drafts: nextDrafts,
+                      errors: validation.errors
+                    }
+                  }
+                }));
+              }}
+            />
           ))}
         </div>
       </div>
@@ -517,107 +502,177 @@ function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element 
 
   return (
     <div className="settings-footer">
-      <button
-        type="button"
-        disabled={activePackage ? hasErrors : false}
-        onClick={async () => {
-          if (!activePackage) {
-            if (!state.globalConfig || !state.globalEditor) return;
-            const validation = applySchemaValidation(
-              state.globalEditor.drafts,
-              state.globalConfig,
-              GLOBAL_SETTINGS_PACKAGE
-            );
+      <div className="settings-footer-status">
+        {state.footerNotice ? <span className="muted settings-footer-notice">{state.footerNotice}</span> : null}
+      </div>
+      <div className="settings-footer-actions">
+        <button
+          type="button"
+          className="button-primary"
+          disabled={activePackage ? hasErrors : false}
+          onClick={async () => {
+            if (!activePackage) {
+              if (!state.globalConfig || !state.globalEditor) return;
+              const validation = applySchemaValidation(
+                state.globalEditor.drafts,
+                state.globalConfig,
+                GLOBAL_SETTINGS_PACKAGE
+              );
+              if (!validation.nextConfig) {
+                updateSettingsUiState((current) => ({
+                  ...current,
+                  globalEditor: {
+                    drafts: state.globalEditor!.drafts,
+                    errors: validation.errors
+                  },
+                  footerNotice: ""
+                }));
+                return;
+              }
+              const saved = await saveCoreNotificationSettings(validation.nextConfig);
+              updateSettingsUiState((current) => ({
+                ...current,
+                globalConfig: saved,
+                globalEditor: createEditorState(saved, GLOBAL_SETTINGS_PACKAGE),
+                footerNotice: "Saved"
+              }));
+              runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
+                settings: saved
+              });
+              return;
+            }
+
+            const currentState = getSettingsUiState();
+            const currentEditor = currentState.editorByPackage[activePackage.id];
+            if (!currentEditor) return;
+
+            const currentConfig = runtime.getPackageConfig<Record<string, unknown>>(activePackage.id);
+            const validation = applySchemaValidation(currentEditor.drafts, currentConfig, activePackage);
             if (!validation.nextConfig) {
               updateSettingsUiState((current) => ({
                 ...current,
-                globalEditor: {
-                  drafts: state.globalEditor!.drafts,
-                  errors: validation.errors
+                editorByPackage: {
+                  ...current.editorByPackage,
+                  [activePackage.id]: {
+                    drafts: currentEditor.drafts,
+                    errors: validation.errors
+                  }
                 },
                 footerNotice: ""
               }));
               return;
             }
-            const saved = await saveCoreNotificationSettings(validation.nextConfig);
-            updateSettingsUiState((current) => ({
-              ...current,
-              globalConfig: saved,
-              globalEditor: createEditorState(saved, GLOBAL_SETTINGS_PACKAGE),
-              footerNotice: "Saved"
-            }));
-            runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
-              settings: saved
-            });
-            return;
-          }
 
-          const currentState = getSettingsUiState();
-          const currentEditor = currentState.editorByPackage[activePackage.id];
-          if (!currentEditor) return;
-
-          const currentConfig = runtime.getPackageConfig<Record<string, unknown>>(activePackage.id);
-          const validation = applySchemaValidation(currentEditor.drafts, currentConfig, activePackage);
-          if (!validation.nextConfig) {
+            await runtime.setPackageConfig(activePackage.id, validation.nextConfig);
             updateSettingsUiState((current) => ({
               ...current,
               editorByPackage: {
                 ...current.editorByPackage,
-                [activePackage.id]: {
-                  drafts: currentEditor.drafts,
-                  errors: validation.errors
-                }
+                [activePackage.id]: createEditorState(validation.nextConfig!, activePackage)
               },
-              footerNotice: ""
+              footerNotice: "Saved"
             }));
-            return;
-          }
+          }}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={async () => {
+            if (!activePackage) {
+              const defaults = await resetCoreNotificationSettings();
+              updateSettingsUiState((current) => ({
+                ...current,
+                globalConfig: defaults,
+                globalEditor: createEditorState(defaults, GLOBAL_SETTINGS_PACKAGE),
+                footerNotice: "Reset to defaults"
+              }));
+              runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
+                settings: defaults
+              });
+              return;
+            }
 
-          await runtime.setPackageConfig(activePackage.id, validation.nextConfig);
-          updateSettingsUiState((current) => ({
-            ...current,
-            editorByPackage: {
-              ...current.editorByPackage,
-              [activePackage.id]: createEditorState(validation.nextConfig!, activePackage)
-            },
-            footerNotice: "Saved"
-          }));
-        }}
-      >
-        Save
-      </button>
-      <button
-        type="button"
-        onClick={async () => {
-          if (!activePackage) {
-            const defaults = await resetCoreNotificationSettings();
+            await runtime.resetPackageConfig(activePackage.id);
+            const resetConfig = runtime.getPackageConfig<Record<string, unknown>>(activePackage.id);
             updateSettingsUiState((current) => ({
               ...current,
-              globalConfig: defaults,
-              globalEditor: createEditorState(defaults, GLOBAL_SETTINGS_PACKAGE),
-              footerNotice: "Reset to defaults"
+              editorByPackage: {
+                ...current.editorByPackage,
+                [activePackage.id]: createEditorState(resetConfig, activePackage)
+              },
+              footerNotice: "Reset to package defaults"
             }));
-            runtime.eventBus.emit(CORE_EVENTS.globalNotificationSettingsUpdated, {
-              settings: defaults
-            });
-            return;
-          }
+          }}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
 
-          await runtime.resetPackageConfig(activePackage.id);
-          const resetConfig = runtime.getPackageConfig<Record<string, unknown>>(activePackage.id);
-          updateSettingsUiState((current) => ({
-            ...current,
-            editorByPackage: {
-              ...current.editorByPackage,
-              [activePackage.id]: createEditorState(resetConfig, activePackage)
-            },
-            footerNotice: "Reset to package defaults"
-          }));
-        }}
-      >
-        Reset
-      </button>
-      {state.footerNotice ? <span className="muted">{state.footerNotice}</span> : null}
+function SettingsSidebarPanel({ runtime }: { runtime: AppRuntime }): JSX.Element {
+  const packageCount = runtime.packages.length;
+  const packageFieldCount = runtime.packages.reduce((total, cockpitPackage) => {
+    return total + listedFields(cockpitPackage).length;
+  }, 0);
+
+  return (
+    <div className="stack settings-sidebar-panel">
+      <div className="panel-card settings-sidebar-hero">
+        <span className="settings-sidebar-kicker">Control Surface</span>
+        <div className="settings-sidebar-header">
+          <h3>Settings</h3>
+          <span className="status-pill">Ready</span>
+        </div>
+        <p className="muted settings-sidebar-copy">
+          Abrí la superficie de configuración para ajustar notificaciones globales y runtime settings de cada paquete.
+        </p>
+        <button
+          type="button"
+          aria-label="Open Settings"
+          className="button-primary button-tile settings-sidebar-action"
+          onClick={() => {
+            void runtime.commands.execute(OPEN_SETTINGS_COMMAND_ID);
+          }}
+        >
+          <span className="button-face">
+            <span className="button-face-icon" aria-hidden="true">
+              ⚙
+            </span>
+            <span className="button-face-copy">
+              <span className="button-face-label">Open Settings</span>
+              <span className="button-face-meta">Global notifications and package runtime controls</span>
+            </span>
+          </span>
+        </button>
+      </div>
+      <div className="panel-card settings-sidebar-summary">
+        <div className="settings-sidebar-stat">
+          <span className="settings-sidebar-stat-label">Packages</span>
+          <strong className="settings-sidebar-stat-value">{packageCount}</strong>
+        </div>
+        <div className="settings-sidebar-stat">
+          <span className="settings-sidebar-stat-label">Fields</span>
+          <strong className="settings-sidebar-stat-value">{GLOBAL_SETTINGS_FIELDS.length + packageFieldCount}</strong>
+        </div>
+      </div>
+      <div className="panel-card settings-sidebar-packages">
+        <div className="settings-sidebar-section-head">
+          <strong>Editable scopes</strong>
+          <span className="muted">Global + packages</span>
+        </div>
+        <div className="settings-sidebar-chip-list">
+          <span className="settings-sidebar-chip">Global Notifications</span>
+          {runtime.packages.map((cockpitPackage) => (
+            <span key={cockpitPackage.id} className="settings-sidebar-chip">
+              {cockpitPackage.settingsSchema.title?.trim() || cockpitPackage.id}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -641,9 +696,11 @@ export function registerCoreSettingsUi(runtime: AppRuntime): void {
   );
 
   runtime.contributions.register({
-    id: "toolbar.settings",
-    slot: "toolbar",
+    id: "sidebar.settings",
+    slot: "sidebar",
     label: "Settings",
-    commandId: OPEN_SETTINGS_COMMAND_ID
+    icon: "⚙️",
+    order: 110,
+    render: () => <SettingsSidebarPanel runtime={runtime} />
   });
 }

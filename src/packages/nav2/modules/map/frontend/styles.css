@@ -653,3 +653,220 @@
   background: rgba(255, 255, 255, 0.96);
   border-color: var(--line);
 }
+
+/* Cockpit map refresh */
+
+.map-workspace-root {
+  background:
+    radial-gradient(circle at top left, rgba(74, 156, 205, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(7, 12, 19, 0.98), rgba(5, 9, 14, 0.98));
+}
+
+.map-workspace-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(110, 139, 164, 0.16);
+  background: linear-gradient(180deg, rgba(11, 18, 26, 0.92), rgba(8, 13, 20, 0.92));
+}
+
+.map-workspace-toolbar-left {
+  display: grid;
+  gap: 12px;
+}
+
+.map-toolbar-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.map-toolbar-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(171, 186, 199, 0.62);
+}
+
+.map-toolbar-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.map-toolbar-title {
+  font-size: 18px;
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.map-toolbar-hint {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(189, 202, 214, 0.7);
+}
+
+.map-toolbar-icons {
+  gap: 10px;
+}
+
+.map-workspace-toolbar .map-toolbar button,
+.swap-btn,
+.view-stage-unlock-btn,
+.map-inspect-copy {
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(19, 31, 44, 0.98), rgba(12, 21, 31, 0.98));
+  border: 1px solid rgba(96, 122, 146, 0.26);
+  color: rgba(229, 236, 242, 0.94);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.map-workspace-toolbar .map-toolbar button:hover:not(:disabled),
+.swap-btn:hover:not(:disabled),
+.view-stage-unlock-btn:hover:not(:disabled),
+.map-inspect-copy:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(27, 43, 61, 0.98), rgba(15, 26, 39, 0.98));
+}
+
+.map-workspace-toolbar .map-toolbar button.active,
+.map-toolbar button.active {
+  background: linear-gradient(180deg, rgba(25, 87, 124, 0.98), rgba(17, 61, 91, 0.98));
+  border-color: rgba(93, 173, 224, 0.42);
+  color: #f7fbff;
+}
+
+.map-workspace-toolbar .map-toolbar button:disabled,
+.swap-btn:disabled,
+.view-stage-unlock-btn:disabled {
+  background: rgba(36, 50, 64, 0.78);
+  border-color: rgba(110, 139, 164, 0.18);
+  color: rgba(175, 190, 201, 0.48);
+}
+
+.map-tool-status {
+  min-height: 56px;
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  padding: 10px 14px;
+  border: 1px solid rgba(110, 139, 164, 0.18);
+  border-radius: 16px;
+  background: rgba(10, 17, 26, 0.74);
+}
+
+.map-tool-status-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(171, 186, 199, 0.62);
+}
+
+.map-tool-status-value {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.map-stage {
+  padding: 18px;
+  background:
+    radial-gradient(circle at center, rgba(24, 49, 69, 0.24), transparent 46%),
+    linear-gradient(180deg, rgba(6, 10, 15, 0.98), rgba(4, 7, 11, 0.98));
+}
+
+.map-workspace-root .map-stage .stage-pane {
+  border: 1px solid rgba(110, 139, 164, 0.18);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(10, 17, 26, 0.96), rgba(7, 12, 18, 0.96));
+  box-shadow: 0 20px 34px rgba(0, 0, 0, 0.28);
+}
+
+.map-workspace-root .map-stage .stage-pane.main {
+  overflow: hidden;
+}
+
+.map-workspace-root .map-stage .stage-pane > h4 {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(110, 139, 164, 0.14);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(188, 200, 210, 0.76);
+}
+
+.map-canvas,
+.camera-frame-wrap,
+.camera-frame {
+  background: rgba(5, 9, 14, 0.98);
+}
+
+.camera-frame-wrap {
+  border-radius: 0 0 20px 20px;
+}
+
+.camera-overlay {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(227, 236, 244, 0.92);
+  background: rgba(4, 8, 13, 0.58);
+}
+
+.stage-bottom-left-actions {
+  left: 24px;
+  bottom: 24px;
+}
+
+.swap-btn {
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  min-height: 52px;
+  border-radius: 16px;
+  font-size: 22px;
+}
+
+.stage-gps-mini-badge {
+  right: 24px;
+  bottom: 24px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(10, 17, 26, 0.86);
+  border: 1px solid rgba(110, 139, 164, 0.18);
+  color: rgba(227, 236, 244, 0.92);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-inspect-popup .coords {
+  color: var(--text);
+}
+
+.map-measure-tooltip,
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-content-wrapper,
+.leaflet-popup.map-inspect-leaflet-popup .leaflet-popup-tip {
+  background: rgba(10, 17, 26, 0.96);
+  border-color: rgba(110, 139, 164, 0.2);
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .map-workspace-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .map-workspace-toolbar-right {
+    justify-content: stretch;
+  }
+
+  .map-tool-status {
+    width: 100%;
+  }
+}

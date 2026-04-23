@@ -27,6 +27,100 @@ export interface TelemetrySnapshot {
   alerts: TelemetryEvent[];
 }
 
+function normalizeEventLevel(raw: unknown): string {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (text === "0" || text === "ok" || text === "info") return "info";
+  if (text === "1" || text === "warn" || text === "warning") return "warn";
+  if (text === "2" || text === "error" || text === "err") return "error";
+  if (!text) return "info";
+  return text;
+}
+
+function eventDetails(raw: Record<string, unknown>): Record<string, string> {
+  const details = asRecord(raw.details);
+  if (!details) return {};
+  return Object.fromEntries(Object.entries(details).map(([key, value]) => [key, String(value)]));
+}
+
+function detailBool(details: Record<string, string>, key: string): boolean {
+  const value = String(details[key] ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
+function detailNumber(details: Record<string, string>, key: string): number {
+  const value = Number(details[key]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function resultStatusFromText(text: string): string {
+  const normalized = text.trim().toLowerCase();
+  if (normalized.includes("succeeded")) return "succeeded";
+  if (normalized.includes("canceled") || normalized.includes("cancelled")) return "cancelled";
+  if (normalized.includes("aborted") || normalized.includes("failed")) return "failed";
+  return "";
+}
+
+export function formatNavigationEventText(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const value = raw as Record<string, unknown>;
+  const text = String(value.text ?? value.message ?? value.msg ?? "").trim();
+  if (!text) return "";
+
+  const code = String(value.code ?? "").trim();
+  const component = String(value.component ?? "").trim().toLowerCase();
+  const details = eventDetails(value);
+  const waypoints = detailNumber(details, "waypoints");
+  const suppressSuccessBrake = detailBool(details, "suppress_success_brake");
+  const loop = detailBool(details, "loop");
+  const reason = String(details.reason ?? "").trim();
+
+  if (code === "GOAL_REQUESTED") {
+    if (loop) return "Loop navigation requested";
+    return "Navigation requested";
+  }
+
+  if (code === "GOAL_ACCEPTED" || text.endsWith("goal accepted")) {
+    if (reason === "loop_segment_advance" || loop) return "Loop segment accepted";
+    if (text.includes("NavigateThroughPoses") || waypoints > 1 || suppressSuccessBrake) {
+      return "Route segment accepted";
+    }
+    return "Goal accepted";
+  }
+
+  if (code === "GOAL_RESULT_SUCCEEDED" || code === "GOAL_CANCELLED" || code === "GOAL_RESULT_ABORTED") {
+    const status = resultStatusFromText(text);
+    const isRouteSegment = component.includes("navigatethroughposes") || text.includes("NavigateThroughPoses");
+    const subject = isRouteSegment ? "Route segment" : "Goal";
+    if (status === "succeeded") return isRouteSegment ? "Route segment reached" : "Goal reached";
+    if (status === "cancelled") return `${subject} cancelled`;
+    if (status === "failed") return `${subject} failed`;
+  }
+
+  if (code === "BRAKE_APPLIED" || text.toLowerCase().includes("brake sequence")) {
+    return "Brake applied";
+  }
+  if (code === "MANUAL_TAKEOVER") {
+    return detailBool(details, "had_goal") ? "Manual takeover: navigation paused" : "Manual control enabled";
+  }
+  if (code === "MANUAL_WATCHDOG_STOP") {
+    return "Manual command timed out; robot stopped";
+  }
+  if (code === "ACTION_SERVER_UNAVAILABLE") {
+    return "Navigation action unavailable";
+  }
+  if (code === "FROMLL_FAILED") {
+    return text.toLowerCase().includes("unavailable")
+      ? "GPS conversion service unavailable"
+      : "GPS goal conversion failed";
+  }
+  if (code === "LOOP_RESTART_FAILED") {
+    return "Loop restart failed";
+  }
+  if (text === "Goal cancel requested") return "Cancelling navigation";
+  if (text === "Goal cancel failed") return "Cancel failed";
+  return text;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -227,10 +321,10 @@ export class TelemetryService {
   private normalizeTelemetryEvent(raw: unknown): TelemetryEvent | null {
     if (!raw || typeof raw !== "object") return null;
     const value = raw as Record<string, unknown>;
-    const text = String(value.text ?? value.message ?? value.msg ?? "");
+    const text = formatNavigationEventText(value);
     if (!text) return null;
     return {
-      level: String(value.level ?? value.severity ?? "info").toLowerCase(),
+      level: normalizeEventLevel(value.level ?? value.severity ?? "info"),
       code: value.code != null ? String(value.code) : undefined,
       text,
       timestamp: Number(value.timestamp ?? value.stamp_ms ?? Date.now())

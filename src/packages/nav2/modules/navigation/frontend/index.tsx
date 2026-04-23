@@ -132,6 +132,119 @@ function formatControlLockReason(reason: string): string {
   return labels[normalized] ?? `Robot bloqueado: ${normalized}`;
 }
 
+function cleanRouteStatus(status: string): string {
+  return status.replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
+}
+
+function formatRouteStatus(status: string): string {
+  const normalized = cleanRouteStatus(status);
+  if (!normalized || normalized === "idle") return "Idle";
+  if (normalized === "route starting") return "Starting route";
+  if (normalized.startsWith("route active")) return "Following route";
+  if (normalized === "route completed") return "Route complete";
+  if (normalized === "route cancelled") return "Route cancelled";
+  if (normalized === "route paused by manual takeover") return "Paused by manual";
+  if (normalized.startsWith("route failed")) return "Route error";
+  return status.trim();
+}
+
+function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
+  const status = cleanRouteStatus(routeMission.status);
+  if (routeMission.paused || status.includes("paused")) return "paused";
+  if (status.includes("failed") || status.includes("abort")) return "error";
+  if (status.includes("completed")) return "done";
+  if (status.includes("cancelled")) return "idle";
+  if (routeMission.active || status.includes("active") || status.includes("starting")) return "active";
+  return "idle";
+}
+
+function buildNavigationStatus(
+  state: NavigationState,
+  telemetry: TelemetrySnapshot | null
+): {
+  title: string;
+  detail: string;
+  tone: "active" | "paused" | "done" | "error" | "idle" | "manual";
+  progressPct: number;
+  showProgress: boolean;
+  segmentText: string;
+  routeMetaText: string;
+} {
+  const routeMission = state.routeMission;
+  const tone = routeTone(routeMission);
+  const expandedCount = Math.max(0, Math.round(routeMission.expandedWaypointCount));
+  const status = cleanRouteStatus(routeMission.status);
+  const startIndex = Math.max(0, Math.round(routeMission.currentStartIndex));
+  const routeProgressCount =
+    expandedCount > 0
+      ? status.includes("completed")
+        ? expandedCount
+        : Math.min(expandedCount, startIndex)
+      : 0;
+  const progressPct = expandedCount > 0 ? Math.min(100, Math.max(0, (routeProgressCount / expandedCount) * 100)) : 0;
+  const hasRouteHistory =
+    expandedCount > 0 || routeMission.inputWaypointCount > 0 || cleanRouteStatus(routeMission.status) !== "idle";
+  const routeMetaText =
+    expandedCount > 0
+      ? `${routeProgressCount}/${expandedCount} route points${routeMission.loop ? " · loop" : ""}`
+      : routeMission.loop
+        ? "Loop route"
+        : "";
+  const segmentText =
+    routeMission.activeChunkSize > 0
+      ? `Segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1} · ${routeMission.activeChunkSize} pts`
+      : routeMission.currentTargetIndex > 0
+        ? `Last segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1}`
+        : "";
+
+  if (state.manualMode || state.manualDisablePending) {
+    return {
+      title: state.manualDisablePending ? "Leaving manual control" : "Manual control",
+      detail: routeMission.paused ? "Route paused" : "Operator control",
+      tone: "manual",
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
+
+  if (tone !== "idle" || hasRouteHistory) {
+    return {
+      title: tone === "paused" ? "Route paused" : formatRouteStatus(routeMission.status),
+      detail: routeMission.loop ? "Mission loop enabled" : tone === "done" ? "Final brake expected" : "Route mission",
+      tone,
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
+
+  if (telemetry?.goalActive) {
+    return {
+      title: state.loopRoute ? "Loop goal active" : "Goal active",
+      detail: "Send navigation",
+      tone: "active",
+      progressPct: 0,
+      showProgress: false,
+      segmentText: "",
+      routeMetaText: ""
+    };
+  }
+
+  const lastResult = String(telemetry?.navResultText ?? state.lastStatus ?? "").trim();
+  return {
+    title: lastResult && lastResult !== "idle" ? formatRouteStatus(lastResult) : "Ready",
+    detail: "No active navigation",
+    tone: "idle",
+    progressPct: 0,
+    showProgress: false,
+    segmentText: "",
+    routeMetaText: ""
+  };
+}
+
 function formatRecordingSummary(state: NavigationState): string {
   const bits = [`Recorder: ${state.recording.active ? "recording" : "idle"}`, `count=${state.recording.count}`];
   if (!state.recording.active && state.recording.lastMessage) {
@@ -173,6 +286,34 @@ function formatInfoTimestamp(value: unknown): string {
   return new Date(numeric).toLocaleString();
 }
 
+function joinClassNames(...values: Array<string | false | undefined>): string {
+  return values.filter(Boolean).join(" ");
+}
+
+function ButtonFace({
+  icon,
+  label,
+  meta,
+  compact = false
+}: {
+  icon: string;
+  label: string;
+  meta?: string;
+  compact?: boolean;
+}): JSX.Element {
+  return (
+    <span className={joinClassNames("button-face", compact && "button-face-compact")}>
+      <span className="button-face-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="button-face-copy">
+        <span className="button-face-label">{label}</span>
+        {meta ? <span className="button-face-meta">{meta}</span> : null}
+      </span>
+    </span>
+  );
+}
+
 function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const [state, setState] = useState(service.getState());
@@ -198,6 +339,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <div className="action-grid">
             <button
               type="button"
+              className="button-primary button-tile"
               disabled={state.connecting}
               onClick={async () => {
                 try {
@@ -207,10 +349,15 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              {state.connecting ? "Connecting..." : "Connect"}
+              <ButtonFace
+                icon={state.connecting ? "◌" : "⏽"}
+                label={state.connecting ? "Connecting" : "Connect"}
+                meta={state.connecting ? "Opening backend session" : "Open backend session"}
+              />
             </button>
             <button
               type="button"
+              className="button-secondary button-tile"
               onClick={async () => {
                 try {
                   await service.disconnect();
@@ -219,7 +366,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              Disconnect
+              <ButtonFace icon="⏹" label="Disconnect" meta="Close current session" />
             </button>
           </div>
           {state.lastError ? <p className="muted">Error: {state.lastError}</p> : null}
@@ -244,11 +391,21 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const telemetryService = getTelemetryService(runtime);
   const [state, setState] = useState<NavigationState>(service.getState());
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
+    telemetryService ? telemetryService.getSnapshot() : null
+  );
   const selectedCount = state.selectedWaypointIndexes.length;
   const lockReasonText = formatControlLockReason(state.controlLockReason);
+  const routeMission = state.routeMission;
+  const navigationStatus = buildNavigationStatus(state, telemetrySnapshot);
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
+  useEffect(() => {
+    if (!telemetryService) return;
+    return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
+  }, [telemetryService]);
 
   const emitInfo = (text: string): void => {
     runtime.eventBus.emit("console.event", {
@@ -280,24 +437,25 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              <span className="nav-lock-btn-label">🔒 Desbloquear robot</span>
+              <ButtonFace icon="🔒" label="Desbloquear robot" meta={lockReasonText} />
             </button>
           </div>
         ) : (
           <div className="nav-legacy-grid">
             <button
               type="button"
-              className={state.goalMode ? "active" : ""}
+              className={joinClassNames("nav-control-btn", state.goalMode && "active")}
               onClick={() => {
                 const enabled = service.toggleGoalMode();
                 emitInfo(enabled ? "Goal mode enabled" : "Goal mode disabled");
               }}
               title="Modo objetivo"
             >
-              📌
+              <ButtonFace icon="📌" label="Goal mode" meta={state.goalMode ? "Enabled" : "Standby"} compact />
             </button>
             <button
               type="button"
+              className="nav-control-btn"
               onClick={() => {
                 service.removeLastWaypoint();
                 emitInfo("Last waypoint removed");
@@ -305,11 +463,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               disabled={state.waypoints.length === 0}
               title="Deshacer"
             >
-              ↩
+              <ButtonFace icon="↩" label="Undo" meta="Last waypoint" compact />
             </button>
             <button
               type="button"
-              className="danger-btn"
+              className="danger-btn nav-control-btn"
               onClick={() => {
                 service.clearWaypoints();
                 emitInfo("Waypoints cleared");
@@ -317,11 +475,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               disabled={state.waypoints.length === 0}
               title="Limpiar waypoints"
             >
-              🗑
+              <ButtonFace icon="🗑" label="Clear" meta="All waypoints" compact />
             </button>
             <button
               type="button"
-              className="danger-btn"
+              className="danger-btn nav-control-btn"
               onClick={() => {
                 const removed = service.removeSelectedWaypoints();
                 if (removed > 0) {
@@ -331,11 +489,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               disabled={selectedCount === 0}
               title="Eliminar seleccionados"
             >
-              🧹
+              <ButtonFace icon="🧹" label="Remove" meta={`${selectedCount} selected`} compact />
             </button>
             <button
               type="button"
-              className="nav-legacy-send-btn"
+              className="nav-legacy-send-btn nav-control-btn nav-control-btn-wide"
               onClick={async () => {
                 try {
                   const sent = await service.sendQueuedGoal();
@@ -351,15 +509,45 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               disabled={state.waypoints.length === 0}
             >
-              ➤ Send
+              <ButtonFace icon="➤" label="Dispatch goal" meta={`${state.waypoints.length} waypoint${state.waypoints.length === 1 ? "" : "s"} queued`} />
             </button>
             <button
               type="button"
-              className="danger-btn nav-legacy-cancel-btn"
+              className="nav-legacy-send-btn nav-control-btn nav-control-btn-wide"
               onClick={async () => {
                 try {
-                  await service.cancelGoal();
-                  emitInfo("Goal cancelled");
+                  const started = await service.sendRouteMission();
+                  emitInfo(
+                    `Route mission started (${started.inputCount} waypoint${started.inputCount === 1 ? "" : "s"}, ${started.expandedCount} route points)`
+                  );
+                } catch (error) {
+                  runtime.eventBus.emit("console.event", {
+                    level: "error",
+                    text: `Route mission failed: ${String(error)}`,
+                    timestamp: Date.now()
+                  });
+                }
+              }}
+              disabled={state.waypoints.length === 0}
+            >
+              <ButtonFace
+                icon="🛣"
+                label="Route mission"
+                meta={state.waypoints.length > 0 ? "Expand and execute route" : "Queue waypoints first"}
+              />
+            </button>
+            <button
+              type="button"
+              className="danger-btn nav-legacy-cancel-btn nav-control-btn nav-control-btn-wide"
+              onClick={async () => {
+                try {
+                  if (routeMission.active || routeMission.paused) {
+                    await service.cancelRouteMission();
+                    emitInfo("Route mission cancelled");
+                  } else {
+                    await service.cancelGoal();
+                    emitInfo("Goal cancelled");
+                  }
                 } catch (error) {
                   runtime.eventBus.emit("console.event", {
                     level: "error",
@@ -369,10 +557,15 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              ⊗ Cancel
+              <ButtonFace
+                icon="⊗"
+                label={routeMission.active || routeMission.paused ? "Cancel route" : "Cancel goal"}
+                meta={routeMission.active || routeMission.paused ? "Stop route mission" : "Stop active navigation"}
+              />
             </button>
             <button
               type="button"
+              className="nav-control-btn"
               onClick={async () => {
                 try {
                   const count = await service.saveWaypointsFile();
@@ -387,10 +580,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Guardar ruta"
             >
-              💾
+              <ButtonFace icon="💾" label="Save route" meta="Persist locally" compact />
             </button>
             <button
               type="button"
+              className="nav-control-btn"
               onClick={async () => {
                 try {
                   const count = await service.loadWaypointsFile();
@@ -405,20 +599,21 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Cargar ruta"
             >
-              📂
+              <ButtonFace icon="📂" label="Load route" meta="Restore file" compact />
             </button>
             <button
               type="button"
+              className="nav-control-btn"
               onClick={() => {
                 void runtime.commands.execute(NavigationCommands.openSnapshotModal);
               }}
               title="Snapshot"
             >
-              📸
+              <ButtonFace icon="📸" label="Snapshot" meta="Camera capture" compact />
             </button>
             <button
               type="button"
-              className={state.manualMode ? "active" : ""}
+              className={joinClassNames("nav-control-btn", state.manualMode && "active")}
               onClick={async () => {
                 const next = !state.manualMode;
                 try {
@@ -434,7 +629,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Modo manual"
             >
-              {state.manualMode ? "ON" : "OFF"}
+              <ButtonFace icon="🎮" label="Manual" meta={state.manualMode ? "Enabled" : "Disabled"} compact />
             </button>
           </div>
         )}
@@ -450,7 +645,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <div className="nav-route-grid">
             <button
               type="button"
-              className={state.recording.active ? "active" : ""}
+              className={joinClassNames("nav-control-btn", state.recording.active && "active")}
               onClick={async () => {
                 try {
                   await service.startRecording();
@@ -465,11 +660,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Iniciar grabacion de waypoints"
             >
-              Start Rec
+              <ButtonFace icon="●" label="Start Rec" meta="Path sampling" compact />
             </button>
             <button
               type="button"
-              className="danger-btn"
+              className="danger-btn nav-control-btn"
               onClick={async () => {
                 try {
                   await service.stopRecording();
@@ -484,11 +679,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Detener grabacion y guardar"
             >
-              Stop Rec
+              <ButtonFace icon="■" label="Stop Rec" meta="Save session" compact />
             </button>
             <button
               type="button"
-              className="nav-route-wide"
+              className="nav-route-wide nav-control-btn"
               onClick={async () => {
                 try {
                   await service.clearRecording();
@@ -503,11 +698,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Limpiar sesion grabada"
             >
-              Clear Rec
+              <ButtonFace icon="⌫" label="Clear Rec" meta="Reset recorded buffer" compact />
             </button>
             <button
               type="button"
-              className="nav-legacy-send-btn"
+              className="nav-legacy-send-btn nav-control-btn"
               onClick={async () => {
                 try {
                   await service.startPatrol();
@@ -522,11 +717,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Iniciar patrulla"
             >
-              Start Patrol
+              <ButtonFace icon="▶" label="Start Patrol" meta="Loop route" compact />
             </button>
             <button
               type="button"
-              className="danger-btn"
+              className="danger-btn nav-control-btn"
               onClick={async () => {
                 try {
                   await service.stopPatrol();
@@ -541,7 +736,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }}
               title="Detener patrulla"
             >
-              Stop Patrol
+              <ButtonFace icon="⏸" label="Stop Patrol" meta="Hold patrol" compact />
             </button>
           </div>
           <div className={`status-pill nav-route-status ${state.recording.active ? "ok" : ""}`.trim()}>
@@ -550,11 +745,30 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <div className={`status-pill nav-route-status ${state.patrolLoop.active ? "ok" : ""}`.trim()}>
             {formatPatrolSummary(state)}
           </div>
+          <div className={joinClassNames("nav-mission-status", `tone-${navigationStatus.tone}`)}>
+            <div className="nav-mission-status-main">
+              <span className="nav-mission-dot" aria-hidden="true" />
+              <div className="nav-mission-copy">
+                <strong>{navigationStatus.title}</strong>
+                <span>{navigationStatus.detail}</span>
+              </div>
+            </div>
+            {navigationStatus.showProgress ? (
+              <div className="nav-route-progress" aria-hidden="true">
+                <span style={{ width: `${navigationStatus.progressPct}%` }} />
+              </div>
+            ) : null}
+            {navigationStatus.segmentText || navigationStatus.routeMetaText ? (
+              <div className="nav-route-meta">
+                {navigationStatus.segmentText ? <span>{navigationStatus.segmentText}</span> : null}
+                {navigationStatus.routeMetaText ? <span>{navigationStatus.routeMetaText}</span> : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       </PanelSection>
       <ManualControlSidebarPanel runtime={runtime} />
       <ZonesSidebarSection runtime={runtime} />
-      <CameraSidebarPanel runtime={runtime} />
     </div>
   );
 }
@@ -613,6 +827,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
         <div className="zones-legacy-grid">
           <button
             type="button"
+            className="button-tile button-secondary"
             onClick={async () => {
               try {
                 await mapService.loadMap("map");
@@ -630,11 +845,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Refresh
+            <ButtonFace icon="↻" label="Refresh" meta="Fetch latest zones" compact />
           </button>
           <button
             type="button"
-            className="danger-btn"
+            className="danger-btn button-tile"
             onClick={async () => {
               const ok = await dialogService.confirm({
                 title: "Clear zones",
@@ -652,10 +867,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               });
             }}
           >
-            Clear
+            <ButtonFace icon="✕" label="Clear" meta="Remove all zones" compact />
           </button>
           <button
             type="button"
+            className="button-primary button-tile"
             onClick={async () => {
               try {
                 await mapService.pushZonesToBackend();
@@ -674,10 +890,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Save
+            <ButtonFace icon="⬆" label="Save" meta="Push and persist" compact />
           </button>
           <button
             type="button"
+            className="button-secondary button-tile"
             onClick={async () => {
               try {
                 const count = mapService.loadZonesFromStorage();
@@ -696,7 +913,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Load
+            <ButtonFace icon="⬇" label="Load" meta="Restore saved zones" compact />
           </button>
         </div>
         <label className="check-row">
@@ -718,91 +935,12 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
                   </div>
                 </div>
                 <button type="button" className="danger-btn" onClick={() => mapService.removeZone(zone.id)}>
-                  Remove
+                  <ButtonFace icon="−" label="Remove" meta="Delete zone" compact />
                 </button>
               </li>
             ))}
           </ul>
         )}
-      </PanelCollapsibleSection>
-    </div>
-  );
-}
-
-function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  let connectionService: ConnectionService | null = null;
-  try {
-    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-  } catch {
-    connectionService = null;
-  }
-
-  const pan = async (angleDeg: number): Promise<void> => {
-    if (!connectionService?.isCameraEnabled()) {
-      runtime.eventBus.emit("console.event", {
-        level: "warn",
-        text: "Camera disabled in current preset",
-        timestamp: Date.now()
-      });
-      return;
-    }
-    try {
-      await service.panCamera(angleDeg);
-    } catch (error) {
-      runtime.eventBus.emit("console.event", {
-        level: "error",
-        text: `Camera pan failed: ${String(error)}`,
-        timestamp: Date.now()
-      });
-    }
-  };
-
-  return (
-    <div className="stack">
-      <PanelCollapsibleSection title="Camera PTZ">
-        <div className="ptz-grid">
-          <button type="button" onClick={() => void pan(45)}>
-            ⇖
-          </button>
-          <button type="button" onClick={() => void pan(0)}>
-            ⇑
-          </button>
-          <button type="button" onClick={() => void pan(-45)}>
-            ⇗
-          </button>
-          <button type="button" onClick={() => void pan(90)}>
-            ⇐
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await service.toggleCameraZoom();
-              } catch (error) {
-                runtime.eventBus.emit("console.event", {
-                  level: "error",
-                  text: `Camera zoom failed: ${String(error)}`,
-                  timestamp: Date.now()
-                });
-              }
-            }}
-          >
-            🔍
-          </button>
-          <button type="button" onClick={() => void pan(-90)}>
-            ⇒
-          </button>
-          <button type="button" onClick={() => void pan(135)}>
-            ⇙
-          </button>
-          <button type="button" onClick={() => void pan(180)}>
-            ⇓
-          </button>
-          <button type="button" onClick={() => void pan(-135)}>
-            ⇘
-          </button>
-        </div>
       </PanelCollapsibleSection>
     </div>
   );

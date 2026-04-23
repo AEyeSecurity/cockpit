@@ -32,6 +32,39 @@ function buttonStatusClass(status: ProcessStatus): string {
   return "process-status-idle";
 }
 
+function statusMetaText(status: ProcessStatus): string {
+  if (status === "running") return "Live task";
+  if (status === "success") return "Last run ok";
+  if (status === "error") return "Needs review";
+  return "Ready";
+}
+
+function ProcessListButton({
+  label,
+  status,
+  active,
+  onSelect
+}: {
+  label: string;
+  status: ProcessStatus;
+  active: boolean;
+  onSelect: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`process-modal-process-btn ${buttonStatusClass(status)} ${active ? "active" : ""}`}
+      onClick={onSelect}
+    >
+      <span className="process-list-button-copy">
+        <span className="process-list-button-label">{label}</span>
+        <span className="process-list-button-meta">{statusMetaText(status)}</span>
+      </span>
+      <span className={`process-list-button-badge ${buttonStatusClass(status)}`}>{statusText(status)}</span>
+    </button>
+  );
+}
+
 export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<ProcessesService>(SERVICE_ID);
   let connectionService: ConnectionService | null = null;
@@ -106,6 +139,13 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
       ) : (
         <div className="process-modal-layout">
           <div className="process-modal-sidebar">
+            <div className="process-modal-sidebar-header">
+              <span className="process-modal-kicker">Runtime Control</span>
+              <h4 className="process-modal-sidebar-title">Managed Processes</h4>
+              <p className="muted process-modal-sidebar-copy">
+                Seleccioná un proceso para revisar output, estado y controlarlo desde el cockpit.
+              </p>
+            </div>
             <div className="process-modal-search-row">
               <input
                 value={state.search}
@@ -116,7 +156,7 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
               />
               <button
                 type="button"
-                className="process-modal-reload-btn"
+                className="process-modal-reload-btn button-secondary"
                 onClick={() => {
                   void service.refresh().catch((error) => {
                     runtime.eventBus.emit("console.event", {
@@ -134,15 +174,14 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
             <ul className="process-modal-list">
               {visibleProcesses.map((entry) => (
                 <li key={entry.label} className="feed-item">
-                  <button
-                    type="button"
-                    className={`process-modal-process-btn ${buttonStatusClass(entry.status)} ${entry.label === selected?.label ? "active" : ""}`}
-                    onClick={() => {
+                  <ProcessListButton
+                    label={entry.label}
+                    status={entry.status}
+                    active={entry.label === selected?.label}
+                    onSelect={() => {
                       service.selectProcess(entry.label);
                     }}
-                  >
-                    {entry.label}
-                  </button>
+                  />
                 </li>
               ))}
               {!state.loading && visibleProcesses.length === 0 ? <li className="feed-item muted">No hay procesos.</li> : null}
@@ -153,7 +192,10 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
             {selected ? (
               <>
                 <div className="process-modal-header">
-                  <strong>{selected.label}</strong>
+                  <div className="process-modal-header-copy">
+                    <span className="process-modal-kicker">Selected Process</span>
+                    <strong>{selected.label}</strong>
+                  </div>
                   <span className={`process-modal-status ${buttonStatusClass(selected.status)}`}>{statusText(selected.status)}</span>
                 </div>
                 <div className="process-modal-details">
@@ -180,6 +222,7 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
                 </div>
                 <div className="panel-card process-modal-output-panel">
                   <div className="process-modal-output-header">
+                    <span className="process-modal-output-title">Output stream</span>
                     <button
                       type="button"
                       className={`process-modal-output-tab ${outputStream === "stdout" ? "active" : ""}`}
@@ -224,6 +267,7 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
                 <div className="row">
                   <button
                     type="button"
+                    className="button-secondary"
                     disabled={!hasOutput}
                     onClick={() => {
                       const clipboardApi =
@@ -257,6 +301,7 @@ export function ProcessesModal({ runtime }: { runtime: ModuleContext }): JSX.Ele
                   </button>
                   <button
                     type="button"
+                    className={selected.running ? "danger-btn" : "button-primary"}
                     onClick={() => {
                       const action = selected.running
                         ? service.stopProcess(selected.label)

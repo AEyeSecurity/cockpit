@@ -6,6 +6,25 @@ export interface GoalInput {
   yawDeg: number;
 }
 
+export interface RouteMissionWaypoint extends GoalInput {}
+
+export interface RouteMissionStateData {
+  active: boolean;
+  paused: boolean;
+  loop: boolean;
+  status: string;
+  inputWaypointCount: number;
+  expandedWaypointCount: number;
+  currentStartIndex: number;
+  currentTargetIndex: number;
+  activeChunkSize: number;
+  legSpacingM: number;
+  chunkSpanM: number;
+  chunkMaxWaypoints: number;
+  missionWaypoints: RouteMissionWaypoint[];
+  activeChunkWaypoints: RouteMissionWaypoint[];
+}
+
 export interface ManualCommandInput {
   linearX: number;
   angularZ: number;
@@ -32,10 +51,24 @@ export interface ManualKeysState {
   d: boolean;
 }
 
+export interface RecordingState {
+  active: boolean;
+  count: number;
+  lastMessage: string;
+}
+
+export interface PatrolLoopState {
+  active: boolean;
+  currentWaypoint: number;
+  totalWaypoints: number;
+  label: string;
+}
+
 export interface NavigationState {
   waypoints: GoalInput[];
   selectedWaypointIndexes: number[];
   loopRoute: boolean;
+  routeMission: RouteMissionStateData;
   goalMode: boolean;
   manualMode: boolean;
   manualDisablePending: boolean;
@@ -55,6 +88,8 @@ export interface NavigationState {
   controlLocked: boolean;
   controlLockReason: string;
   unlockGraceUntilMs: number;
+  recording: RecordingState;
+  patrolLoop: PatrolLoopState;
   lastStatus: string;
   lastSnapshot: SnapshotData | null;
 }
@@ -172,6 +207,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function extractMessageText(message: Record<string, unknown>): string {
+  const direct = typeof message.message === "string" ? message.message.trim() : "";
+  if (direct) return direct;
+  const payload = asRecord(message.payload);
+  const nested = payload && typeof payload.message === "string" ? payload.message.trim() : "";
+  return nested || "";
+}
+
 function messageCandidates(message: Record<string, unknown>): Record<string, unknown>[] {
   const direct = message;
   const payload = asRecord(message.payload);
@@ -182,6 +225,74 @@ function messageCandidates(message: Record<string, unknown>): Record<string, unk
   return [direct, payload, directState, directTelemetry, payloadState, payloadTelemetry].filter(
     (entry): entry is Record<string, unknown> => entry !== null
   );
+}
+
+function createDefaultRouteMission(): RouteMissionStateData {
+  return {
+    active: false,
+    paused: false,
+    loop: false,
+    status: "idle",
+    inputWaypointCount: 0,
+    expandedWaypointCount: 0,
+    currentStartIndex: 0,
+    currentTargetIndex: 0,
+    activeChunkSize: 0,
+    legSpacingM: 0,
+    chunkSpanM: 0,
+    chunkMaxWaypoints: 0,
+    missionWaypoints: [],
+    activeChunkWaypoints: []
+  };
+}
+
+function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  const lat = Number(value.lat ?? value.x);
+  const lon = Number(value.lon ?? value.y);
+  const yawDeg = Number(value.yaw_deg ?? value.yawDeg ?? 0);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+    return null;
+  }
+  return {
+    x: lat,
+    y: lon,
+    yawDeg
+  };
+}
+
+function parseRouteMissionState(message: Record<string, unknown>): RouteMissionStateData | null {
+  const candidate = messageCandidates(message)
+    .map((entry) => asRecord(entry.route_mission))
+    .find((entry): entry is Record<string, unknown> => entry !== null);
+  if (!candidate) return null;
+
+  const missionWaypoints = Array.isArray(candidate.mission_waypoints)
+    ? candidate.mission_waypoints.map((entry) => parseRouteWaypoint(entry)).filter((entry): entry is RouteMissionWaypoint => entry !== null)
+    : [];
+  const activeChunkWaypoints = Array.isArray(candidate.active_chunk_waypoints)
+    ? candidate.active_chunk_waypoints
+        .map((entry) => parseRouteWaypoint(entry))
+        .filter((entry): entry is RouteMissionWaypoint => entry !== null)
+    : [];
+
+  return {
+    active: candidate.active === true,
+    paused: candidate.paused === true,
+    loop: candidate.loop === true,
+    status: String(candidate.status ?? "idle"),
+    inputWaypointCount: Number(candidate.input_waypoint_count ?? 0) || 0,
+    expandedWaypointCount: Number(candidate.expanded_waypoint_count ?? 0) || 0,
+    currentStartIndex: Number(candidate.current_start_index ?? 0) || 0,
+    currentTargetIndex: Number(candidate.current_target_index ?? 0) || 0,
+    activeChunkSize: Number(candidate.active_chunk_size ?? activeChunkWaypoints.length) || 0,
+    legSpacingM: Number(candidate.leg_spacing_m ?? 0) || 0,
+    chunkSpanM: Number(candidate.chunk_span_m ?? 0) || 0,
+    chunkMaxWaypoints: Number(candidate.chunk_max_waypoints ?? 0) || 0,
+    missionWaypoints,
+    activeChunkWaypoints
+  };
 }
 
 function isLegacyLockAliasMessage(message: Record<string, unknown>): boolean {
@@ -245,6 +356,70 @@ function extractControlLockFromNavEvent(message: Record<string, unknown>): { loc
   return {};
 }
 
+function extractRecordingCount(message: Record<string, unknown>): number | null {
+  for (const candidate of messageCandidates(message)) {
+    if (!Object.prototype.hasOwnProperty.call(candidate, "recording_count")) continue;
+    const count = Number(candidate.recording_count);
+    if (Number.isFinite(count)) {
+      return Math.max(0, Math.trunc(count));
+    }
+  }
+
+  const isRecordingCountMessage = String(message.op ?? "").trim() === "recording_count";
+  if (!isRecordingCountMessage) return null;
+  const payload = asRecord(message.payload);
+  const count = Number(message.count ?? payload?.count);
+  if (!Number.isFinite(count)) return null;
+  return Math.max(0, Math.trunc(count));
+}
+
+function parsePatrolLoopUpdate(raw: Record<string, unknown> | null): Partial<PatrolLoopState> | null {
+  if (!raw) return null;
+  const update: Partial<PatrolLoopState> = {};
+  let hasValue = false;
+
+  if (typeof raw.active === "boolean") {
+    update.active = raw.active === true;
+    hasValue = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "current_wp") || Object.prototype.hasOwnProperty.call(raw, "currentWaypoint")) {
+    const currentWaypoint = Number(raw.current_wp ?? raw.currentWaypoint);
+    if (Number.isFinite(currentWaypoint)) {
+      update.currentWaypoint = Math.trunc(currentWaypoint);
+      hasValue = true;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "total_wp") || Object.prototype.hasOwnProperty.call(raw, "totalWaypoints")) {
+    const totalWaypoints = Number(raw.total_wp ?? raw.totalWaypoints);
+    if (Number.isFinite(totalWaypoints)) {
+      update.totalWaypoints = Math.max(0, Math.trunc(totalWaypoints));
+      hasValue = true;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "label")) {
+    update.label = String(raw.label ?? "");
+    hasValue = true;
+  }
+
+  return hasValue ? update : null;
+}
+
+function extractPatrolLoopUpdate(message: Record<string, unknown>): Partial<PatrolLoopState> | null {
+  const directPatrolStatus = parsePatrolLoopUpdate(asRecord(message.patrol_status));
+  if (directPatrolStatus) return directPatrolStatus;
+
+  for (const candidate of messageCandidates(message)) {
+    const nested = parsePatrolLoopUpdate(asRecord(candidate.patrol_status));
+    if (nested) return nested;
+  }
+
+  if (String(message.op ?? "").trim() !== "patrol_status") return null;
+  return parsePatrolLoopUpdate(message) ?? parsePatrolLoopUpdate(asRecord(message.payload));
+}
+
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -258,6 +433,7 @@ export class NavigationService {
     waypoints: [],
     selectedWaypointIndexes: [],
     loopRoute: true,
+    routeMission: createDefaultRouteMission(),
     goalMode: false,
     manualMode: false,
     manualDisablePending: false,
@@ -282,6 +458,17 @@ export class NavigationService {
     controlLocked: true,
     controlLockReason: "locked",
     unlockGraceUntilMs: 0,
+    recording: {
+      active: false,
+      count: 0,
+      lastMessage: ""
+    },
+    patrolLoop: {
+      active: false,
+      currentWaypoint: -1,
+      totalWaypoints: 0,
+      label: ""
+    },
     lastStatus: "No active goal",
     lastSnapshot: null
   };
@@ -334,14 +521,20 @@ export class NavigationService {
       subscribeNavTelemetry?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeAck?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeNavEvent?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribeRecordingCount?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribePatrolStatus?: (callback: (message: Record<string, unknown>) => void) => () => void;
     };
     dispatcher.subscribeState?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+      this.applyRecordingCountPayload(message);
+      this.applyPatrolLoopPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeNavTelemetry?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeAck?.((message) => {
       const request = String(message.request ?? "").trim();
@@ -351,10 +544,17 @@ export class NavigationService {
         startUnlockGrace: isSetControlLockAck
       });
       this.applyManualControlPayload(message);
+      this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeNavEvent?.((message) => {
       const fromEvent = extractControlLockFromNavEvent(message);
       this.applyControlLockUpdate(fromEvent);
+    });
+    dispatcher.subscribeRecordingCount?.((message) => {
+      this.applyRecordingCountPayload(message);
+    });
+    dispatcher.subscribePatrolStatus?.((message) => {
+      this.applyPatrolLoopPayload(message);
     });
   }
 
@@ -362,9 +562,16 @@ export class NavigationService {
     return {
       ...this.state,
       waypoints: this.state.waypoints.map((waypoint) => ({ ...waypoint })),
+      routeMission: {
+        ...this.state.routeMission,
+        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => ({ ...waypoint })),
+        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => ({ ...waypoint }))
+      },
       selectedWaypointIndexes: [...this.state.selectedWaypointIndexes],
       manualCommand: { ...this.state.manualCommand },
       manualKeys: { ...this.state.manualKeys },
+      recording: { ...this.state.recording },
+      patrolLoop: { ...this.state.patrolLoop },
       lastSnapshot: this.state.lastSnapshot ? { ...this.state.lastSnapshot } : null
     };
   }
@@ -580,6 +787,91 @@ export class NavigationService {
     return loaded.length;
   }
 
+  async startRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestStartRecording();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Start recording failed");
+    }
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        active: true,
+        lastMessage: ""
+      },
+      lastStatus: "Waypoint recording started"
+    };
+    this.emit();
+  }
+
+  async stopRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestStopRecording();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Stop recording failed");
+    }
+    const message = extractMessageText(response as Record<string, unknown>) || "saved";
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        active: false,
+        lastMessage: message
+      },
+      lastStatus: "Waypoint recording stopped"
+    };
+    this.emit();
+  }
+
+  async clearRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestClearRecording();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Clear recording failed");
+    }
+    const message = extractMessageText(response as Record<string, unknown>) || "recording cleared";
+    this.state = {
+      ...this.state,
+      recording: {
+        active: false,
+        count: 0,
+        lastMessage: message
+      },
+      lastStatus: "Waypoint recording cleared"
+    };
+    this.emit();
+  }
+
+  async startPatrol(): Promise<void> {
+    const response = await this.robotDispatcher.requestStartPatrol();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Start patrol failed");
+    }
+    this.state = {
+      ...this.state,
+      patrolLoop: {
+        ...this.state.patrolLoop,
+        active: true
+      },
+      lastStatus: "Loop patrol started"
+    };
+    this.emit();
+  }
+
+  async stopPatrol(): Promise<void> {
+    const response = await this.robotDispatcher.requestStopPatrol();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Stop patrol failed");
+    }
+    this.state = {
+      ...this.state,
+      patrolLoop: {
+        ...this.state.patrolLoop,
+        active: false
+      },
+      lastStatus: "Loop patrol stopped"
+    };
+    this.emit();
+  }
+
   toggleCameraStream(): boolean {
     const next = !this.state.cameraStreamConnected;
     this.state = {
@@ -670,6 +962,60 @@ export class NavigationService {
     };
   }
 
+  async sendRouteMission(options?: {
+    legSpacingM?: number;
+    chunkSpanM?: number;
+    chunkMaxWaypoints?: number;
+  }): Promise<{ inputCount: number; expandedCount: number; loopRoute: boolean }> {
+    if (this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    if (this.state.manualMode) {
+      this.state = {
+        ...this.state,
+        manualDisablePending: true,
+        lastStatus: "Disabling manual mode to start route..."
+      };
+      this.emit();
+      await this.setManualMode(false);
+    }
+
+    const queued = this.state.waypoints.map((entry) => parseGoal(entry));
+    if (queued.length === 0) {
+      throw new Error("No waypoint queued");
+    }
+
+    const payload: Record<string, unknown> = {
+      waypoints: queued.map((entry) => ({
+        lat: entry.x,
+        lon: entry.y,
+        yaw_deg: entry.yawDeg
+      })),
+      loop: this.state.loopRoute
+    };
+    if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
+    if (options?.chunkSpanM !== undefined) payload.chunk_span_m = Number(options.chunkSpanM);
+    if (options?.chunkMaxWaypoints !== undefined) payload.chunk_max_waypoints = Number(options.chunkMaxWaypoints);
+
+    const response = await this.robotDispatcher.requestRouteMission(payload as never);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Route mission dispatch failed"));
+    }
+
+    const inputCount = Number(response.input_waypoint_count ?? queued.length) || queued.length;
+    const expandedCount = Number(response.expanded_waypoint_count ?? queued.length) || queued.length;
+    this.state = {
+      ...this.state,
+      lastStatus: `Route mission sent (${inputCount} -> ${expandedCount})`
+    };
+    this.emit();
+    return {
+      inputCount,
+      expandedCount,
+      loopRoute: this.state.loopRoute
+    };
+  }
+
   async sendGoal(input: GoalInput): Promise<void> {
     if (this.state.controlLocked) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
@@ -700,6 +1046,26 @@ export class NavigationService {
     this.state = {
       ...this.state,
       lastStatus: "Goal cancelled"
+    };
+    this.emit();
+  }
+
+  async cancelRouteMission(): Promise<void> {
+    const response = await this.robotDispatcher.requestCancelRouteMission();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Cancel route failed");
+    }
+    this.state = {
+      ...this.state,
+      lastStatus: "Route mission cancelled",
+      routeMission: {
+        ...this.state.routeMission,
+        active: false,
+        paused: false,
+        status: "route cancelled",
+        activeChunkSize: 0,
+        activeChunkWaypoints: []
+      }
     };
     this.emit();
   }
@@ -1041,6 +1407,51 @@ export class NavigationService {
       this.clearManualIntent();
     }
     this.updateManualLoopLifecycle();
+    this.emit();
+  }
+
+  private applyRecordingCountPayload(message: Record<string, unknown>): void {
+    const count = extractRecordingCount(message);
+    if (count === null || count === this.state.recording.count) return;
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        count
+      }
+    };
+    this.emit();
+  }
+
+  private applyPatrolLoopPayload(message: Record<string, unknown>): void {
+    const update = extractPatrolLoopUpdate(message);
+    if (!update) return;
+    const next = {
+      ...this.state.patrolLoop,
+      ...update
+    };
+    const changed =
+      next.active !== this.state.patrolLoop.active ||
+      next.currentWaypoint !== this.state.patrolLoop.currentWaypoint ||
+      next.totalWaypoints !== this.state.patrolLoop.totalWaypoints ||
+      next.label !== this.state.patrolLoop.label;
+    if (!changed) return;
+    this.state = {
+      ...this.state,
+      patrolLoop: next
+    };
+    this.emit();
+  }
+
+  private applyRouteMissionPayload(message: Record<string, unknown>): void {
+    const routeMission = parseRouteMissionState(message);
+    if (!routeMission) return;
+    const routeStatus = routeMission.status.trim();
+    this.state = {
+      ...this.state,
+      routeMission,
+      lastStatus: routeStatus.length > 0 ? routeStatus : this.state.lastStatus
+    };
     this.emit();
   }
 

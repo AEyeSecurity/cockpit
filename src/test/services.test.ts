@@ -53,7 +53,7 @@ describe("services", () => {
 
   it("prioritizes localStorage over config defaults for ConnectionService", () => {
     installStorageMock({
-      "map_tools.connection_presets.v1": JSON.stringify({
+      "map_tools.connection_presets.v2": JSON.stringify({
         preset: "sim",
         presets: {
           real: { host: "ls-real", port: "1111" },
@@ -259,6 +259,165 @@ describe("services", () => {
     const sent = await service.sendQueuedGoal({ x: 0, y: 0, yawDeg: 0 });
     expect(sent.sentCount).toBe(1);
     expect(dispatcher.requestGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends route missions through NavigationService", async () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 6
+      }),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.queueWaypoint({ x: -31.41, y: -64.18, yawDeg: 0 });
+    service.queueWaypoint({ x: -31.42, y: -64.19, yawDeg: 45 });
+
+    const started = await service.sendRouteMission();
+
+    expect(started).toMatchObject({
+      inputCount: 2,
+      expandedCount: 6,
+      loopRoute: true
+    });
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledTimes(1);
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        loop: true,
+        waypoints: [
+          expect.objectContaining({ lat: -31.41, lon: -64.18, yaw_deg: 0 }),
+          expect.objectContaining({ lat: -31.42, lon: -64.19, yaw_deg: 45 })
+        ]
+      })
+    );
+  });
+
+  it("updates route mission state from backend payloads", () => {
+    const subscribers: {
+      state?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeState: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.state = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.state?.({
+      op: "state",
+      route_mission: {
+        active: true,
+        paused: false,
+        loop: true,
+        status: "route active [segment 1]",
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 7,
+        current_start_index: 2,
+        current_target_index: 4,
+        active_chunk_size: 3,
+        leg_spacing_m: 1.5,
+        chunk_span_m: 12,
+        chunk_max_waypoints: 8,
+        mission_waypoints: [
+          { lat: -31.41, lon: -64.18, yaw_deg: 0 },
+          { lat: -31.42, lon: -64.19, yaw_deg: 45 }
+        ],
+        active_chunk_waypoints: [
+          { lat: -31.415, lon: -64.185, yaw_deg: 10 }
+        ]
+      }
+    });
+
+    expect(service.getState().routeMission).toMatchObject({
+      active: true,
+      paused: false,
+      loop: true,
+      status: "route active [segment 1]",
+      inputWaypointCount: 2,
+      expandedWaypointCount: 7,
+      currentStartIndex: 2,
+      currentTargetIndex: 4,
+      activeChunkSize: 3,
+      legSpacingM: 1.5,
+      chunkSpanM: 12,
+      chunkMaxWaypoints: 8
+    });
+    expect(service.getState().routeMission.missionWaypoints).toHaveLength(2);
+    expect(service.getState().routeMission.activeChunkWaypoints).toHaveLength(1);
+  });
+
+  it("cancels route missions through NavigationService", async () => {
+    const subscribers: {
+      state?: (message: Record<string, unknown>) => void;
+    } = {};
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      }),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeState: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        subscribers.state = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    subscribers.state?.({
+      op: "state",
+      route_mission: {
+        active: true,
+        paused: false,
+        status: "route active",
+        active_chunk_size: 2,
+        active_chunk_waypoints: [{ lat: -31.415, lon: -64.185, yaw_deg: 10 }]
+      }
+    });
+
+    await service.cancelRouteMission();
+
+    expect(dispatcher.requestCancelRouteMission).toHaveBeenCalledTimes(1);
+    expect(service.getState().routeMission).toMatchObject({
+      active: false,
+      paused: false,
+      status: "route cancelled",
+      activeChunkSize: 0
+    });
+    expect(service.getState().routeMission.activeChunkWaypoints).toEqual([]);
   });
 
   it("toggles goal mode in NavigationService state", () => {
