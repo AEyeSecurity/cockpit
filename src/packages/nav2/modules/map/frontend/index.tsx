@@ -8,7 +8,7 @@ import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
-import { MapService, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
+import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
 import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
@@ -215,7 +215,7 @@ function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
 function buildDatumIcon(): L.DivIcon {
   return L.divIcon({
     className: "",
-    html: '<div class="datum-icon"><span class="datum-glyph">⯂</span></div>',
+    html: '<div class="datum-icon"><span class="datum-dot"></span></div>',
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
@@ -1255,6 +1255,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     sensorInfoService ? sensorInfoService.getState() : null
   );
+  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(
+    mapService.getDatumProfilesState()
+  );
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
   const cameraStreamSeqRef = useRef(0);
@@ -1294,6 +1297,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       void sensorInfoService.close();
     };
   }, [sensorInfoService]);
+  useEffect(() => {
+    void mapService.getDatums().then(setDatumProfiles).catch(() => undefined);
+  }, [mapService]);
+  useEffect(() => mapService.subscribeDatumProfiles((next) => setDatumProfiles(next)), [mapService]);
+  useEffect(() => {
+    if (connectionState?.connected !== true) return;
+    void mapService.getDatums().then(setDatumProfiles).catch(() => undefined);
+  }, [connectionState?.connected, mapService]);
   useEffect(() => {
     const connected = connectionState?.connected === true;
     const previous = wasConnectedRef.current;
@@ -1496,8 +1507,21 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
   const datumFromSensor = generalSnapshot.datum as Record<string, unknown> | undefined;
-  const datumLat = Number(datumFromSensor?.datum_lat ?? state.map?.originLat ?? Number.NaN);
-  const datumLon = Number(datumFromSensor?.datum_lon ?? state.map?.originLon ?? Number.NaN);
+  const selectedDatum = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId) ?? null;
+  const datumLat = Number(
+    datumFromSensor?.datum_lat ??
+      datumProfiles?.runtime.lat ??
+      selectedDatum?.lat ??
+      state.map?.originLat ??
+      Number.NaN
+  );
+  const datumLon = Number(
+    datumFromSensor?.datum_lon ??
+      datumProfiles?.runtime.lon ??
+      selectedDatum?.lon ??
+      state.map?.originLon ??
+      Number.NaN
+  );
   const datumPose =
     Number.isFinite(datumLat) &&
     Number.isFinite(datumLon) &&
@@ -1507,7 +1531,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           lon: datumLon
         }
       : null;
-
   const selectTool = (tool: MapToolMode, infoLabel: string): void => {
     if (!mapToolsEnabled) {
       runtime.eventBus.emit("console.event", {
@@ -1649,32 +1672,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               disabled={!mapToolsEnabled}
             >
               🎯
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void mapService
-                  .setDatumOnBackend()
-                  .then(() => {
-                    runtime.eventBus.emit("console.event", {
-                      level: "info",
-                      text: "Datum updated from robot pose",
-                      timestamp: Date.now()
-                    });
-                  })
-                  .catch((error) => {
-                    runtime.eventBus.emit("console.event", {
-                      level: "error",
-                      text: `Set datum failed: ${String(error)}`,
-                      timestamp: Date.now()
-                    });
-                  });
-              }}
-              title="Definir datum"
-              aria-label="Definir datum"
-              disabled={!mapToolsEnabled}
-            >
-              🧲
             </button>
             <button
               type="button"

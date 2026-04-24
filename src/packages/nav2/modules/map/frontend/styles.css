@@ -167,7 +167,9 @@
   flex: 1;
   min-width: 0;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .map-workspace-root .map-canvas {
@@ -379,11 +381,15 @@
   filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.75));
 }
 
-.datum-glyph {
-  color: #ff00ff;
-  font-size: 18px;
-  line-height: 1;
-  text-shadow: 0 0 1px rgba(2, 6, 23, 0.6);
+.datum-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #ff00ff;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 0 0 2px rgba(2, 6, 23, 0.65),
+    0 0 10px rgba(255, 0, 255, 0.85);
 }
 
 .datum-label {

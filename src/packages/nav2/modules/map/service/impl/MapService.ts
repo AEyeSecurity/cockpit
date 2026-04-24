@@ -18,6 +18,34 @@ export interface ZoneEntry {
   polygon?: Array<{ lat: number; lon: number }>;
 }
 
+export interface DatumProfile {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  yawDeg: number;
+  source?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface DatumProfilesState {
+  datums: DatumProfile[];
+  selectedId: string;
+  runtime: {
+    lat: number | null;
+    lon: number | null;
+    yawDeg: number | null;
+    source: string;
+    available: boolean;
+    alreadySet: boolean;
+  };
+  pendingRestart: boolean;
+  applyMode: string;
+  filePath: string;
+  error: string;
+}
+
 export interface MapWorkspaceState {
   map: MapData | null;
   toolMode: MapToolMode;
@@ -51,6 +79,7 @@ function getStorageAdapter(): {
 
 export class MapService {
   private readonly listeners = new Set<(state: MapWorkspaceState) => void>();
+  private readonly datumListeners = new Set<(state: DatumProfilesState | null) => void>();
   private state: MapWorkspaceState = {
     map: null,
     toolMode: "idle",
@@ -59,10 +88,24 @@ export class MapService {
     zones: [],
     inspectCoords: "n/a"
   };
+  private datumProfilesState: DatumProfilesState | null = null;
   private savedZonesPayload = "[]";
   private readonly zoneStorageKey = "cockpit.map.zones.v1";
 
-  constructor(private readonly mapDispatcher: MapDispatcher) {}
+  constructor(private readonly mapDispatcher: MapDispatcher) {
+    this.mapDispatcher.subscribe("state", (message) => {
+      const payload = asRecord(message.datums);
+      if (!payload) return;
+      this.setDatumProfilesState(parseDatumProfilesState(payload));
+    });
+    this.mapDispatcher.subscribe("datums", (message) => {
+      this.setDatumProfilesState(parseDatumProfilesState(message as Record<string, unknown>));
+    });
+    this.mapDispatcher.subscribe("ack", (message) => {
+      if (!Array.isArray(message.datums)) return;
+      this.setDatumProfilesState(parseDatumProfilesState(message as Record<string, unknown>));
+    });
+  }
 
   async loadMap(mapId: string): Promise<MapData> {
     if (!mapId.trim()) {
@@ -136,6 +179,18 @@ export class MapService {
     callback(this.getState());
     return () => {
       this.listeners.delete(callback);
+    };
+  }
+
+  getDatumProfilesState(): DatumProfilesState | null {
+    return this.datumProfilesState ? cloneDatumProfilesState(this.datumProfilesState) : null;
+  }
+
+  subscribeDatumProfiles(callback: (state: DatumProfilesState | null) => void): () => void {
+    this.datumListeners.add(callback);
+    callback(this.getDatumProfilesState());
+    return () => {
+      this.datumListeners.delete(callback);
     };
   }
 
@@ -341,17 +396,97 @@ export class MapService {
     this.emit();
   }
 
-  async setDatumOnBackend(): Promise<void> {
-    const response = await this.mapDispatcher.setDatum();
+  async getDatums(): Promise<DatumProfilesState> {
+    const response = await this.mapDispatcher.getDatums();
     if (response.ok === false) {
-      throw new Error(String(response.error ?? "set_datum failed"));
+      throw new Error(String(response.error ?? "get_datums failed"));
+    }
+    const next = parseDatumProfilesState(response as Record<string, unknown>);
+    this.setDatumProfilesState(next);
+    return next;
+  }
+
+  async saveDatumOnBackend(input: {
+    id?: string;
+    name: string;
+    lat: number;
+    lon: number;
+    yawDeg: number;
+    notes?: string;
+    select?: boolean;
+  }): Promise<DatumProfilesState> {
+    const response = await this.mapDispatcher.saveDatum({
+      id: input.id,
+      name: input.name,
+      lat: input.lat,
+      lon: input.lon,
+      yaw_deg: input.yawDeg,
+      notes: input.notes ?? "",
+      select: input.select === true
+    });
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "save_datum failed"));
+    }
+    this.state = {
+      ...this.state,
+      toolInfo: "Datum profile saved for next navigation restart."
+    };
+    this.emit();
+    const next = parseDatumProfilesState(response as Record<string, unknown>);
+    this.setDatumProfilesState(next);
+    return next;
+  }
+
+  async selectDatumOnBackend(id: string): Promise<DatumProfilesState> {
+    const response = await this.mapDispatcher.selectDatum(id);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "select_datum failed"));
+    }
+    const next = parseDatumProfilesState(response as Record<string, unknown>);
+    this.setDatumProfilesState(next);
+    return next;
+  }
+
+  async deleteDatumOnBackend(id: string): Promise<DatumProfilesState> {
+    const response = await this.mapDispatcher.deleteDatum(id);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "delete_datum failed"));
+    }
+    const next = parseDatumProfilesState(response as Record<string, unknown>);
+    this.setDatumProfilesState(next);
+    return next;
+  }
+
+  async captureCurrentGpsDatumOnBackend(input: {
+    name: string;
+    yawDeg?: number;
+    notes?: string;
+    select?: boolean;
+  }): Promise<DatumProfilesState> {
+    const response = await this.mapDispatcher.captureCurrentGpsDatum({
+      name: input.name,
+      yaw_deg: input.yawDeg,
+      notes: input.notes ?? "",
+      select: input.select === true
+    });
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "capture_current_gps_datum failed"));
     }
     this.setDatumFromRobot();
+    const next = parseDatumProfilesState(response as Record<string, unknown>);
+    this.setDatumProfilesState(next);
+    return next;
   }
 
   private emit(): void {
     const state = this.getState();
     this.listeners.forEach((listener) => listener(state));
+  }
+
+  private setDatumProfilesState(next: DatumProfilesState): void {
+    this.datumProfilesState = cloneDatumProfilesState(next);
+    const state = this.getDatumProfilesState();
+    this.datumListeners.forEach((listener) => listener(state));
   }
 
   private syncZonesIfEnabled(options?: { sync?: boolean }): void {
@@ -391,4 +526,62 @@ export class MapService {
       features
     };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function cloneDatumProfilesState(state: DatumProfilesState): DatumProfilesState {
+  return {
+    ...state,
+    datums: state.datums.map((entry) => ({ ...entry })),
+    runtime: { ...state.runtime }
+  };
+}
+
+function parseDatumProfile(value: unknown): DatumProfile | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  const lat = Number(item.lat ?? item.latitude);
+  const lon = Number(item.lon ?? item.longitude);
+  const yawDeg = Number(item.yaw_deg ?? item.yawDeg ?? item.yaw ?? 0);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) return null;
+  return {
+    id: String(item.id ?? ""),
+    name: String(item.name ?? item.id ?? "Datum"),
+    lat,
+    lon,
+    yawDeg,
+    source: item.source === undefined ? undefined : String(item.source),
+    notes: item.notes === undefined ? undefined : String(item.notes),
+    updatedAt: item.updated_at === undefined ? undefined : String(item.updated_at)
+  };
+}
+
+export function parseDatumProfilesState(payload: Record<string, unknown>): DatumProfilesState {
+  const datums = Array.isArray(payload.datums)
+    ? payload.datums.map(parseDatumProfile).filter((entry): entry is DatumProfile => entry !== null && entry.id.length > 0)
+    : [];
+  const runtimeRaw = (payload.runtime ?? {}) as Record<string, unknown>;
+  const runtimeLat = Number(runtimeRaw.lat);
+  const runtimeLon = Number(runtimeRaw.lon);
+  const runtimeYaw = Number(runtimeRaw.yaw_deg ?? runtimeRaw.yawDeg);
+  return {
+    datums,
+    selectedId: String(payload.selected_id ?? payload.selectedId ?? ""),
+    runtime: {
+      lat: Number.isFinite(runtimeLat) ? runtimeLat : null,
+      lon: Number.isFinite(runtimeLon) ? runtimeLon : null,
+      yawDeg: Number.isFinite(runtimeYaw) ? runtimeYaw : null,
+      source: String(runtimeRaw.source ?? ""),
+      available: runtimeRaw.available === true,
+      alreadySet: runtimeRaw.already_set === true || runtimeRaw.alreadySet === true
+    },
+    pendingRestart: payload.pending_restart === true || payload.pendingRestart === true,
+    applyMode: String(payload.apply_mode ?? payload.applyMode ?? "next_restart"),
+    filePath: String(payload.file_path ?? payload.filePath ?? ""),
+    error: String(payload.error ?? "")
+  };
 }
