@@ -39,6 +39,20 @@ describe("formatNavigationEventText", () => {
 
     expect(
       formatNavigationEventText({
+        code: "GOAL_RESULT_ABORTED",
+        component: "navigatethroughposes",
+        message: "NavigateThroughPoses result: aborted",
+        details: {
+          failure_reason:
+            "no se encontró una ruta válida; probablemente está bloqueada por obstáculos/costmap"
+        }
+      })
+    ).toBe(
+      "Route segment failed: no se encontró una ruta válida; probablemente está bloqueada por obstáculos/costmap"
+    );
+
+    expect(
+      formatNavigationEventText({
         code: "GOAL_ACCEPTED",
         message: "NavigateThroughPoses goal accepted",
         details: { reason: "loop_segment_advance", loop: "true" }

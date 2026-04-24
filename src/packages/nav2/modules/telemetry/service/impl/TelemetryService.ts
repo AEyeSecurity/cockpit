@@ -93,7 +93,10 @@ export function formatNavigationEventText(raw: unknown): string {
     const subject = isRouteSegment ? "Route segment" : "Goal";
     if (status === "succeeded") return isRouteSegment ? "Route segment reached" : "Goal reached";
     if (status === "cancelled") return `${subject} cancelled`;
-    if (status === "failed") return `${subject} failed`;
+    if (status === "failed") {
+      const failureReason = String(details.failure_reason ?? "").trim();
+      return failureReason ? `${subject} failed: ${failureReason}` : `${subject} failed`;
+    }
   }
 
   if (code === "BRAKE_APPLIED" || text.toLowerCase().includes("brake sequence")) {

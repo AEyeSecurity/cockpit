@@ -201,6 +201,14 @@ function formatRouteStatus(status: string): string {
   return status.trim();
 }
 
+function formatNavResultDetail(raw: string): string {
+  const text = raw.trim();
+  if (!text || text.toLowerCase() === "idle") return "";
+  const reasonMatch = text.match(/\((.+)\)\s*$/u);
+  if (reasonMatch?.[1]) return reasonMatch[1].trim();
+  return text;
+}
+
 function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
   const status = cleanRouteStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
@@ -248,6 +256,7 @@ function buildNavigationStatus(
       : routeMission.currentTargetIndex > 0
         ? `Last segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1}`
         : "";
+  const navResultDetail = formatNavResultDetail(String(telemetry?.navResultText ?? ""));
 
   if (state.manualMode || state.manualDisablePending) {
     return {
@@ -264,7 +273,14 @@ function buildNavigationStatus(
   if (tone !== "idle" || hasRouteHistory) {
     return {
       title: tone === "paused" ? "Route paused" : formatRouteStatus(routeMission.status),
-      detail: routeMission.loop ? "Mission loop enabled" : tone === "done" ? "Final brake expected" : "Route mission",
+      detail:
+        tone === "error" && navResultDetail
+          ? navResultDetail
+          : routeMission.loop
+            ? "Mission loop enabled"
+            : tone === "done"
+              ? "Final brake expected"
+              : "Route mission",
       tone,
       progressPct,
       showProgress: expandedCount > 0,
