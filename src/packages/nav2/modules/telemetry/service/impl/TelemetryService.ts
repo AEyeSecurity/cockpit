@@ -79,6 +79,7 @@ export function formatNavigationEventText(raw: unknown): string {
   const suppressSuccessBrake = detailBool(details, "suppress_success_brake");
   const loop = detailBool(details, "loop");
   const reason = String(details.reason ?? "").trim();
+  const failureReason = String(details.failure_reason ?? "").trim();
 
   if (code === "GOAL_REQUESTED") {
     if (loop) return "Loop navigation requested";
@@ -99,7 +100,7 @@ export function formatNavigationEventText(raw: unknown): string {
     const subject = isRouteSegment ? "Route segment" : "Goal";
     if (status === "succeeded") return isRouteSegment ? "Route segment reached" : "Goal reached";
     if (status === "cancelled") return `${subject} cancelled`;
-    if (status === "failed") return `${subject} failed`;
+    if (status === "failed") return failureReason ? `${subject} failed: ${failureReason}` : `${subject} failed`;
   }
 
   if (code === "BRAKE_APPLIED" || text.toLowerCase().includes("brake sequence")) {

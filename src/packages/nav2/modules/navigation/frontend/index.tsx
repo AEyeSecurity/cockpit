@@ -6,7 +6,7 @@ import type { CockpitModule, ModuleContext } from "../../../../../core/types/mod
 import { RobotDispatcher } from "../dispatcher/impl/RobotDispatcher";
 import { ConnectionService, type ConnectionState } from "../service/impl/ConnectionService";
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
-import { MapService, type MapWorkspaceState } from "../../map/service/impl/MapService";
+import { MapService, type DatumProfilesState, type MapWorkspaceState } from "../../map/service/impl/MapService";
 import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
@@ -30,18 +30,20 @@ interface Nav2RuntimeConfig {
   manual_linear_speed_min?: unknown;
   manual_linear_speed_max?: unknown;
   manual_linear_speed_default?: unknown;
-  manual_angular_speed_min?: unknown;
-  manual_angular_speed_max?: unknown;
-  manual_angular_speed_default?: unknown;
+  manual_steering_angle_min_deg?: unknown;
+  manual_steering_angle_max_deg?: unknown;
+  manual_steering_angle_default_deg?: unknown;
   manual_loop_interval_ms?: unknown;
 }
 
 interface ManualSpeedLimits {
   linearMin: number;
   linearMax: number;
-  angularMin: number;
-  angularMax: number;
+  steeringAngleMinDeg: number;
+  steeringAngleMaxDeg: number;
 }
+
+const DEFAULT_MANUAL_STEERING_ANGLE_DEG = 18.0;
 
 function readNav2Config(ctx: ModuleContext): Nav2RuntimeConfig {
   return ctx.getPackageConfig<Record<string, unknown>>("nav2") as Nav2RuntimeConfig;
@@ -73,17 +75,17 @@ function parseLoopIntervalMs(value: unknown, fallback: number): number {
 function parseManualSpeedLimits(config: Nav2RuntimeConfig): ManualSpeedLimits {
   const linearMinCandidate = Number(config.manual_linear_speed_min);
   const linearMaxCandidate = Number(config.manual_linear_speed_max);
-  const angularMinCandidate = Number(config.manual_angular_speed_min);
-  const angularMaxCandidate = Number(config.manual_angular_speed_max);
+  const steeringAngleMinCandidate = Number(config.manual_steering_angle_min_deg);
+  const steeringAngleMaxCandidate = Number(config.manual_steering_angle_max_deg);
   const linearMin = Number.isFinite(linearMinCandidate) ? linearMinCandidate : 1.0;
   const linearMax = Number.isFinite(linearMaxCandidate) ? linearMaxCandidate : 4.0;
-  const angularMin = Number.isFinite(angularMinCandidate) ? angularMinCandidate : 0.1;
-  const angularMax = Number.isFinite(angularMaxCandidate) ? angularMaxCandidate : 1.2;
+  const steeringAngleMin = Number.isFinite(steeringAngleMinCandidate) ? steeringAngleMinCandidate : 1.0;
+  const steeringAngleMax = Number.isFinite(steeringAngleMaxCandidate) ? steeringAngleMaxCandidate : 30.0;
   return {
     linearMin: linearMax > linearMin ? linearMin : 1.0,
     linearMax: linearMax > linearMin ? linearMax : 4.0,
-    angularMin: angularMax > angularMin ? angularMin : 0.1,
-    angularMax: angularMax > angularMin ? angularMax : 1.2
+    steeringAngleMinDeg: steeringAngleMax > steeringAngleMin ? steeringAngleMin : 1.0,
+    steeringAngleMaxDeg: steeringAngleMax > steeringAngleMin ? steeringAngleMax : 30.0
   };
 }
 
@@ -149,6 +151,8 @@ function formatRouteStatus(status: string): string {
 }
 
 function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
+  if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
   const status = cleanRouteStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -156,6 +160,23 @@ function routeTone(routeMission: NavigationState["routeMission"]): "active" | "p
   if (status.includes("cancelled")) return "idle";
   if (routeMission.active || status.includes("active") || status.includes("starting")) return "active";
   return "idle";
+}
+
+function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
+  if (routeMission.blockedState === "BLOCKED_RETRYING") return "Retrying blocked route";
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "Operator needed";
+  if (routeMission.blockedState === "BLOCKED_WAITING") return "Route blocked";
+  return "";
+}
+
+function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]): string {
+  const reason = routeMission.blockedReasonText || routeMission.blockedReasonCode || "obstacle or path blockage";
+  const retryMax = Math.max(0, Math.round(routeMission.blockedRetryMaxAttempts));
+  const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
+  const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
+  const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
+  const waitText = routeMission.blockedState === "BLOCKED_WAITING" && wait > 0 ? `${Math.ceil(wait)}s` : "";
+  return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
 }
 
 function buildNavigationStatus(
@@ -196,6 +217,18 @@ function buildNavigationStatus(
       : routeMission.currentTargetIndex > 0
         ? `Last segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1}`
         : "";
+
+  if (routeMission.blockedState) {
+    return {
+      title: formatBlockedStatusTitle(routeMission) || formatRouteStatus(routeMission.status),
+      detail: formatBlockedStatusDetail(routeMission),
+      tone,
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
 
   if (state.manualMode || state.manualDisablePending) {
     return {
@@ -278,6 +311,12 @@ function formatInfoCoordinate(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "n/a";
   return numeric.toFixed(6);
+}
+
+function formatDatumCoordinate(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/a";
+  return numeric.toFixed(7);
 }
 
 function formatInfoTimestamp(value: unknown): string {
@@ -963,7 +1002,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       </NavSidebarCollapsibleSection>
 
       {/* ── 4. DISPATCH ───────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="NAVIGATION ACTIONS" className="nav-sidebar-actions-section">
+      <NavSidebarCollapsibleSection title="NAVIGATION ACTIONS" className="nav-sidebar-actions-section" defaultCollapsed={false}>
         <button
           type="button"
           className={joinClassNames("ncb-wide send-btn", goalRunning && "active")}
@@ -992,7 +1031,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             }
           }}
         >
-          <ButtonFace icon={<NavGlyph kind="route" />} label="ROUTE MISSION" meta="Expand and execute route" />
+          <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={wps < 2 ? "Needs 2+ waypoints" : "Expanded route mission"} />
         </button>
         <button
           type="button"
@@ -1177,6 +1216,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
+      <DatumSidebarSection runtime={runtime} />
+
       {/* Speed limits + Zones (existing sub-components) */}
     </div>
   );
@@ -1203,18 +1244,206 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
           />
         </label>
         <label className="range-row">
-          Angular speed (rad/s): {state.manualAngularSpeed.toFixed(2)}
+          Steering angle (deg): {state.manualSteeringAngleDeg.toFixed(1)}
           <input
             type="range"
-            min={state.manualAngularMin}
-            max={state.manualAngularMax}
-            step={0.01}
-            value={state.manualAngularSpeed}
-            onChange={(event) => service.setManualAngularSpeed(Number(event.target.value))}
+            min={state.manualSteeringAngleMinDeg}
+            max={state.manualSteeringAngleMaxDeg}
+            step={0.1}
+            value={state.manualSteeringAngleDeg}
+            onChange={(event) => service.setManualSteeringAngleDeg(Number(event.target.value))}
           />
         </label>
       </PanelSection>
     </div>
+  );
+}
+
+function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Element | null {
+  const mapService = getMapService(runtime);
+  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(
+    mapService ? mapService.getDatumProfilesState() : null
+  );
+  const [form, setForm] = useState({
+    name: "",
+    lat: "",
+    lon: "",
+    yawDeg: "0",
+    notes: ""
+  });
+
+  useEffect(() => {
+    if (!mapService) return;
+    return mapService.subscribeDatumProfiles((next) => setDatumProfiles(next));
+  }, [mapService]);
+
+  useEffect(() => {
+    if (!mapService) return;
+    void mapService
+      .getDatums()
+      .then((next) => setDatumProfiles(next))
+      .catch((error) => {
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: `Datums unavailable: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+  }, [mapService, runtime.eventBus]);
+
+  if (!mapService) return null;
+
+  const emit = (level: "info" | "warn" | "error", text: string): void => {
+    runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
+  };
+  const refreshDatums = async (): Promise<void> => {
+    const next = await mapService.getDatums();
+    setDatumProfiles(next);
+  };
+  const captureGpsDatum = (): void => {
+    const yawDeg = Number(form.yawDeg);
+    void mapService
+      .captureCurrentGpsDatumOnBackend({
+        name: form.name.trim() || `GPS ${new Date().toLocaleString()}`,
+        yawDeg: Number.isFinite(yawDeg) ? yawDeg : undefined,
+        notes: form.notes,
+        select: true
+      })
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum GPS guardado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Capture datum failed: ${String(error)}`));
+  };
+  const saveManualDatum = (): void => {
+    const lat = Number(form.lat);
+    const lon = Number(form.lon);
+    const yawDeg = Number(form.yawDeg);
+    if (!form.name.trim() || !Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+      emit("error", "Datum manual invalido: nombre, lat, lon y yaw numericos son requeridos");
+      return;
+    }
+    void mapService
+      .saveDatumOnBackend({
+        name: form.name,
+        lat,
+        lon,
+        yawDeg,
+        notes: form.notes,
+        select: true
+      })
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum manual guardado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Save datum failed: ${String(error)}`));
+  };
+  const selectDatum = (id: string): void => {
+    void mapService
+      .selectDatumOnBackend(id)
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum seleccionado; reinicia el launch ROS para aplicarlo");
+      })
+      .catch((error) => emit("error", `Select datum failed: ${String(error)}`));
+  };
+  const deleteDatum = (id: string): void => {
+    void mapService
+      .deleteDatumOnBackend(id)
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum eliminado");
+      })
+      .catch((error) => emit("error", `Delete datum failed: ${String(error)}`));
+  };
+
+  const runtimeDatum = datumProfiles?.runtime;
+  const selected = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+  const statusText = datumProfiles?.pendingRestart ? "Pendiente de restart ROS" : "Aplicado";
+  const datums = datumProfiles?.datums ?? [];
+
+  return (
+    <NavSidebarCollapsibleSection
+      title="DATUM"
+      className="nav-sidebar-datum-section"
+      badge={<span className={joinClassNames("waypoint-badge", datums.length === 0 && "empty")}>{datums.length}</span>}
+    >
+      <div className="datum-sidebar-status">
+        <div>
+          <span>Runtime</span>
+          <strong>
+            {formatDatumCoordinate(runtimeDatum?.lat)}, {formatDatumCoordinate(runtimeDatum?.lon)}
+          </strong>
+        </div>
+        <div className={joinClassNames("datum-sidebar-badge", datumProfiles?.pendingRestart && "pending")}>
+          {statusText}
+        </div>
+        <p className="muted nav-legacy-text">Seleccionado: {selected?.name ?? "n/a"}</p>
+      </div>
+      <div className="datum-sidebar-form">
+        <input
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+          placeholder="Nombre"
+        />
+        <input
+          value={form.yawDeg}
+          onChange={(event) => setForm((current) => ({ ...current, yawDeg: event.target.value }))}
+          placeholder="Yaw deg"
+          inputMode="decimal"
+        />
+        <input
+          value={form.lat}
+          onChange={(event) => setForm((current) => ({ ...current, lat: event.target.value }))}
+          placeholder="Lat manual"
+          inputMode="decimal"
+        />
+        <input
+          value={form.lon}
+          onChange={(event) => setForm((current) => ({ ...current, lon: event.target.value }))}
+          placeholder="Lon manual"
+          inputMode="decimal"
+        />
+        <input
+          value={form.notes}
+          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          placeholder="Notas"
+        />
+      </div>
+      <div className="datum-sidebar-actions">
+        <button type="button" className="ncb sec-btn" onClick={captureGpsDatum}>
+          <ButtonFace icon="GPS" label="CAPTURE" meta="Use current fix" compact />
+        </button>
+        <button type="button" className="ncb send-btn" onClick={saveManualDatum}>
+          <ButtonFace icon="LAT" label="SAVE" meta="Manual datum" compact />
+        </button>
+        <button
+          type="button"
+          className="ncb sec-btn"
+          onClick={() => void refreshDatums().catch((error) => emit("warn", `Refresh datums failed: ${String(error)}`))}
+        >
+          <ButtonFace icon="↻" label="REFRESH" meta="Backend list" compact />
+        </button>
+      </div>
+      <div className="datum-sidebar-list">
+        {datums.map((entry) => (
+          <div key={entry.id} className={joinClassNames("datum-sidebar-row", entry.id === datumProfiles?.selectedId && "selected")}>
+            <button type="button" className="datum-sidebar-select" onClick={() => selectDatum(entry.id)} title="Seleccionar para proximo launch ROS">
+              {entry.id === datumProfiles?.selectedId ? "●" : "○"}
+            </button>
+            <span>
+              <strong>{entry.name}</strong>
+              <small>
+                {formatDatumCoordinate(entry.lat)}, {formatDatumCoordinate(entry.lon)} · yaw {entry.yawDeg.toFixed(1)}°
+              </small>
+            </span>
+            <button type="button" className="datum-sidebar-delete danger-btn" onClick={() => deleteDatum(entry.id)} title="Eliminar datum">
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </NavSidebarCollapsibleSection>
   );
 }
 
@@ -1877,10 +2106,15 @@ function registerServices(
   const navigationService = new NavigationService(dispatcher, {
     linearMin: limits.linearMin,
     linearMax: limits.linearMax,
-    angularMin: limits.angularMin,
-    angularMax: limits.angularMax,
+    steeringAngleMinDeg: limits.steeringAngleMinDeg,
+    steeringAngleMaxDeg: limits.steeringAngleMaxDeg,
     linearSpeed: parseNumberInRange(config.manual_linear_speed_default, 1.2, limits.linearMin, limits.linearMax),
-    angularSpeed: parseNumberInRange(config.manual_angular_speed_default, 0.4, limits.angularMin, limits.angularMax),
+    steeringAngleDeg: parseNumberInRange(
+      config.manual_steering_angle_default_deg,
+      DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+      limits.steeringAngleMinDeg,
+      limits.steeringAngleMaxDeg
+    ),
     loopIntervalMs: parseLoopIntervalMs(config.manual_loop_interval_ms, 50)
   });
   ctx.services.registerService({
@@ -1917,10 +2151,15 @@ function registerServices(
     navigationService.applyRuntimeDefaults({
       linearMin: nextLimits.linearMin,
       linearMax: nextLimits.linearMax,
-      angularMin: nextLimits.angularMin,
-      angularMax: nextLimits.angularMax,
+      steeringAngleMinDeg: nextLimits.steeringAngleMinDeg,
+      steeringAngleMaxDeg: nextLimits.steeringAngleMaxDeg,
       linearSpeed: parseNumberInRange(nextConfig.manual_linear_speed_default, 1.2, nextLimits.linearMin, nextLimits.linearMax),
-      angularSpeed: parseNumberInRange(nextConfig.manual_angular_speed_default, 0.4, nextLimits.angularMin, nextLimits.angularMax),
+      steeringAngleDeg: parseNumberInRange(
+        nextConfig.manual_steering_angle_default_deg,
+        DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+        nextLimits.steeringAngleMinDeg,
+        nextLimits.steeringAngleMaxDeg
+      ),
       loopIntervalMs: parseLoopIntervalMs(nextConfig.manual_loop_interval_ms, 50)
     });
   });

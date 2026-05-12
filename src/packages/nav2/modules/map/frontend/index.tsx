@@ -8,7 +8,7 @@ import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
-import { MapService, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
+import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
 import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
@@ -289,12 +289,80 @@ function normalizeYawDeg(yawDeg: number): number {
 }
 
 function yawDegFromLatLng(origin: L.LatLng, target: L.LatLng): number {
+  const vector = vectorFromLatLng(origin, target);
+  if (!vector) return 0;
+  return yawDegFromVector(vector);
+}
+
+function vectorFromLatLng(origin: L.LatLng, target: L.LatLng): { east: number; north: number } | null {
   const refLat = Number(origin.lat);
   const metersPerDegLat = 111320;
   const metersPerDegLon = metersPerDegLat * Math.max(1e-6, Math.abs(Math.cos((refLat * Math.PI) / 180)));
   const eastM = (Number(target.lng) - Number(origin.lng)) * metersPerDegLon;
   const northM = (Number(target.lat) - Number(origin.lat)) * metersPerDegLat;
-  return normalizeYawDeg((Math.atan2(northM, eastM) * 180) / Math.PI);
+  if (!Number.isFinite(eastM) || !Number.isFinite(northM) || Math.hypot(eastM, northM) <= 1e-6) {
+    return null;
+  }
+  return { east: eastM, north: northM };
+}
+
+function yawDegFromVector(vector: { east: number; north: number }): number {
+  return normalizeYawDeg((Math.atan2(vector.north, vector.east) * 180) / Math.PI);
+}
+
+function tangentYawDeg(
+  incoming: { east: number; north: number } | null,
+  outgoing: { east: number; north: number } | null
+): number | null {
+  if (!incoming) return outgoing ? yawDegFromVector(outgoing) : null;
+  if (!outgoing) return yawDegFromVector(incoming);
+  const incomingLength = Math.hypot(incoming.east, incoming.north);
+  const outgoingLength = Math.hypot(outgoing.east, outgoing.north);
+  if (incomingLength <= 1e-6) return yawDegFromVector(outgoing);
+  if (outgoingLength <= 1e-6) return yawDegFromVector(incoming);
+  const east = incoming.east / incomingLength + outgoing.east / outgoingLength;
+  const north = incoming.north / incomingLength + outgoing.north / outgoingLength;
+  if (Math.hypot(east, north) <= 1e-6) return yawDegFromVector(outgoing);
+  return yawDegFromVector({ east, north });
+}
+
+function waypointHasManualYaw(waypoint: NavigationState["waypoints"][number]): boolean {
+  return waypoint.yawDeg !== undefined && waypoint.yawDeg !== null && Number.isFinite(Number(waypoint.yawDeg));
+}
+
+function resolveWaypointPreviewYawDeg(
+  points: Array<{ lat: number; lon: number; yawDeg?: number; manual: boolean }>,
+  index: number,
+  loopRoute: boolean,
+  robotPose: TelemetrySnapshot["robotPose"]
+): number {
+  const point = points[index];
+  if (!point) return 0;
+  if (point.manual && Number.isFinite(Number(point.yawDeg))) {
+    return normalizeYawDeg(Number(point.yawDeg));
+  }
+  const origin = L.latLng(point.lat, point.lon);
+  const next = index + 1 < points.length ? points[index + 1] : loopRoute && points.length > 1 ? points[0] : null;
+  const prev = index > 0 ? points[index - 1] : loopRoute && points.length > 1 ? points[points.length - 1] : null;
+  const incoming = prev ? vectorFromLatLng(L.latLng(prev.lat, prev.lon), origin) : null;
+  const outgoing = next ? vectorFromLatLng(origin, L.latLng(next.lat, next.lon)) : null;
+  const tangent = tangentYawDeg(incoming, outgoing);
+  if (tangent !== null) return tangent;
+
+  if (next) {
+    const nextVector = vectorFromLatLng(origin, L.latLng(next.lat, next.lon));
+    if (nextVector) return yawDegFromVector(nextVector);
+  }
+  if (prev) {
+    const prevVector = vectorFromLatLng(L.latLng(prev.lat, prev.lon), origin);
+    if (prevVector) return yawDegFromVector(prevVector);
+  }
+  if (robotPose && Number.isFinite(Number(robotPose.lat)) && Number.isFinite(Number(robotPose.lon))) {
+    const robotVector = vectorFromLatLng(L.latLng(robotPose.lat, robotPose.lon), origin);
+    if (robotVector) return yawDegFromVector(robotVector);
+    if (Number.isFinite(Number(robotPose.headingDeg))) return normalizeYawDeg(Number(robotPose.headingDeg));
+  }
+  return 0;
 }
 
 interface GeoPoint {
@@ -342,10 +410,10 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false): L.DivIcon {
+function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}`;
+  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}`;
   return L.divIcon({
     className: "",
     html:
@@ -415,6 +483,7 @@ function LeafletMapCanvas({
   onToggleWaypointSelection,
   onMoveWaypoint,
   onZoneToolSettled,
+  loopRoute,
   initialCenterLat,
   initialCenterLon,
   initialZoom,
@@ -431,10 +500,11 @@ function LeafletMapCanvas({
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
-  onQueueWaypoint: (lat: number, lon: number, yawDeg: number) => void;
+  onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
   onZoneToolSettled: () => void;
+  loopRoute: boolean;
   initialCenterLat: number;
   initialCenterLon: number;
   initialZoom: number;
@@ -449,7 +519,7 @@ function LeafletMapCanvas({
   const robotMarkerRef = useRef<L.Marker | null>(null);
   const datumMarkerRef = useRef<L.Marker | null>(null);
   const draftMarkerRef = useRef<L.Marker | null>(null);
-  const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg: number; dragYaw: boolean } | null>(null);
+  const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg?: number; dragYaw: boolean } | null>(null);
   const goalCreateSessionRef = useRef<{ active: boolean; hasMoved: boolean }>({ active: false, hasMoved: false });
   const waypointDragEndMsRef = useRef(0);
   const waypointRenderKeyRef = useRef("");
@@ -520,7 +590,7 @@ function LeafletMapCanvas({
     }
     layer.clearLayers();
     const marker = L.marker([draft.lat, draft.lon], {
-      icon: buildWaypointIcon(waypointCountRef.current, draft.yawDeg, true, false),
+      icon: buildWaypointIcon(waypointCountRef.current, draft.yawDeg ?? 0, true, false, draft.dragYaw),
       interactive: false
     });
     marker.addTo(layer);
@@ -1163,7 +1233,6 @@ function LeafletMapCanvas({
       goalDraftRef.current = {
         lat: Number(evt.latlng.lat),
         lon: Number(evt.latlng.lng),
-        yawDeg: 0,
         dragYaw: false
       };
       if (map.dragging.enabled()) {
@@ -1212,7 +1281,7 @@ function LeafletMapCanvas({
       const draft = goalDraftRef.current;
       clearGoalDraft();
       if (!draft) return;
-      onQueueWaypointRef.current(draft.lat, draft.lon, draft.yawDeg);
+      onQueueWaypointRef.current(draft.lat, draft.lon, draft.dragYaw ? draft.yawDeg : undefined);
     });
 
     map.on("mouseout", () => {
@@ -1334,26 +1403,37 @@ function LeafletMapCanvas({
         index,
         lat: Number(waypoint.x),
         lon: Number(waypoint.y),
-        yawDeg: Number(waypoint.yawDeg ?? 0),
+        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(waypoint),
         selected: selectedWaypointIndexes.includes(index)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
+    const previewPoints = points.map((entry) => ({
+      lat: entry.lat,
+      lon: entry.lon,
+      yawDeg: entry.yawDeg,
+      manual: entry.manual
+    }));
+    const displayPoints = points.map((entry, displayIndex) => ({
+      ...entry,
+      displayYawDeg: resolveWaypointPreviewYawDeg(previewPoints, displayIndex, loopRoute, robotPose)
+    }));
     const renderKey =
-      points.length === 0
+      displayPoints.length === 0
         ? "__empty__"
-        : points
+        : displayPoints
             .map(
               (entry) =>
-                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.yawDeg.toFixed(2)}:${entry.selected ? 1 : 0}`
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
     waypointRenderKeyRef.current = renderKey;
     layer.clearLayers();
-    if (points.length === 0) return;
-    points.forEach((entry) => {
+    if (displayPoints.length === 0) return;
+    displayPoints.forEach((entry) => {
       const marker = L.marker([entry.lat, entry.lon], {
-        icon: buildWaypointIcon(entry.index, entry.yawDeg, false, entry.selected),
+        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual),
         interactive: true,
         draggable: true
       }).bindTooltip(`#${entry.index + 1}`, { direction: "top" });
@@ -1378,7 +1458,7 @@ function LeafletMapCanvas({
       });
       marker.addTo(layer);
     });
-  }, [selectedWaypointIndexes, waypoints]);
+  }, [loopRoute, robotPose, selectedWaypointIndexes, waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1489,6 +1569,7 @@ function CockpitMapCanvas({
   onQueueWaypoint,
   onToggleWaypointSelection,
   onMoveWaypoint,
+  loopRoute,
   initialCenterLat,
   initialCenterLon,
   initialZoom,
@@ -1505,9 +1586,10 @@ function CockpitMapCanvas({
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
-  onQueueWaypoint: (lat: number, lon: number, yawDeg: number) => void;
+  onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
+  loopRoute: boolean;
   initialCenterLat: number;
   initialCenterLon: number;
   initialZoom: number;
@@ -1529,7 +1611,7 @@ function CockpitMapCanvas({
   const [goalDraft, setGoalDraft] = useState<{
     pointerId: number;
     origin: GeoPoint;
-    yawDeg: number;
+    yawDeg?: number;
   } | null>(null);
   const [dragWaypoint, setDragWaypoint] = useState<{
     pointerId: number;
@@ -1731,15 +1813,29 @@ function CockpitMapCanvas({
     state.toolMode
   ]);
 
-  const routePolylinePoints = waypoints
-    .map((waypoint, index) => {
+  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean }> = waypoints
+    .flatMap((waypoint, index) => {
       const lat = Number(waypoint.x);
       const lon = Number(waypoint.y);
-      const yawDeg = Number(waypoint.yawDeg ?? 0);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) return null;
-      return { index, lat, lon, yawDeg };
-    })
-    .filter((entry): entry is { index: number; lat: number; lon: number; yawDeg: number } => entry !== null);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+      return [{
+        index,
+        lat,
+        lon,
+        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(waypoint)
+      }];
+    });
+  const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
+    lat: entry.lat,
+    lon: entry.lon,
+    yawDeg: entry.yawDeg,
+    manual: entry.manual
+  }));
+  const displayRoutePolylinePoints = routePolylinePoints.map((entry, displayIndex) => ({
+    ...entry,
+    displayYawDeg: resolveWaypointPreviewYawDeg(waypointPreviewPoints, displayIndex, loopRoute, robotPose)
+  }));
   const decorativeWaypoints = routePolylinePoints.length === 0
     ? [
         { ...offsetGeoPoint(centerPoint, -14, 8), done: true },
@@ -1826,8 +1922,7 @@ function CockpitMapCanvas({
     event.currentTarget.setPointerCapture(event.pointerId);
     setGoalDraft({
       pointerId: event.pointerId,
-      origin: point,
-      yawDeg: 0
+      origin: point
     });
   };
 
@@ -1954,11 +2049,11 @@ function CockpitMapCanvas({
           <span className="map-datum-cross" />
         </div>
       ) : null}
-      {routePolylinePoints.map((waypoint) => {
-        const isDragging = dragWaypoint?.index === waypoint.index;
+      {displayRoutePolylinePoints.map((waypoint) => {
+        const activeDrag = dragWaypoint?.index === waypoint.index ? dragWaypoint : null;
         const point = {
-          lat: isDragging ? dragWaypoint.lat : waypoint.lat,
-          lon: isDragging ? dragWaypoint.lon : waypoint.lon
+          lat: activeDrag ? activeDrag.lat : waypoint.lat,
+          lon: activeDrag ? activeDrag.lon : waypoint.lon
         };
         if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return null;
         const projected = projectPoint(point);
@@ -1968,14 +2063,16 @@ function CockpitMapCanvas({
           <button
             key={`waypoint-${waypoint.index}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`}
             type="button"
-            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${isDragging ? " dragging" : ""}`}
+            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}`}
             data-index={waypoint.index + 1}
             style={{
               left: projected.x,
               top: projected.y,
-              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.yawDeg)}deg)`
+              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
             }}
-            title={`WP ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}`}
+            title={`WP ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+              waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
+            }`}
             disabled={!interactive}
             onPointerDown={(event) => {
               if (!interactive || event.button !== 0) return;
@@ -2043,12 +2140,12 @@ function CockpitMapCanvas({
       {goalDraft ? (
         <>
           <div
-            className="wp draft"
+            className={`wp draft${goalDraft.yawDeg === undefined ? " auto" : " manual"}`}
             data-index={waypoints.length + 1}
             style={{
               left: projectPoint(goalDraft.origin).x,
               top: projectPoint(goalDraft.origin).y,
-              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - goalDraft.yawDeg)}deg)`
+              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - (goalDraft.yawDeg ?? 0))}deg)`
             }}
           />
           <div
@@ -2056,7 +2153,7 @@ function CockpitMapCanvas({
             style={{
               left: projectPoint(goalDraft.origin).x,
               top: projectPoint(goalDraft.origin).y,
-              transform: `translate(-50%, -50%) rotate(${90 - goalDraft.yawDeg}deg)`
+              transform: `translate(-50%, -50%) rotate(${90 - (goalDraft.yawDeg ?? 0)}deg)`
             }}
             aria-hidden="true"
           />
@@ -2148,6 +2245,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     sensorInfoService ? sensorInfoService.getState() : null
   );
+  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(mapService.getDatumProfilesState());
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
   const cameraStreamSeqRef = useRef(0);
@@ -2192,6 +2290,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       port: connectionState?.port
     });
   }, [mapService, connectionState?.connected, connectionState?.host, connectionState?.port]);
+  useEffect(() => mapService.subscribeDatumProfiles((next) => setDatumProfiles(next)), [mapService]);
+  useEffect(() => {
+    if (connectionState?.connected !== true) return;
+    void mapService.getDatums().catch(() => undefined);
+  }, [connectionState?.connected, mapService]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
@@ -2336,7 +2439,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return undefined;
   }, [displayTotal, fwCurrentWp, goalActive, goalSucceeded, loopTotalWaypoints, missionProgressPct, routeComplete]);
   const missionProgressLabel = `${Math.round(displayMissionProgressPct)}%`;
+  const blockedState = routeMission?.blockedState ?? "";
+  const blockedReason =
+    routeMission?.blockedReasonText || routeMission?.blockedReasonCode || (blockedState ? "obstacle or path blockage" : "");
+  const blockedRetryMax = Math.max(0, Math.round(routeMission?.blockedRetryMaxAttempts ?? 0));
+  const blockedRetryAttempt = Math.max(0, Math.round(routeMission?.blockedRetryAttempt ?? 0));
+  const blockedWait = Math.max(0, Number(routeMission?.blockedWaitRemainingS ?? 0));
+  const blockedRetryText = blockedRetryMax > 0 ? `retry ${Math.min(blockedRetryAttempt + 1, blockedRetryMax)}/${blockedRetryMax}` : "";
+  const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
+  const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
   const missionTitle =
+    blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
+    blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
+    blockedState === "BLOCKED_WAITING" ? "Route blocked" :
     routeComplete ? "Route complete" :
     routeMission?.paused ? "Route paused" :
     routeMission?.active ? "Following route" :
@@ -2345,6 +2460,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     navigationState?.goalMode ? "Goal mode" :
     "Ready";
   const missionDetail =
+    blockedState ? blockedDetail :
     routePointCount > 0
       ? `${missionCompletedCount}/${missionProgressTotal} goals completed`
       : goalActive
@@ -2357,21 +2473,24 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           ? "Operator control"
           : `${queuedWaypointCount} queued waypoints`;
   const missionToneClass =
-    routeStatusText.includes("fail") || routeStatusText.includes("error")
+    blockedState === "BLOCKED_NEEDS_OPERATOR" || routeStatusText.includes("fail") || routeStatusText.includes("error")
       ? "error"
-      : routeMission?.paused || navigationState?.manualMode
+      : blockedState || routeMission?.paused || navigationState?.manualMode
         ? "warn"
         : routeMission?.active || routeComplete || goalActive || navigationState?.goalMode
           ? "active"
           : "";
   const linearMin = navigationState?.manualLinearMin ?? 1;
   const linearMax = navigationState?.manualLinearMax ?? 4;
-  const angularMin = navigationState?.manualAngularMin ?? 0.1;
-  const angularMax = navigationState?.manualAngularMax ?? 1.2;
+  const steeringAngleMin = navigationState?.manualSteeringAngleMinDeg ?? 1;
+  const steeringAngleMax = navigationState?.manualSteeringAngleMaxDeg ?? 30;
   const linearSpeed = navigationState?.manualLinearSpeed ?? 1.2;
-  const angularSpeed = navigationState?.manualAngularSpeed ?? 0.4;
+  const steeringAngleDeg = navigationState?.manualSteeringAngleDeg ?? 18;
   const linearFillPct = linearMax > linearMin ? Math.min(100, Math.max(0, ((linearSpeed - linearMin) / (linearMax - linearMin)) * 100)) : 0;
-  const angularFillPct = angularMax > angularMin ? Math.min(100, Math.max(0, ((angularSpeed - angularMin) / (angularMax - angularMin)) * 100)) : 0;
+  const steeringFillPct =
+    steeringAngleMax > steeringAngleMin
+      ? Math.min(100, Math.max(0, ((steeringAngleDeg - steeringAngleMin) / (steeringAngleMax - steeringAngleMin)) * 100))
+      : 0;
   const routeBadgeText =
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
 
@@ -2484,8 +2603,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
   const datumFromSensor = generalSnapshot.datum as Record<string, unknown> | undefined;
-  const datumLat = Number(datumFromSensor?.datum_lat ?? state.map?.originLat ?? Number.NaN);
-  const datumLon = Number(datumFromSensor?.datum_lon ?? state.map?.originLon ?? Number.NaN);
+  const selectedDatumProfile = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+  const datumLat = Number(datumFromSensor?.datum_lat ?? datumProfiles?.runtime.lat ?? selectedDatumProfile?.lat ?? state.map?.originLat ?? Number.NaN);
+  const datumLon = Number(datumFromSensor?.datum_lon ?? datumProfiles?.runtime.lon ?? selectedDatumProfile?.lon ?? state.map?.originLon ?? Number.NaN);
   const datumPose =
     Number.isFinite(datumLat) &&
     Number.isFinite(datumLon) &&
@@ -2565,16 +2685,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     mapService.setToolMode("idle");
   };
 
-  const queueWaypointFromMap = (lat: number, lon: number, yawDeg: number): void => {
+  const queueWaypointFromMap = (lat: number, lon: number, yawDeg?: number): void => {
     if (!navigationService || !navigationState?.goalMode) return;
-    navigationService.queueWaypoint({
-      x: lat,
-      y: lon,
-      yawDeg
-    });
+    navigationService.queueWaypoint(
+      yawDeg === undefined
+        ? { x: lat, y: lon }
+        : {
+            x: lat,
+            y: lon,
+            yawDeg
+          }
+    );
     runtime.eventBus.emit("console.event", {
       level: "info",
-      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)}) yaw=${yawDeg.toFixed(1)}°`,
+      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
+        yawDeg === undefined ? " auto-yaw" : ` yaw=${yawDeg.toFixed(1)}°`
+      }`,
       timestamp: Date.now()
     });
   };
@@ -2649,6 +2775,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
                 initialZoom={initialZoom}
@@ -2701,6 +2828,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
                 initialZoom={initialZoom}
@@ -2812,22 +2940,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   </div>
                   <div className="map-html-range">
                     <div className="range-label">
-                      Angular speed (rad/s) <span className="range-val">{angularSpeed.toFixed(2)}</span>
+                      Steering angle (deg) <span className="range-val">{steeringAngleDeg.toFixed(1)}</span>
                     </div>
                     <input
                       type="range"
-                      min={angularMin}
-                      max={angularMax}
-                      step={0.01}
-                      value={angularSpeed}
+                      min={steeringAngleMin}
+                      max={steeringAngleMax}
+                      step={0.1}
+                      value={steeringAngleDeg}
                       disabled={!navigationService}
-                      style={{ "--range-fill": `${angularFillPct}%` } as CSSProperties}
-                      onChange={(event) => navigationService?.setManualAngularSpeed(Number(event.target.value))}
+                      style={{ "--range-fill": `${steeringFillPct}%` } as CSSProperties}
+                      onChange={(event) => navigationService?.setManualSteeringAngleDeg(Number(event.target.value))}
                     />
                     <div className="map-range-scale" aria-hidden="true">
-                      <span>{angularMin.toFixed(2)}</span>
-                      <span>{((angularMin + angularMax) / 2).toFixed(2)}</span>
-                      <span>{angularMax.toFixed(2)}</span>
+                      <span>{steeringAngleMin.toFixed(1)}</span>
+                      <span>{((steeringAngleMin + steeringAngleMax) / 2).toFixed(1)}</span>
+                      <span>{steeringAngleMax.toFixed(1)}</span>
                     </div>
                   </div>
                   <div className="map-html-tool-status">{toolStatusText}</div>

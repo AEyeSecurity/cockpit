@@ -1,6 +1,6 @@
 {
   "values": {
-    "ws_real_host": "localhost",
+    "ws_real_host": "100.111.4.7",
     "ws_real_port": 8766,
     "ws_sim_host": "localhost",
     "ws_sim_port": 8766,
@@ -12,9 +12,9 @@
     "manual_linear_speed_min": 1.0,
     "manual_linear_speed_max": 4.0,
     "manual_linear_speed_default": 1.2,
-    "manual_angular_speed_min": 0.1,
-    "manual_angular_speed_max": 1.2,
-    "manual_angular_speed_default": 0.4,
+    "manual_steering_angle_min_deg": 1.0,
+    "manual_steering_angle_max_deg": 30.0,
+    "manual_steering_angle_default_deg": 18.0,
     "manual_loop_interval_ms": 50
   },
   "settings": {
@@ -24,7 +24,7 @@
         "key": "ws_real_host",
         "label": "WS Real Host",
         "type": "string",
-        "placeholder": "localhost"
+        "placeholder": "100.111.4.7"
       },
       {
         "key": "ws_real_port",
@@ -85,18 +85,18 @@
         "type": "number"
       },
       {
-        "key": "manual_angular_speed_min",
-        "label": "Manual Angular Speed Min",
+        "key": "manual_steering_angle_min_deg",
+        "label": "Manual Steering Angle Min (deg)",
         "type": "number"
       },
       {
-        "key": "manual_angular_speed_max",
-        "label": "Manual Angular Speed Max",
+        "key": "manual_steering_angle_max_deg",
+        "label": "Manual Steering Angle Max (deg)",
         "type": "number"
       },
       {
-        "key": "manual_angular_speed_default",
-        "label": "Manual Angular Speed Default",
+        "key": "manual_steering_angle_default_deg",
+        "label": "Manual Steering Angle Default (deg)",
         "type": "number"
       },
       {

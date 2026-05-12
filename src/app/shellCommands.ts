@@ -12,6 +12,11 @@ export const ShellCommands = {
   zoomReset: "cockpit.shell.zoomReset"
 } as const;
 
+const LegacyShellCommands = {
+  openModal: "core.shell.openModal",
+  closeModal: "core.shell.closeModal"
+} as const;
+
 export interface ShellCommandCallbacks {
   toggleSidebar: () => void;
   toggleConsole: () => void;
@@ -51,10 +56,24 @@ export function registerShellCommands(
       }
     )
   );
+  disposables.push(
+    runtime.commands.register(
+      { id: LegacyShellCommands.openModal, title: "Open Modal", category: "Shell" },
+      (modalId: unknown) => {
+        if (typeof modalId === "string") callbacks.openModal(modalId);
+      }
+    )
+  );
 
   disposables.push(
     runtime.commands.register(
       { id: ShellCommands.closeModal, title: "Close Modal", category: "Shell" },
+      () => callbacks.closeModal()
+    )
+  );
+  disposables.push(
+    runtime.commands.register(
+      { id: LegacyShellCommands.closeModal, title: "Close Modal", category: "Shell" },
       () => callbacks.closeModal()
     )
   );

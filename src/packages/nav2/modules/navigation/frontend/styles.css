@@ -7040,3 +7040,122 @@ pre {
   animation: none !important;
   z-index: 3 !important;
 }
+
+.datum-sidebar-status {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.datum-sidebar-status span,
+.datum-sidebar-row small {
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 11px;
+}
+
+.datum-sidebar-status strong,
+.datum-sidebar-row strong {
+  display: block;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.datum-sidebar-badge {
+  width: fit-content;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.24);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.datum-sidebar-badge.pending {
+  border-color: rgba(250, 204, 21, 0.48);
+  color: #fef08a;
+  background: rgba(113, 63, 18, 0.26);
+}
+
+.datum-sidebar-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.datum-sidebar-form input,
+.datum-sidebar-form select {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: #f8fafc;
+  background: rgba(2, 6, 23, 0.42);
+  font-size: 12px;
+}
+
+.datum-sidebar-form input:last-child {
+  grid-column: 1 / -1;
+}
+
+.datum-sidebar-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.datum-sidebar-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.datum-sidebar-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.datum-sidebar-row.selected {
+  border-color: rgba(34, 211, 238, 0.58);
+  background: rgba(8, 145, 178, 0.18);
+}
+
+.datum-sidebar-row span {
+  min-width: 0;
+}
+
+.datum-sidebar-row strong,
+.datum-sidebar-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.datum-sidebar-select,
+.datum-sidebar-delete {
+  min-width: 0;
+  width: 26px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+.datum-sidebar-select {
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  color: #bae6fd;
+  background: rgba(14, 116, 144, 0.24);
+}

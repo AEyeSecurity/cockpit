@@ -18,11 +18,20 @@ function resolveOptionalServices(runtime: ModuleContext): {
   connection: ConnectionService | null;
   sensorInfo: SensorInfoService | null;
 } {
+  const hasStateApi = (service: unknown): service is { getState: () => unknown; subscribe: (listener: (state: never) => void) => () => void } =>
+    !!service &&
+    typeof service === "object" &&
+    typeof (service as { getState?: unknown }).getState === "function" &&
+    typeof (service as { subscribe?: unknown }).subscribe === "function";
   try {
     const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
     const connection = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
     const sensorInfo = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
-    return { navigation, connection, sensorInfo };
+    return {
+      navigation: hasStateApi(navigation) ? navigation : null,
+      connection: hasStateApi(connection) ? connection : null,
+      sensorInfo: hasStateApi(sensorInfo) ? sensorInfo : null
+    };
   } catch {
     return { navigation: null, connection: null, sensorInfo: null };
   }
@@ -321,9 +330,14 @@ function TelemetryEmptyState({ label }: { label: string }): JSX.Element {
   );
 }
 
-function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const services = resolveOptionalServices(runtime);
-  const telemetryService = runtime.services.getService<TelemetryService>(SERVICE_ID);
+  let telemetryService: TelemetryService | null = null;
+  try {
+    telemetryService = runtime.services.getService<TelemetryService>(SERVICE_ID);
+  } catch {
+    telemetryService = null;
+  }
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     services.sensorInfo ? services.sensorInfo.getState() : null
   );
@@ -333,7 +347,33 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
   const [navigationState, setNavigationState] = useState(
     services.navigation ? services.navigation.getState() : null
   );
-  const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot>(telemetryService.getSnapshot());
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot>(
+    telemetryService
+      ? telemetryService.getSnapshot()
+      : {
+          robotStatus: {
+            batteryPct: 0,
+            mode: "disconnected",
+            connected: false
+          },
+          robotPose: null,
+          cmdVelSafe: "n/a",
+          goalActive: false,
+          currentWaypoint: 0,
+          totalWaypoints: 0,
+          loopTotalWaypoints: 0,
+          navResultStatus: 0,
+          navResultText: "",
+          navResultEventId: 0,
+          controlLocked: false,
+          controlLockReason: "",
+          recentEvents: [],
+          alerts: [],
+          rtkSourceState: null,
+          datum: null,
+          gpsStatus: null
+        }
+  );
   const pixhawkPayload = sensorInfoState?.payloads.pixhawk_gps as Record<string, unknown> | undefined;
   const pixhawkSnapshot = (pixhawkPayload?.snapshot ?? {}) as Record<string, unknown>;
 
@@ -352,20 +392,30 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
     return services.navigation.subscribe((next) => setNavigationState(next));
   }, [services.navigation]);
 
-  useEffect(() => telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next)), [telemetryService]);
+  useEffect(() => {
+    if (!telemetryService) return undefined;
+    return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
+  }, [telemetryService]);
 
   useEffect(() => {
     if (!services.sensorInfo) return;
+    void services.sensorInfo.setActiveTab("general");
     void services.sensorInfo.open();
     return () => {
       void services.sensorInfo!.close();
     };
   }, [services.sensorInfo]);
 
-  const datumState = telemetrySnapshot.datum ?? {};
-  const rtkState = telemetrySnapshot.rtkSourceState ?? {};
-  const gpsStatus = telemetrySnapshot.gpsStatus ?? {};
-  const yawDiagnostics = (pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined) ?? {};
+  const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
+  const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
+  const datumState = telemetrySnapshot.datum ?? (generalSnapshot.datum as Record<string, unknown> | undefined) ?? {};
+  const rtkState =
+    telemetrySnapshot.rtkSourceState ?? (generalSnapshot.rtk_source_state as Record<string, unknown> | undefined) ?? {};
+  const gpsStatus = telemetrySnapshot.gpsStatus ?? (generalSnapshot.gps_status as Record<string, unknown> | undefined) ?? {};
+  const yawDiagnostics =
+    (pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined) ??
+    (generalSnapshot.diagnostics as Record<string, unknown> | undefined) ??
+    {};
   const yawDelta = parseNumericValue(yawDiagnostics.yaw_delta_deg);
   const yawTone =
     yawDelta === null ? "neutral" :
@@ -415,7 +465,7 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
       <div className="panel-card telemetry-panel-card">
         <div className="telemetry-card-header">
           <h4>Datum</h4>
-          <StatusChip label={datumState.already_set === true ? "set" : "unset"} tone={datumTone} />
+          <StatusChip label={datumState.already_set === true ? "Set" : "Unset"} tone={datumTone} />
         </div>
         <div className="key-value-grid telemetry-kv-grid">
           <span>Status</span>
@@ -454,6 +504,8 @@ function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Ele
               <StatusChip label={rtkState.connected === true ? "connected" : "offline"} tone={rtkState.connected === true ? "ok" : "off"} />
             </div>
             <div className="key-value-grid telemetry-kv-grid">
+              <span>Connected</span>
+              <span>{rtkState.connected === true ? "yes" : "no"}</span>
               <span>Source</span>
               <span>{String(rtkState.active_source_label ?? "n/a")}</span>
               <span>RTCM age</span>

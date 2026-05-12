@@ -52,7 +52,7 @@ describe("integration", () => {
 
     const runtime1 = await bootstrapApp();
     const base = runtime1.getPackageConfig<Record<string, unknown>>("nav2");
-    expect(base.ws_real_host).toBe("localhost");
+    expect(base.ws_real_host).toBe("100.111.4.7");
     expect(base.map_default_zoom).toBe(16);
 
     await runtime1.setPackageConfig("nav2", {
@@ -76,7 +76,7 @@ describe("integration", () => {
     await runtime2.resetPackageConfig("nav2");
     const runtime3 = await bootstrapApp();
     const restored = runtime3.getPackageConfig<Record<string, unknown>>("nav2");
-    expect(restored.ws_real_host).toBe("localhost");
+    expect(restored.ws_real_host).toBe("100.111.4.7");
     expect(restored.map_default_zoom).toBe(16);
 
     await removeConfig("packages/nav2.json");

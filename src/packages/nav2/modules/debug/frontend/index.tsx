@@ -264,6 +264,24 @@ export function createDebugModule(): CockpitModule {
         order: 100,
         render: () => <DebugSidebarPanel runtime={ctx} />
       });
+
+      ctx.contributions.register({
+        id: "toolbar.debug",
+        slot: "toolbar",
+        label: "Debug",
+        items: [
+          {
+            id: "debug.record",
+            label: "Grabación",
+            commandId: OPEN_RECORD_MODAL_COMMAND_ID
+          },
+          {
+            id: "debug.info",
+            label: "Información",
+            commandId: NavigationCommands.openInfoModal
+          }
+        ]
+      });
     }
   };
 }

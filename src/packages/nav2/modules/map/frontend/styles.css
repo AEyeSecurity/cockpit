@@ -271,6 +271,15 @@
   border-bottom-color: #fb7185;
 }
 
+.wp.auto::before {
+  border-bottom-color: #14b8a6;
+}
+
+.wp.auto[data-index]::after {
+  border-style: dashed;
+  color: #0f766e;
+}
+
 .wp.selected {
   cursor: grab;
 }
@@ -361,6 +370,15 @@
 .wp-icon.draft .wp-arrow {
   border-bottom-color: #f59e0b;
   opacity: 0.9;
+}
+
+.wp-icon.auto .wp-arrow {
+  border-bottom-color: #14b8a6;
+}
+
+.wp-icon.auto .wp-index {
+  border-style: dashed;
+  color: #0f766e;
 }
 
 .wp-icon.selected .wp-arrow {
