@@ -2,14 +2,19 @@ import type { AppRuntime } from "../core/types/module";
 import type { Disposable } from "../core/commands/types";
 
 export const ShellCommands = {
-  toggleSidebar: "core.shell.toggleSidebar",
-  toggleConsole: "core.shell.toggleConsole",
-  openModal:     "core.shell.openModal",
-  closeModal:    "core.shell.closeModal",
-  dismiss:       "core.shell.dismiss",
-  zoomIn:        "core.shell.zoomIn",
-  zoomOut:       "core.shell.zoomOut",
-  zoomReset:     "core.shell.zoomReset"
+  toggleSidebar: "cockpit.shell.toggleSidebar",
+  toggleConsole: "cockpit.shell.toggleConsole",
+  openModal: "cockpit.shell.openModal",
+  closeModal: "cockpit.shell.closeModal",
+  dismiss: "cockpit.shell.dismiss",
+  zoomIn: "cockpit.shell.zoomIn",
+  zoomOut: "cockpit.shell.zoomOut",
+  zoomReset: "cockpit.shell.zoomReset"
+} as const;
+
+const LegacyShellCommands = {
+  openModal: "core.shell.openModal",
+  closeModal: "core.shell.closeModal"
 } as const;
 
 export interface ShellCommandCallbacks {
@@ -51,10 +56,24 @@ export function registerShellCommands(
       }
     )
   );
+  disposables.push(
+    runtime.commands.register(
+      { id: LegacyShellCommands.openModal, title: "Open Modal", category: "Shell" },
+      (modalId: unknown) => {
+        if (typeof modalId === "string") callbacks.openModal(modalId);
+      }
+    )
+  );
 
   disposables.push(
     runtime.commands.register(
       { id: ShellCommands.closeModal, title: "Close Modal", category: "Shell" },
+      () => callbacks.closeModal()
+    )
+  );
+  disposables.push(
+    runtime.commands.register(
+      { id: LegacyShellCommands.closeModal, title: "Close Modal", category: "Shell" },
       () => callbacks.closeModal()
     )
   );

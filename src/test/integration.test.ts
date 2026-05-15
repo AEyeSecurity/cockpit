@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
-import { readConfig, removeConfig, writeConfig } from "../platform/tauri/configFs";
+import { readConfig, removeConfig, writeConfig } from "../platform/host/configFs";
 
 describe("integration", () => {
   it("persists config through fallback storage", async () => {
@@ -16,7 +16,7 @@ describe("integration", () => {
     );
     const runtime = await bootstrapApp();
     expect(runtime.contributions.has("nav2.workspace.map")).toBe(false);
-    expect(runtime.contributions.has("nav2.toolbar.debug")).toBe(false);
+    expect(runtime.contributions.has("nav2.sidebar.debug")).toBe(false);
     await removeConfig("modules.yaml");
   });
 
@@ -26,17 +26,19 @@ describe("integration", () => {
     expect(runtime.contributions.has("nav2.footer.connection")).toBe(false);
     expect(runtime.contributions.has("nav2.footer.connection-status")).toBe(true);
     expect(runtime.contributions.has("nav2.toolbar.navigation")).toBe(false);
-    expect(runtime.contributions.has("nav2.toolbar.debug")).toBe(true);
+    expect(runtime.contributions.has("nav2.sidebar.debug")).toBe(true);
+    expect(runtime.contributions.has("sidebar.settings")).toBe(true);
     expect(runtime.contributions.has("nav2.toolbar.processes")).toBe(true);
     expect(runtime.contributions.has("nav2.modal.processes")).toBe(true);
     expect(runtime.commands.has("nav2.processes.openModal")).toBe(true);
 
-    const debugToolbar = runtime.contributions.get("nav2.toolbar.debug");
-    expect(debugToolbar?.slot).toBe("toolbar");
-    expect(debugToolbar && "items" in debugToolbar ? debugToolbar.items?.map((item) => item.label) : []).toEqual([
-      "Grabación",
-      "Información"
-    ]);
+    const debugSidebar = runtime.contributions.get("nav2.sidebar.debug");
+    expect(debugSidebar?.slot).toBe("sidebar");
+    expect(debugSidebar && "label" in debugSidebar ? debugSidebar.label : "").toBe("Debug");
+
+    const settingsSidebar = runtime.contributions.get("sidebar.settings");
+    expect(settingsSidebar?.slot).toBe("sidebar");
+    expect(settingsSidebar && "label" in settingsSidebar ? settingsSidebar.label : "").toBe("Settings");
 
     const processesToolbar = runtime.contributions.get("nav2.toolbar.processes");
     expect(processesToolbar?.slot).toBe("toolbar");

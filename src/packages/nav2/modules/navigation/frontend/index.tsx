@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
 import { PanelCollapsibleSection, PanelSection } from "../../../../core";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
@@ -33,9 +33,6 @@ interface Nav2RuntimeConfig {
   manual_steering_angle_min_deg?: unknown;
   manual_steering_angle_max_deg?: unknown;
   manual_steering_angle_default_deg?: unknown;
-  manual_angular_speed_min?: unknown;
-  manual_angular_speed_max?: unknown;
-  manual_angular_speed_default?: unknown;
   manual_loop_interval_ms?: unknown;
 }
 
@@ -46,10 +43,6 @@ interface ManualSpeedLimits {
   steeringAngleMaxDeg: number;
 }
 
-const MANUAL_ACKERMANN_WHEELBASE_M = 0.94;
-const DEFAULT_MANUAL_LINEAR_SPEED = 1.2;
-const DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG = 1.0;
-const DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG = 30.0;
 const DEFAULT_MANUAL_STEERING_ANGLE_DEG = 18.0;
 
 function readNav2Config(ctx: ModuleContext): Nav2RuntimeConfig {
@@ -79,72 +72,28 @@ function parseLoopIntervalMs(value: unknown, fallback: number): number {
   return Math.max(20, Math.round(parsed));
 }
 
-function yawRateToSteeringDeg(angularSpeed: number, referenceSpeed: number): number {
-  const angular = Number(angularSpeed);
-  const speed = Math.abs(Number(referenceSpeed));
-  if (!Number.isFinite(angular) || !Number.isFinite(speed) || speed <= 1.0e-6) {
-    return DEFAULT_MANUAL_STEERING_ANGLE_DEG;
-  }
-  return (Math.atan((Math.abs(angular) * MANUAL_ACKERMANN_WHEELBASE_M) / speed) * 180.0) / Math.PI;
-}
-
 function parseManualSpeedLimits(config: Nav2RuntimeConfig): ManualSpeedLimits {
   const linearMinCandidate = Number(config.manual_linear_speed_min);
   const linearMaxCandidate = Number(config.manual_linear_speed_max);
-  const linearMin = Number.isFinite(linearMinCandidate) ? linearMinCandidate : 1.0;
-  const linearMax = Number.isFinite(linearMaxCandidate) ? linearMaxCandidate : 4.0;
-  const defaultLinearSpeed = parseNumberInRange(
-    config.manual_linear_speed_default,
-    DEFAULT_MANUAL_LINEAR_SPEED,
-    linearMin,
-    linearMax
-  );
   const steeringAngleMinCandidate = Number(config.manual_steering_angle_min_deg);
   const steeringAngleMaxCandidate = Number(config.manual_steering_angle_max_deg);
-  const legacyAngularMinCandidate = Number(config.manual_angular_speed_min);
-  const legacyAngularMaxCandidate = Number(config.manual_angular_speed_max);
-  const steeringAngleMin = Number.isFinite(steeringAngleMinCandidate)
-    ? steeringAngleMinCandidate
-    : Number.isFinite(legacyAngularMinCandidate)
-      ? yawRateToSteeringDeg(legacyAngularMinCandidate, defaultLinearSpeed)
-      : DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG;
-  const steeringAngleMax = Number.isFinite(steeringAngleMaxCandidate)
-    ? steeringAngleMaxCandidate
-    : Number.isFinite(legacyAngularMaxCandidate)
-      ? yawRateToSteeringDeg(legacyAngularMaxCandidate, defaultLinearSpeed)
-      : DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG;
+  const linearMin = Number.isFinite(linearMinCandidate) ? linearMinCandidate : 1.0;
+  const linearMax = Number.isFinite(linearMaxCandidate) ? linearMaxCandidate : 4.0;
+  const steeringAngleMin = Number.isFinite(steeringAngleMinCandidate) ? steeringAngleMinCandidate : 1.0;
+  const steeringAngleMax = Number.isFinite(steeringAngleMaxCandidate) ? steeringAngleMaxCandidate : 30.0;
   return {
     linearMin: linearMax > linearMin ? linearMin : 1.0,
     linearMax: linearMax > linearMin ? linearMax : 4.0,
-    steeringAngleMinDeg:
-      steeringAngleMax > steeringAngleMin ? steeringAngleMin : DEFAULT_MANUAL_STEERING_ANGLE_MIN_DEG,
-    steeringAngleMaxDeg:
-      steeringAngleMax > steeringAngleMin ? steeringAngleMax : DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG
+    steeringAngleMinDeg: steeringAngleMax > steeringAngleMin ? steeringAngleMin : 1.0,
+    steeringAngleMaxDeg: steeringAngleMax > steeringAngleMin ? steeringAngleMax : 30.0
   };
-}
-
-function parseDefaultSteeringAngleDeg(config: Nav2RuntimeConfig, limits: ManualSpeedLimits): number {
-  const defaultLinearSpeed = parseNumberInRange(
-    config.manual_linear_speed_default,
-    DEFAULT_MANUAL_LINEAR_SPEED,
-    limits.linearMin,
-    limits.linearMax
-  );
-  return parseNumberInRange(
-    config.manual_steering_angle_default_deg,
-    Number.isFinite(Number(config.manual_angular_speed_default))
-      ? yawRateToSteeringDeg(Number(config.manual_angular_speed_default), defaultLinearSpeed)
-      : DEFAULT_MANUAL_STEERING_ANGLE_DEG,
-    limits.steeringAngleMinDeg,
-    limits.steeringAngleMaxDeg
-  );
 }
 
 function buildConnectionPresetDefaults(ctx: ModuleContext, config: Nav2RuntimeConfig): {
   real: { host: string; port: string };
   sim: { host: string; port: string };
 } {
-  const wsRealHostFallback = ctx.env.wsRealHost ?? "100.111.4.7";
+  const wsRealHostFallback = ctx.env.wsRealHost ?? "localhost";
   const wsSimHostFallback = ctx.env.wsSimHost ?? "localhost";
   const wsPortFallback = ctx.env.wsDefaultPort ?? "8766";
   return {
@@ -201,15 +150,9 @@ function formatRouteStatus(status: string): string {
   return status.trim();
 }
 
-function formatNavResultDetail(raw: string): string {
-  const text = raw.trim();
-  if (!text || text.toLowerCase() === "idle") return "";
-  const reasonMatch = text.match(/\((.+)\)\s*$/u);
-  if (reasonMatch?.[1]) return reasonMatch[1].trim();
-  return text;
-}
-
 function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
+  if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
   const status = cleanRouteStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -217,6 +160,23 @@ function routeTone(routeMission: NavigationState["routeMission"]): "active" | "p
   if (status.includes("cancelled")) return "idle";
   if (routeMission.active || status.includes("active") || status.includes("starting")) return "active";
   return "idle";
+}
+
+function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
+  if (routeMission.blockedState === "BLOCKED_RETRYING") return "Retrying blocked route";
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "Operator needed";
+  if (routeMission.blockedState === "BLOCKED_WAITING") return "Route blocked";
+  return "";
+}
+
+function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]): string {
+  const reason = routeMission.blockedReasonText || routeMission.blockedReasonCode || "obstacle or path blockage";
+  const retryMax = Math.max(0, Math.round(routeMission.blockedRetryMaxAttempts));
+  const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
+  const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
+  const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
+  const waitText = routeMission.blockedState === "BLOCKED_WAITING" && wait > 0 ? `${Math.ceil(wait)}s` : "";
+  return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
 }
 
 function buildNavigationStatus(
@@ -243,7 +203,8 @@ function buildNavigationStatus(
         : Math.min(expandedCount, startIndex)
       : 0;
   const progressPct = expandedCount > 0 ? Math.min(100, Math.max(0, (routeProgressCount / expandedCount) * 100)) : 0;
-  const hasRouteHistory = expandedCount > 0 || routeMission.inputWaypointCount > 0 || cleanRouteStatus(routeMission.status) !== "idle";
+  const hasRouteHistory =
+    expandedCount > 0 || routeMission.inputWaypointCount > 0 || cleanRouteStatus(routeMission.status) !== "idle";
   const routeMetaText =
     expandedCount > 0
       ? `${routeProgressCount}/${expandedCount} route points${routeMission.loop ? " · loop" : ""}`
@@ -256,7 +217,18 @@ function buildNavigationStatus(
       : routeMission.currentTargetIndex > 0
         ? `Last segment ${routeMission.currentStartIndex + 1}-${routeMission.currentTargetIndex + 1}`
         : "";
-  const navResultDetail = formatNavResultDetail(String(telemetry?.navResultText ?? ""));
+
+  if (routeMission.blockedState) {
+    return {
+      title: formatBlockedStatusTitle(routeMission) || formatRouteStatus(routeMission.status),
+      detail: formatBlockedStatusDetail(routeMission),
+      tone,
+      progressPct,
+      showProgress: expandedCount > 0,
+      segmentText,
+      routeMetaText
+    };
+  }
 
   if (state.manualMode || state.manualDisablePending) {
     return {
@@ -273,14 +245,7 @@ function buildNavigationStatus(
   if (tone !== "idle" || hasRouteHistory) {
     return {
       title: tone === "paused" ? "Route paused" : formatRouteStatus(routeMission.status),
-      detail:
-        tone === "error" && navResultDetail
-          ? navResultDetail
-          : routeMission.loop
-            ? "Mission loop enabled"
-            : tone === "done"
-              ? "Final brake expected"
-              : "Route mission",
+      detail: routeMission.loop ? "Mission loop enabled" : tone === "done" ? "Final brake expected" : "Route mission",
       tone,
       progressPct,
       showProgress: expandedCount > 0,
@@ -311,6 +276,21 @@ function buildNavigationStatus(
     segmentText: "",
     routeMetaText: ""
   };
+}
+
+function formatRecordingSummary(state: NavigationState): string {
+  const bits = [`Recorder: ${state.recording.active ? "recording" : "idle"}`, `count=${state.recording.count}`];
+  if (!state.recording.active && state.recording.lastMessage) {
+    bits.push(state.recording.lastMessage);
+  }
+  return bits.join(" · ");
+}
+
+function formatPatrolSummary(state: NavigationState): string {
+  const currentDisplay = state.patrolLoop.currentWaypoint >= 0 ? state.patrolLoop.currentWaypoint + 1 : "-";
+  const totalDisplay = state.patrolLoop.totalWaypoints > 0 ? state.patrolLoop.totalWaypoints : 0;
+  const labelSuffix = state.patrolLoop.label ? ` · ${state.patrolLoop.label}` : "";
+  return `Patrol: ${state.patrolLoop.active ? "active" : "idle"} · wp=${currentDisplay}/${totalDisplay}${labelSuffix}`;
 }
 
 function getMapService(runtime: ModuleContext): MapService | null {
@@ -345,6 +325,377 @@ function formatInfoTimestamp(value: unknown): string {
   return new Date(numeric).toLocaleString();
 }
 
+function joinClassNames(...values: Array<string | false | undefined>): string {
+  return values.filter(Boolean).join(" ");
+}
+
+type NavGlyphKind =
+  | "connect"
+  | "disconnect"
+  | "goal"
+  | "manual"
+  | "addWaypoint"
+  | "undo"
+  | "clear"
+  | "remove"
+  | "dispatch"
+  | "route"
+  | "cancel"
+  | "save"
+  | "load"
+  | "snapshot"
+  | "recordStart"
+  | "recordStop"
+  | "recordClear"
+  | "patrolStart"
+  | "patrolStop";
+
+function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
+  const baseProps = {
+    viewBox: "0 0 24 24",
+    width: 15,
+    height: 15,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const
+  };
+
+  switch (kind) {
+    case "connect":
+      return (
+        <svg {...baseProps}>
+          <path d="M8 8V4" />
+          <path d="M16 8V4" />
+          <path d="M7 12h10" />
+          <path d="M9 12v2a3 3 0 0 0 6 0v-2" />
+          <path d="M12 17v3" />
+        </svg>
+      );
+    case "disconnect":
+      return (
+        <svg {...baseProps}>
+          <path d="M8 8V4" />
+          <path d="M16 8V4" />
+          <path d="M7 12h10" />
+          <path d="M9 12v2a3 3 0 0 0 6 0v-2" />
+          <path d="M5 19 19 5" />
+        </svg>
+      );
+    case "goal":
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="6.5" />
+          <circle cx="12" cy="12" r="2.5" />
+          <path d="M12 3v2.5" />
+        </svg>
+      );
+    case "manual":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 4v5" />
+          <path d="M12 15v5" />
+          <path d="M4 12h5" />
+          <path d="M15 12h5" />
+          <circle cx="12" cy="12" r="2.2" />
+        </svg>
+      );
+    case "addWaypoint":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+          <circle cx="12" cy="12" r="7" opacity="0.35" />
+        </svg>
+      );
+    case "undo":
+      return (
+        <svg {...baseProps}>
+          <path d="M9 8 5 12l4 4" />
+          <path d="M6 12h7a5 5 0 1 1 0 10" />
+        </svg>
+      );
+    case "clear":
+      return (
+        <svg {...baseProps}>
+          <path d="M4 7h16" />
+          <path d="M9 7V5.5h6V7" />
+          <path d="m7 7 1 11h8l1-11" />
+        </svg>
+      );
+    case "remove":
+      return (
+        <svg {...baseProps}>
+          <path d="M7 7l10 10" />
+          <path d="M17 7 7 17" />
+        </svg>
+      );
+    case "dispatch":
+      return (
+        <svg {...baseProps}>
+          <path d="M5 12h12" />
+          <path d="m13 6 6 6-6 6" />
+        </svg>
+      );
+    case "route":
+      return (
+        <svg {...baseProps}>
+          <circle cx="6" cy="17" r="1.8" />
+          <circle cx="12" cy="7" r="1.8" />
+          <circle cx="18" cy="13" r="1.8" />
+          <path d="M7.5 15.8 10.5 8.4" />
+          <path d="m13.5 8.2 3 3.6" />
+        </svg>
+      );
+    case "cancel":
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="7" />
+          <path d="M9 9l6 6" />
+          <path d="M15 9 9 15" />
+        </svg>
+      );
+    case "save":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 4v10" />
+          <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
+          <path d="M5 17.5h14v2H5z" />
+        </svg>
+      );
+    case "load":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 20V10" />
+          <path d="m8.5 13.5 3.5-3.5 3.5 3.5" />
+          <path d="M5 4.5h14v2H5z" />
+        </svg>
+      );
+    case "snapshot":
+      return (
+        <svg {...baseProps}>
+          <rect x="4" y="7" width="16" height="10" rx="2.5" />
+          <circle cx="12" cy="12" r="3" />
+          <path d="M8 7 9.5 5.5h5L16 7" />
+        </svg>
+      );
+    case "recordStart":
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="5.2" />
+        </svg>
+      );
+    case "recordStop":
+      return (
+        <svg {...baseProps}>
+          <rect x="7" y="7" width="10" height="10" rx="1.5" />
+        </svg>
+      );
+    case "recordClear":
+      return (
+        <svg {...baseProps}>
+          <path d="M5 16 11 8l4 4-6 8H5z" />
+          <path d="M13 6 18 11" />
+        </svg>
+      );
+    case "patrolStart":
+      return (
+        <svg {...baseProps}>
+          <path d="m9 7 7 5-7 5z" />
+          <path d="M5 6v12" opacity="0.45" />
+        </svg>
+      );
+    case "patrolStop":
+      return (
+        <svg {...baseProps}>
+          <path d="M8 7v10" />
+          <path d="M16 7v10" />
+        </svg>
+      );
+  }
+}
+
+function ButtonFace({
+  icon,
+  label,
+  meta,
+  compact = false
+}: {
+  icon: ReactNode;
+  label: string;
+  meta?: string;
+  compact?: boolean;
+}): JSX.Element {
+  return (
+    <span className={joinClassNames("button-face bf", compact && "button-face-compact")}>
+      <span className="button-face-icon bf-ico" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="button-face-copy bf-copy">
+        <span className="button-face-label bf-label">{label}</span>
+        {meta ? <span className="button-face-meta bf-meta">{meta}</span> : null}
+      </span>
+    </span>
+  );
+}
+
+function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
+  const baseProps = {
+    viewBox: "0 0 24 24",
+    width: 16,
+    height: 16,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.9,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const
+  };
+
+  switch (title) {
+    case "CONNECTION":
+      return (
+        <svg {...baseProps}>
+          <path d="M5 12.5a10 10 0 0 1 14 0" />
+          <path d="M8.5 16a5.2 5.2 0 0 1 7 0" />
+          <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "CONTROL MODE":
+      return (
+        <svg {...baseProps}>
+          <path d="m4 7 5 5-5 5" />
+          <path d="M12 17h8" />
+        </svg>
+      );
+    case "WAYPOINTS":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" />
+          <circle cx="12" cy="10" r="2" />
+        </svg>
+      );
+    case "NAVIGATION ACTIONS":
+      return (
+        <svg {...baseProps}>
+          <path d="m4 11 16-7-7 16-2-7-7-2Z" />
+        </svg>
+      );
+    case "FILE OPERATIONS":
+      return (
+        <svg {...baseProps}>
+          <path d="M3.5 7.5h6l1.7 2H20.5v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z" />
+          <path d="M3.5 7.5V5.5a1.5 1.5 0 0 1 1.5-1.5h4l1.5 2H19a1.5 1.5 0 0 1 1.5 1.5v2" />
+        </svg>
+      );
+    case "RECORDING":
+      return (
+        <svg {...baseProps}>
+          <rect x="4" y="7" width="11" height="10" rx="2" />
+          <path d="m15 10 5-2.5v9L15 14" />
+        </svg>
+      );
+    case "PATROL":
+      return (
+        <svg {...baseProps}>
+          <path d="M12 3.5 19 6v5.5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6Z" />
+        </svg>
+      );
+    default:
+      return <NavGlyph kind="route" />;
+  }
+}
+
+function NavSidebarCollapsibleSection({
+  title,
+  badge,
+  className,
+  defaultCollapsed = true,
+  children
+}: {
+  title: string;
+  badge?: ReactNode;
+  className?: string;
+  defaultCollapsed?: boolean;
+  children: ReactNode;
+}): JSX.Element {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [contentHeight, setContentHeight] = useState(500);
+  const bodyId = useId();
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const accordionState = collapsed ? "closed" : "open";
+  const accordionStyle = {
+    "--nav-accordion-open-height": `${Math.max(contentHeight, 1)}px`
+  } as CSSProperties;
+  const handleHeaderWheel = (event: WheelEvent<HTMLButtonElement>): void => {
+    if (Math.abs(event.deltaY) < 4) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCollapsed(event.deltaY > 0);
+  };
+
+  useEffect(() => {
+    const contentElement = contentRef.current;
+    if (!contentElement) return;
+
+    let animationFrameId = 0;
+    const measureContentHeight = (): void => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(() => {
+        const nextHeight = Math.ceil(contentElement.scrollHeight);
+        setContentHeight((currentHeight) => (currentHeight === nextHeight ? currentHeight : nextHeight));
+      });
+    };
+
+    measureContentHeight();
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureContentHeight) : null;
+    resizeObserver?.observe(contentElement);
+    window.addEventListener("resize", measureContentHeight);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measureContentHeight);
+    };
+  }, []);
+
+  return (
+    <section
+      className={joinClassNames(
+        "ps",
+        "nav-sidebar-collapsible-section",
+        collapsed ? "collapsed" : "open",
+        className
+      )}
+      data-state={accordionState}
+      style={accordionStyle}
+    >
+      <button
+        type="button"
+        className="nav-sidebar-section-header"
+        aria-expanded={!collapsed}
+        aria-controls={bodyId}
+        onClick={() => setCollapsed((current) => !current)}
+        onWheel={handleHeaderWheel}
+      >
+        <span className="nav-sidebar-section-title-row">
+          <span className="nav-sidebar-section-icon" aria-hidden="true">
+            <NavSidebarSectionIcon title={title} />
+          </span>
+          <span className="ps-title">{title}</span>
+          {badge ? <span className="nav-sidebar-section-badge">{badge}</span> : null}
+        </span>
+        <span className="nav-sidebar-section-chevron" aria-hidden="true" />
+      </button>
+      <div id={bodyId} className="nav-sidebar-section-body" data-state={accordionState} aria-hidden={collapsed}>
+        <div ref={contentRef} className="nav-sidebar-section-content" data-state={accordionState}>
+          {children}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const [state, setState] = useState(service.getState());
@@ -370,6 +721,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <div className="action-grid">
             <button
               type="button"
+              className="button-primary button-tile"
               disabled={state.connecting}
               onClick={async () => {
                 try {
@@ -379,10 +731,15 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              {state.connecting ? "Connecting..." : "Connect"}
+              <ButtonFace
+                icon={<NavGlyph kind="connect" />}
+                label={state.connecting ? "Connecting" : "Connect"}
+                meta={state.connecting ? "Opening backend session" : "Open backend session"}
+              />
             </button>
             <button
               type="button"
+              className="button-secondary button-tile"
               onClick={async () => {
                 try {
                   await service.disconnect();
@@ -391,7 +748,7 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 }
               }}
             >
-              Disconnect
+              <ButtonFace icon={<NavGlyph kind="disconnect" />} label="Disconnect" meta="Close current session" />
             </button>
           </div>
           {state.lastError ? <p className="muted">Error: {state.lastError}</p> : null}
@@ -409,291 +766,459 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 
   return (
     <span className={`connection-footer-status-badge ${state.connected ? "connected" : "disconnected"}`}>
-      {state.connected ? "Conectado" : "Desconectado"}
+      <span className="connection-state-label">{state.connected ? "Conectado" : "Desconectado"}</span>
     </span>
   );
 }
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const navService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
+  const connService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const telemetryService = getTelemetryService(runtime);
-  const [state, setState] = useState<NavigationState>(service.getState());
+  const [navState, setNavState] = useState<NavigationState>(navService.getState());
+  const [connState, setConnState] = useState(connService.getState());
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
-  const selectedCount = state.selectedWaypointIndexes.length;
-  const lockReasonText = formatControlLockReason(state.controlLockReason);
-  const routeMission = state.routeMission;
-  const navigationStatus = buildNavigationStatus(state, telemetrySnapshot);
-
-  useEffect(() => service.subscribe((next) => setState(next)), [service]);
+  const wps = navState.waypoints.length;
+  const selectedCount = navState.selectedWaypointIndexes.length;
+  const lockReasonText = formatControlLockReason(navState.controlLockReason);
+  const routeMission = navState.routeMission;
+  const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
+  const routeMissionRunning = routeMission.active || routeMission.paused;
+  const goalRunning = missionActive && !routeMissionRunning;
+  const patrolling = navState.patrolLoop.active;
+  const goalModeSelected = navState.goalMode;
+  const manualModeSelected = navState.manualMode && !goalModeSelected;
+  const connectionStatusClassName = joinClassNames(
+    "status-pill",
+    "nav-sidebar-status-pill",
+    connState.connected && "ok",
+    connState.connecting && "pending",
+    Boolean(connState.lastError) && !connState.connected && !connState.connecting && "bad"
+  );
+  const connectionStatusText = connState.connected
+    ? "Link established"
+    : connState.connecting
+      ? "Establishing link..."
+      : connState.lastError
+        ? "Link error"
+        : "Esperando conexión";
+  useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
+  useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
   }, [telemetryService]);
 
   const emitInfo = (text: string): void => {
-    runtime.eventBus.emit("console.event", {
-      level: "info",
-      text,
-      timestamp: Date.now()
-    });
+    runtime.eventBus.emit("console.event", { level: "info", text, timestamp: Date.now() });
+  };
+  const emitError = (text: string): void => {
+    runtime.eventBus.emit("console.event", { level: "error", text, timestamp: Date.now() });
+  };
+  const enableMapWaypointPlacement = async (): Promise<void> => {
+    if (navState.controlLocked) {
+      emitError(`Waypoint placement blocked: ${lockReasonText}`);
+      return;
+    }
+    if (!goalModeSelected) {
+      try {
+        await navService.setGoalMode(true);
+      } catch (error) {
+        emitError(`Waypoint placement failed: ${String(error)}`);
+        return;
+      }
+    }
+    emitInfo("Waypoint placement enabled: click and drag on the map to place it");
   };
 
   return (
-    <div className="stack">
-      <PanelSection title="Navigation">
-        {state.controlLocked ? (
-          <div className="nav-legacy-grid nav-lock-grid">
-            <button
-              type="button"
-              className="nav-lock-btn"
-              title="Desbloquea el robot para permitir controlarlo"
-              onClick={async () => {
-                try {
-                  await service.unlockControls();
-                  emitInfo("Controls unlocked");
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Unlock failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-            >
-              <span className="nav-lock-btn-label">🔒 Desbloquear robot</span>
-            </button>
-          </div>
-        ) : (
-          <div className="nav-legacy-grid">
-            <button
-              type="button"
-              className={state.goalMode ? "active" : ""}
-              onClick={() => {
-                const enabled = service.toggleGoalMode();
-                emitInfo(enabled ? "Goal mode enabled" : "Goal mode disabled");
-              }}
-              title="Modo objetivo"
-            >
-              📌
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                service.removeLastWaypoint();
-                emitInfo("Last waypoint removed");
-              }}
-              disabled={state.waypoints.length === 0}
-              title="Deshacer"
-            >
-              ↩
-            </button>
-            <button
-              type="button"
-              className="danger-btn"
-              onClick={() => {
-                service.clearWaypoints();
-                emitInfo("Waypoints cleared");
-              }}
-              disabled={state.waypoints.length === 0}
-              title="Limpiar waypoints"
-            >
-              🗑
-            </button>
-            <button
-              type="button"
-              className="danger-btn"
-              onClick={() => {
-                const removed = service.removeSelectedWaypoints();
-                if (removed > 0) {
-                  emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
-                }
-              }}
-              disabled={selectedCount === 0}
-              title="Eliminar seleccionados"
-            >
-              🧹
-            </button>
-            <button
-              type="button"
-              className="nav-legacy-send-btn"
-              onClick={async () => {
-                try {
-                  const sent = await service.sendQueuedGoal();
-                  const sentCount = sent.sentCount;
-                  emitInfo(`Send navigation requested (${sentCount} waypoint${sentCount > 1 ? "s" : ""})`);
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Goal failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              disabled={state.waypoints.length === 0}
-            >
-              ➤ Send
-            </button>
-            <button
-              type="button"
-              className="nav-legacy-send-btn"
-              onClick={async () => {
-                try {
-                  const started = await service.sendRouteMission();
-                  emitInfo(
-                    `Route mission started (${started.inputCount} waypoint${started.inputCount > 1 ? "s" : ""}, ${started.expandedCount} route points)`
-                  );
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Route mission failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              disabled={state.waypoints.length === 0}
-            >
-              🛣 Route
-            </button>
-            <button
-              type="button"
-              className="danger-btn nav-legacy-cancel-btn"
-              onClick={async () => {
-                try {
-                  await service.cancelGoal();
-                  emitInfo("Navigation cancelled");
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Cancel failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-            >
-              ⊗ Cancel
-            </button>
-            <button
-              type="button"
-              className="danger-btn nav-legacy-cancel-btn"
-              onClick={async () => {
-                try {
-                  await service.cancelRouteMission();
-                  emitInfo("Route mission cancel requested");
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Cancel route failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              disabled={!routeMission.active && !routeMission.paused}
-            >
-              ⏹ Route
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const count = await service.saveWaypointsFile();
-                  emitInfo(`Saved ${count} waypoints`);
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Save waypoints failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              title="Guardar ruta"
-            >
-              💾
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const count = await service.loadWaypointsFile();
-                  emitInfo(`Loaded ${count} waypoints`);
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Load waypoints failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              title="Cargar ruta"
-            >
-              📂
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void runtime.commands.execute(NavigationCommands.openSnapshotModal);
-              }}
-              title="Snapshot"
-            >
-              📸
-            </button>
-            <button
-              type="button"
-              className={state.manualMode ? "active" : ""}
-              onClick={async () => {
-                const next = !state.manualMode;
-                try {
-                  await service.setManualMode(next);
-                  emitInfo(next ? "Manual control enabled" : "Manual control disabled");
-                } catch (error) {
-                  runtime.eventBus.emit("console.event", {
-                    level: "error",
-                    text: `Manual mode failed: ${String(error)}`,
-                    timestamp: Date.now()
-                  });
-                }
-              }}
-              title="Modo manual"
-            >
-              {state.manualMode ? "ON" : "OFF"}
-            </button>
-          </div>
-        )}
+    <div className="nav-sidebar">
+      <NavSidebarCollapsibleSection title="CONNECTION" className="nav-sidebar-connection-section">
+        <select
+          className="connection-preset-select"
+          value={connState.preset}
+          onChange={(event) => connService.setPreset(event.target.value === "sim" ? "sim" : "real")}
+        >
+          <option value="real">Real Robot</option>
+          <option value="sim">Simulation</option>
+        </select>
+        <div className="input-grid">
+          <input
+            value={connState.host}
+            onChange={(event) => connService.setHost(event.target.value)}
+            placeholder="Host address"
+          />
+          <input
+            value={connState.port}
+            onChange={(event) => connService.setPort(event.target.value)}
+            placeholder="Port"
+          />
+        </div>
+        <div className="action-grid">
+          <button
+            type="button"
+            className={joinClassNames("bt prim-btn", (connState.connected || connState.connecting) && "active")}
+            disabled={connState.connecting || connState.connected}
+            onClick={async () => {
+              try {
+                await connService.connect();
+              } catch {
+                // error persisted in connState.lastError
+              }
+            }}
+          >
+            <ButtonFace
+              icon={<NavGlyph kind="connect" />}
+              label={connState.connecting ? "CONNECTING" : "CONNECT"}
+              meta="Open backend session"
+            />
+          </button>
+          <button
+            type="button"
+            className="bt sec-btn"
+            disabled={!connState.connected && !connState.connecting}
+            onClick={async () => {
+              try {
+                await connService.disconnect();
+              } catch {
+                // error persisted in connState.lastError
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="disconnect" />} label="DISCONNECT" meta="Close session" />
+          </button>
+        </div>
+        <div className={connectionStatusClassName}>
+          <span className="status-dot" aria-hidden="true" />
+          <span>{connectionStatusText}</span>
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 2. CONTROL MODE ───────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="CONTROL MODE" className="nav-sidebar-control-section">
+        <div className="ncb-grid">
+          <button
+            type="button"
+            className={joinClassNames("ncb", goalModeSelected && "active")}
+            title={navState.controlLocked ? lockReasonText : "Goal mode"}
+            disabled={navState.controlLocked}
+            onClick={async () => {
+              const next = !goalModeSelected;
+              try {
+                await navService.setGoalMode(next);
+                emitInfo(next ? "Goal mode enabled" : "Goal mode disabled");
+              } catch (error) {
+                emitError(`Goal mode failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="goal" />} label="GOAL MODE" meta={goalModeSelected ? "Enabled" : "Standby"} compact />
+          </button>
+          <button
+            type="button"
+            className={joinClassNames("ncb", manualModeSelected && "active")}
+            title={navState.controlLocked ? lockReasonText : "Manual mode"}
+            disabled={navState.controlLocked}
+            onClick={async () => {
+              const next = !navState.manualMode;
+              try {
+                await navService.setManualMode(next);
+                emitInfo(next ? "Manual mode enabled" : "Manual mode disabled");
+              } catch (error) {
+                emitError(`Manual mode failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Enabled" : "Disabled"} compact />
+          </button>
+        </div>
         <label className="check-row nav-loop-check">
           <input
             type="checkbox"
-            checked={state.loopRoute}
-            onChange={(event) => service.setLoopRoute(event.target.checked)}
+            checked={navState.loopRoute}
+            onChange={(event) => navService.setLoopRoute(event.target.checked)}
           />
           Loop route
         </label>
-        <div className={`nav-mission-status tone-${navigationStatus.tone}`}>
-          <div className="nav-mission-status-main">
-            <span className="nav-mission-dot" />
-            <div className="nav-mission-copy">
-              <strong>{navigationStatus.title}</strong>
-              <span>{navigationStatus.detail}</span>
-            </div>
-          </div>
-          {navigationStatus.showProgress ? (
-            <div className="nav-route-progress" aria-label="Route progress">
-              <span style={{ width: `${navigationStatus.progressPct}%` }} />
-            </div>
-          ) : null}
-          {navigationStatus.routeMetaText || navigationStatus.segmentText ? (
-            <div className="nav-route-meta">
-              {navigationStatus.routeMetaText ? <span>{navigationStatus.routeMetaText}</span> : null}
-              {navigationStatus.segmentText ? <span>{navigationStatus.segmentText}</span> : null}
-            </div>
-          ) : null}
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 3. WAYPOINTS ──────────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection
+        title="WAYPOINTS"
+        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
+        className="nav-sidebar-compact-section nav-sidebar-waypoints-section"
+      >
+        <div className="ncb-3-grid nav-sidebar-compact-grid">
+          <button
+            type="button"
+            className="ncb sec-btn"
+            disabled={wps === 0}
+            title="Deshacer último waypoint"
+            onClick={() => {
+              navService.removeLastWaypoint();
+              emitInfo("Last waypoint removed");
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Last waypoint" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb danger-btn"
+            disabled={wps === 0}
+            title="Limpiar todos los waypoints"
+            onClick={() => {
+              navService.clearWaypoints();
+              emitInfo("Waypoints cleared");
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb danger-btn"
+            disabled={selectedCount === 0}
+            title={`${selectedCount} waypoints seleccionados`}
+            onClick={() => {
+              const removed = navService.removeSelectedWaypoints();
+              if (removed > 0) emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
+          </button>
         </div>
-        {state.controlLocked ? <p className="muted nav-legacy-text">{lockReasonText}</p> : null}
-      </PanelSection>
-      <ManualControlSidebarPanel runtime={runtime} />
+        <button
+          type="button"
+          className={joinClassNames("ncb-wide prim-btn", wps > 0 && "active")}
+          disabled={navState.controlLocked}
+          title={navState.controlLocked ? lockReasonText : "Activar colocación de waypoint en el mapa"}
+          onClick={() => {
+            void enableMapWaypointPlacement();
+          }}
+        >
+          <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="ADD WAYPOINT" meta={goalModeSelected ? "Click map to place" : "Place on map"} />
+        </button>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 4. DISPATCH ───────────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="NAVIGATION ACTIONS" className="nav-sidebar-actions-section" defaultCollapsed={false}>
+        <button
+          type="button"
+          className={joinClassNames("ncb-wide send-btn", goalRunning && "active")}
+          disabled={wps === 0}
+          onClick={async () => {
+            try {
+              const sent = await navService.sendQueuedGoal();
+              emitInfo(`Goal dispatch sent (${sent.sentCount} waypoint${sent.sentCount > 1 ? "s" : ""})`);
+            } catch (error) {
+              emitError(`Goal failed: ${String(error)}`);
+            }
+          }}
+        >
+          <ButtonFace icon={<NavGlyph kind="dispatch" />} label="DISPATCH GOAL" meta={`${wps} waypoints queued`} />
+        </button>
+        <button
+          type="button"
+          className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
+          disabled={wps < 2}
+          onClick={async () => {
+            try {
+              const started = await navService.sendRouteMission();
+              emitInfo(`Route mission started (${started.inputCount} wps, ${started.expandedCount} pts)`);
+            } catch (error) {
+              emitError(`Route mission failed: ${String(error)}`);
+            }
+          }}
+        >
+          <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={wps < 2 ? "Needs 2+ waypoints" : "Expanded route mission"} />
+        </button>
+        <button
+          type="button"
+          className="ncb-wide cancel-btn"
+          disabled={!missionActive}
+          onClick={async () => {
+            try {
+              if (routeMission.active || routeMission.paused) {
+                await navService.cancelRouteMission();
+                emitInfo("Route mission cancelled");
+              } else {
+                await navService.cancelGoal();
+                emitInfo("Goal cancelled");
+              }
+            } catch (error) {
+              emitError(`Cancel failed: ${String(error)}`);
+            }
+          }}
+        >
+          <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL" meta="Stop active navigation" />
+        </button>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 5. FILE ───────────────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection
+        title="FILE OPERATIONS"
+        className="nav-sidebar-compact-section nav-sidebar-file-section"
+        defaultCollapsed
+      >
+        <div className="ncb-3-grid nav-sidebar-compact-grid">
+          <button
+            type="button"
+            className="ncb sec-btn"
+            title="Guardar ruta"
+            onClick={async () => {
+              try {
+                const count = await navService.saveWaypointsFile();
+                emitInfo(`Saved ${count} waypoints`);
+              } catch (error) {
+                emitError(`Save waypoints failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="save" />} label="SAVE" meta="Persist waypoints" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb sec-btn"
+            title="Cargar ruta"
+            onClick={async () => {
+              try {
+                const count = await navService.loadWaypointsFile();
+                emitInfo(`Loaded ${count} waypoints`);
+              } catch (error) {
+                emitError(`Load waypoints failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="load" />} label="LOAD" meta="Restore saved" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb sec-btn"
+            title="Snapshot"
+            onClick={() => {
+              void runtime.commands.execute(NavigationCommands.openSnapshotModal);
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="snapshot" />} label="SNAPSHOT" meta="Capture state" compact />
+          </button>
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 6. RECORDING ──────────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="RECORDING" className="nav-sidebar-recording-section">
+        <div className={joinClassNames("recording-indicator", navState.recording.active && "active")}>
+          <span className="recording-dot" aria-hidden="true" />
+          <span className="recording-text">{formatRecordingSummary(navState)}</span>
+        </div>
+        <div className="ncb-3-grid">
+          <button
+            type="button"
+            className={joinClassNames("ncb sec-btn", navState.recording.active && "active")}
+            disabled={!connState.connected || navState.recording.active}
+            title={
+              !connState.connected
+                ? "Conectá WebSocket antes de grabar"
+                : navState.recording.active
+                  ? "Grabación en curso"
+                  : "Iniciar grabación"
+            }
+            onClick={async () => {
+              try {
+                await navService.startRecording();
+                emitInfo("Waypoint recording started");
+              } catch (error) {
+                emitError(`Start recording failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="recordStart" />} label="START" meta="Sample" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb danger-btn"
+            disabled={!connState.connected || !navState.recording.active}
+            title={!connState.connected ? "Conectá WebSocket para detener" : "Detener y guardar"}
+            onClick={async () => {
+              try {
+                await navService.stopRecording();
+                emitInfo("Waypoint recording stopped");
+              } catch (error) {
+                emitError(`Stop recording failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="recordStop" />} label="STOP" meta="Save" compact />
+          </button>
+          <button
+            type="button"
+            className="ncb sec-btn"
+            disabled={!connState.connected || navState.recording.active}
+            title={
+              !connState.connected
+                ? "Conectá WebSocket para limpiar"
+                : navState.recording.active
+                  ? "Detené la grabación antes de limpiar"
+                  : "Limpiar sesión grabada"
+            }
+            onClick={async () => {
+              try {
+                await navService.clearRecording();
+                emitInfo("Waypoint recording cleared");
+              } catch (error) {
+                emitError(`Clear recording failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="recordClear" />} label="CLEAR" meta="Reset" compact />
+          </button>
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 7. PATROL ─────────────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="PATROL" className="nav-sidebar-patrol-section">
+        <div className={`status-pill nav-route-status ${patrolling ? "ok" : ""}`.trim()}>
+          {formatPatrolSummary(navState)}
+        </div>
+        <div className="ncb-grid">
+          <button
+            type="button"
+            className={joinClassNames("ncb send-btn", patrolling && "active")}
+            disabled={wps === 0 || patrolling}
+            title="Iniciar patrulla"
+            onClick={async () => {
+              try {
+                await navService.startPatrol();
+                emitInfo("Loop patrol started");
+              } catch (error) {
+                emitError(`Start patrol failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="patrolStart" />} label="START" meta="Loop route" />
+          </button>
+          <button
+            type="button"
+            className="ncb cancel-btn"
+            disabled={!patrolling}
+            title="Detener patrulla"
+            onClick={async () => {
+              try {
+                await navService.stopPatrol();
+                emitInfo("Loop patrol stopped");
+              } catch (error) {
+                emitError(`Stop patrol failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="patrolStop" />} label="STOP" meta="Hold patrol" />
+          </button>
+        </div>
+      </NavSidebarCollapsibleSection>
+
       <DatumSidebarSection runtime={runtime} />
-      <ZonesSidebarSection runtime={runtime} />
-      <CameraSidebarPanel runtime={runtime} />
+
+      {/* Speed limits + Zones (existing sub-components) */}
     </div>
   );
 }
@@ -724,7 +1249,7 @@ function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX
             type="range"
             min={state.manualSteeringAngleMinDeg}
             max={state.manualSteeringAngleMaxDeg}
-            step={0.5}
+            step={0.1}
             value={state.manualSteeringAngleDeg}
             onChange={(event) => service.setManualSteeringAngleDeg(Number(event.target.value))}
           />
@@ -749,6 +1274,11 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
 
   useEffect(() => {
     if (!mapService) return;
+    return mapService.subscribeDatumProfiles((next) => setDatumProfiles(next));
+  }, [mapService]);
+
+  useEffect(() => {
+    if (!mapService) return;
     void mapService
       .getDatums()
       .then((next) => setDatumProfiles(next))
@@ -760,32 +1290,22 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
         });
       });
   }, [mapService, runtime.eventBus]);
-  useEffect(() => {
-    if (!mapService) return;
-    return mapService.subscribeDatumProfiles((next) => setDatumProfiles(next));
-  }, [mapService]);
 
   if (!mapService) return null;
 
   const emit = (level: "info" | "warn" | "error", text: string): void => {
-    runtime.eventBus.emit("console.event", {
-      level,
-      text,
-      timestamp: Date.now()
-    });
+    runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
   };
-
   const refreshDatums = async (): Promise<void> => {
     const next = await mapService.getDatums();
     setDatumProfiles(next);
   };
-
   const captureGpsDatum = (): void => {
     const yawDeg = Number(form.yawDeg);
     void mapService
       .captureCurrentGpsDatumOnBackend({
         name: form.name.trim() || `GPS ${new Date().toLocaleString()}`,
-        yawDeg: Number.isFinite(yawDeg) ? yawDeg : 0,
+        yawDeg: Number.isFinite(yawDeg) ? yawDeg : undefined,
         notes: form.notes,
         select: true
       })
@@ -795,7 +1315,6 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       })
       .catch((error) => emit("error", `Capture datum failed: ${String(error)}`));
   };
-
   const saveManualDatum = (): void => {
     const lat = Number(form.lat);
     const lon = Number(form.lon);
@@ -819,7 +1338,6 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       })
       .catch((error) => emit("error", `Save datum failed: ${String(error)}`));
   };
-
   const selectDatum = (id: string): void => {
     void mapService
       .selectDatumOnBackend(id)
@@ -829,91 +1347,103 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       })
       .catch((error) => emit("error", `Select datum failed: ${String(error)}`));
   };
+  const deleteDatum = (id: string): void => {
+    void mapService
+      .deleteDatumOnBackend(id)
+      .then((next) => {
+        setDatumProfiles(next);
+        emit("info", "Datum eliminado");
+      })
+      .catch((error) => emit("error", `Delete datum failed: ${String(error)}`));
+  };
 
   const runtimeDatum = datumProfiles?.runtime;
   const selected = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+  const statusText = datumProfiles?.pendingRestart ? "Pendiente de restart ROS" : "Aplicado";
+  const datums = datumProfiles?.datums ?? [];
 
   return (
-    <div className="stack">
-      <PanelCollapsibleSection title="Datums">
-        <div className="datum-sidebar-status">
-          <div>
-            <span>Runtime</span>
-            <strong>{formatDatumCoordinate(runtimeDatum?.lat)}, {formatDatumCoordinate(runtimeDatum?.lon)}</strong>
+    <NavSidebarCollapsibleSection
+      title="DATUM"
+      className="nav-sidebar-datum-section"
+      badge={<span className={joinClassNames("waypoint-badge", datums.length === 0 && "empty")}>{datums.length}</span>}
+    >
+      <div className="datum-sidebar-status">
+        <div>
+          <span>Runtime</span>
+          <strong>
+            {formatDatumCoordinate(runtimeDatum?.lat)}, {formatDatumCoordinate(runtimeDatum?.lon)}
+          </strong>
+        </div>
+        <div className={joinClassNames("datum-sidebar-badge", datumProfiles?.pendingRestart && "pending")}>
+          {statusText}
+        </div>
+        <p className="muted nav-legacy-text">Seleccionado: {selected?.name ?? "n/a"}</p>
+      </div>
+      <div className="datum-sidebar-form">
+        <input
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+          placeholder="Nombre"
+        />
+        <input
+          value={form.yawDeg}
+          onChange={(event) => setForm((current) => ({ ...current, yawDeg: event.target.value }))}
+          placeholder="Yaw deg"
+          inputMode="decimal"
+        />
+        <input
+          value={form.lat}
+          onChange={(event) => setForm((current) => ({ ...current, lat: event.target.value }))}
+          placeholder="Lat manual"
+          inputMode="decimal"
+        />
+        <input
+          value={form.lon}
+          onChange={(event) => setForm((current) => ({ ...current, lon: event.target.value }))}
+          placeholder="Lon manual"
+          inputMode="decimal"
+        />
+        <input
+          value={form.notes}
+          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          placeholder="Notas"
+        />
+      </div>
+      <div className="datum-sidebar-actions">
+        <button type="button" className="ncb sec-btn" onClick={captureGpsDatum}>
+          <ButtonFace icon="GPS" label="CAPTURE" meta="Use current fix" compact />
+        </button>
+        <button type="button" className="ncb send-btn" onClick={saveManualDatum}>
+          <ButtonFace icon="LAT" label="SAVE" meta="Manual datum" compact />
+        </button>
+        <button
+          type="button"
+          className="ncb sec-btn"
+          onClick={() => void refreshDatums().catch((error) => emit("warn", `Refresh datums failed: ${String(error)}`))}
+        >
+          <ButtonFace icon="↻" label="REFRESH" meta="Backend list" compact />
+        </button>
+      </div>
+      <div className="datum-sidebar-list">
+        {datums.map((entry) => (
+          <div key={entry.id} className={joinClassNames("datum-sidebar-row", entry.id === datumProfiles?.selectedId && "selected")}>
+            <button type="button" className="datum-sidebar-select" onClick={() => selectDatum(entry.id)} title="Seleccionar para proximo launch ROS">
+              {entry.id === datumProfiles?.selectedId ? "●" : "○"}
+            </button>
+            <span>
+              <strong>{entry.name}</strong>
+              <small>
+                {formatDatumCoordinate(entry.lat)}, {formatDatumCoordinate(entry.lon)} · yaw {entry.yawDeg.toFixed(1)}°
+              </small>
+            </span>
+            <button type="button" className="datum-sidebar-delete danger-btn" onClick={() => deleteDatum(entry.id)} title="Eliminar datum">
+              ×
+            </button>
           </div>
-          <div className={datumProfiles?.pendingRestart ? "datum-sidebar-badge pending" : "datum-sidebar-badge"}>
-            {datumProfiles?.pendingRestart ? "Pendiente de restart ROS" : "Aplicado"}
-          </div>
-          <p className="muted nav-legacy-text">
-            Seleccionado: {selected?.name ?? "n/a"}
-          </p>
-        </div>
-        <div className="datum-sidebar-form">
-          <input
-            value={form.name}
-            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Nombre"
-          />
-          <input
-            value={form.yawDeg}
-            onChange={(event) => setForm((current) => ({ ...current, yawDeg: event.target.value }))}
-            placeholder="Yaw deg"
-          />
-          <input
-            value={form.lat}
-            onChange={(event) => setForm((current) => ({ ...current, lat: event.target.value }))}
-            placeholder="Lat manual"
-          />
-          <input
-            value={form.lon}
-            onChange={(event) => setForm((current) => ({ ...current, lon: event.target.value }))}
-            placeholder="Lon manual"
-          />
-          <input
-            value={form.notes}
-            onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-            placeholder="Notas"
-          />
-        </div>
-        <div className="datum-sidebar-actions">
-          <button type="button" onClick={captureGpsDatum}>
-            Capturar GPS
-          </button>
-          <button type="button" onClick={saveManualDatum}>
-            Guardar manual
-          </button>
-          <button type="button" onClick={() => void refreshDatums().catch((error) => emit("warn", `Refresh datums failed: ${String(error)}`))}>
-            Refrescar
-          </button>
-        </div>
-        <div className="datum-sidebar-list">
-          {(datumProfiles?.datums ?? []).map((entry) => (
-            <div key={entry.id} className={entry.id === datumProfiles?.selectedId ? "datum-sidebar-row selected" : "datum-sidebar-row"}>
-              <button type="button" onClick={() => selectDatum(entry.id)} title="Seleccionar para proximo launch ROS">
-                {entry.id === datumProfiles?.selectedId ? "●" : "○"}
-              </button>
-              <span>
-                <strong>{entry.name}</strong>
-                <small>{formatDatumCoordinate(entry.lat)}, {formatDatumCoordinate(entry.lon)} · yaw {entry.yawDeg.toFixed(1)}°</small>
-              </span>
-              <button
-                type="button"
-                className="danger-btn"
-                onClick={() => {
-                  void mapService
-                    .deleteDatumOnBackend(entry.id)
-                    .then((next) => setDatumProfiles(next))
-                    .catch((error) => emit("error", `Delete datum failed: ${String(error)}`));
-                }}
-                title="Eliminar datum"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      </PanelCollapsibleSection>
-    </div>
+        ))}
+      </div>
+    </NavSidebarCollapsibleSection>
   );
 }
 
@@ -935,6 +1465,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
         <div className="zones-legacy-grid">
           <button
             type="button"
+            className="button-tile button-secondary"
             onClick={async () => {
               try {
                 await mapService.loadMap("map");
@@ -952,11 +1483,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Refresh
+            <ButtonFace icon="↻" label="Refresh" meta="Fetch latest zones" compact />
           </button>
           <button
             type="button"
-            className="danger-btn"
+            className="danger-btn button-tile"
             onClick={async () => {
               const ok = await dialogService.confirm({
                 title: "Clear zones",
@@ -974,10 +1505,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               });
             }}
           >
-            Clear
+            <ButtonFace icon="✕" label="Clear" meta="Remove all zones" compact />
           </button>
           <button
             type="button"
+            className="button-primary button-tile"
             onClick={async () => {
               try {
                 await mapService.pushZonesToBackend();
@@ -996,10 +1528,11 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Save
+            <ButtonFace icon="⬆" label="Save" meta="Push and persist" compact />
           </button>
           <button
             type="button"
+            className="button-secondary button-tile"
             onClick={async () => {
               try {
                 const count = mapService.loadZonesFromStorage();
@@ -1018,7 +1551,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            Load
+            <ButtonFace icon="⬇" label="Load" meta="Restore saved zones" compact />
           </button>
         </div>
         <label className="check-row">
@@ -1040,91 +1573,12 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
                   </div>
                 </div>
                 <button type="button" className="danger-btn" onClick={() => mapService.removeZone(zone.id)}>
-                  Remove
+                  <ButtonFace icon="−" label="Remove" meta="Delete zone" compact />
                 </button>
               </li>
             ))}
           </ul>
         )}
-      </PanelCollapsibleSection>
-    </div>
-  );
-}
-
-function CameraSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  let connectionService: ConnectionService | null = null;
-  try {
-    connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-  } catch {
-    connectionService = null;
-  }
-
-  const pan = async (angleDeg: number): Promise<void> => {
-    if (!connectionService?.isCameraEnabled()) {
-      runtime.eventBus.emit("console.event", {
-        level: "warn",
-        text: "Camera disabled in current preset",
-        timestamp: Date.now()
-      });
-      return;
-    }
-    try {
-      await service.panCamera(angleDeg);
-    } catch (error) {
-      runtime.eventBus.emit("console.event", {
-        level: "error",
-        text: `Camera pan failed: ${String(error)}`,
-        timestamp: Date.now()
-      });
-    }
-  };
-
-  return (
-    <div className="stack">
-      <PanelCollapsibleSection title="Camera PTZ">
-        <div className="ptz-grid">
-          <button type="button" onClick={() => void pan(45)}>
-            ⇖
-          </button>
-          <button type="button" onClick={() => void pan(0)}>
-            ⇑
-          </button>
-          <button type="button" onClick={() => void pan(-45)}>
-            ⇗
-          </button>
-          <button type="button" onClick={() => void pan(90)}>
-            ⇐
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await service.toggleCameraZoom();
-              } catch (error) {
-                runtime.eventBus.emit("console.event", {
-                  level: "error",
-                  text: `Camera zoom failed: ${String(error)}`,
-                  timestamp: Date.now()
-                });
-              }
-            }}
-          >
-            🔍
-          </button>
-          <button type="button" onClick={() => void pan(-90)}>
-            ⇒
-          </button>
-          <button type="button" onClick={() => void pan(135)}>
-            ⇙
-          </button>
-          <button type="button" onClick={() => void pan(180)}>
-            ⇓
-          </button>
-          <button type="button" onClick={() => void pan(-135)}>
-            ⇘
-          </button>
-        </div>
       </PanelCollapsibleSection>
     </div>
   );
@@ -1441,7 +1895,13 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           </div>
         </div>
       ) : null}
-      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "topics" ? (
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "topics" && !state.implemented.topics ? (
+        <div className="panel-card info-placeholder-card">
+          <strong>Topics</strong>
+          <p className="muted">Topic stream bridge not available in this backend.</p>
+        </div>
+      ) : null}
+      {!showDisconnected && (!state.loading[state.activeTab] || activePayload) && state.activeTab === "topics" && state.implemented.topics ? (
         <div className="stack info-modal-topics">
           {topicsSnapshotError ? <div className="status-pill bad">{topicsSnapshotError}</div> : null}
           {state.topics.truncated ? <div className="status-pill">Historial truncado por limites de memoria.</div> : null}
@@ -1637,17 +2097,24 @@ function registerDispatcher(ctx: ModuleContext): RobotDispatcher {
   return dispatcher;
 }
 
-function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): NavigationService {
+function registerServices(
+  ctx: ModuleContext,
+  dispatcher: RobotDispatcher
+): { navigationService: NavigationService; connectionService: ConnectionService } {
   const config = readNav2Config(ctx);
   const limits = parseManualSpeedLimits(config);
-  const defaultSteeringAngleDeg = parseDefaultSteeringAngleDeg(config, limits);
   const navigationService = new NavigationService(dispatcher, {
     linearMin: limits.linearMin,
     linearMax: limits.linearMax,
     steeringAngleMinDeg: limits.steeringAngleMinDeg,
     steeringAngleMaxDeg: limits.steeringAngleMaxDeg,
     linearSpeed: parseNumberInRange(config.manual_linear_speed_default, 1.2, limits.linearMin, limits.linearMax),
-    steeringAngleDeg: defaultSteeringAngleDeg,
+    steeringAngleDeg: parseNumberInRange(
+      config.manual_steering_angle_default_deg,
+      DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+      limits.steeringAngleMinDeg,
+      limits.steeringAngleMaxDeg
+    ),
     loopIntervalMs: parseLoopIntervalMs(config.manual_loop_interval_ms, 50)
   });
   ctx.services.registerService({
@@ -1666,12 +2133,20 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     id: CONNECTION_SERVICE_ID,
     service: connectionService
   });
+  connectionService.subscribe((state) => {
+    if (!state.connected) {
+      navigationService.applyLocalControlLock(true, "DISCONNECTED");
+      return;
+    }
+    if (state.preset === "sim") {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+    }
+  });
   ctx.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
     const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
     if (packageId !== "nav2") return;
     const nextConfig = (payload.config ?? {}) as Nav2RuntimeConfig;
     const nextLimits = parseManualSpeedLimits(nextConfig);
-    const nextDefaultSteeringAngleDeg = parseDefaultSteeringAngleDeg(nextConfig, nextLimits);
     connectionService.applyPresetDefaults(buildConnectionPresetDefaults(ctx, nextConfig));
     navigationService.applyRuntimeDefaults({
       linearMin: nextLimits.linearMin,
@@ -1679,7 +2154,12 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
       steeringAngleMinDeg: nextLimits.steeringAngleMinDeg,
       steeringAngleMaxDeg: nextLimits.steeringAngleMaxDeg,
       linearSpeed: parseNumberInRange(nextConfig.manual_linear_speed_default, 1.2, nextLimits.linearMin, nextLimits.linearMax),
-      steeringAngleDeg: nextDefaultSteeringAngleDeg,
+      steeringAngleDeg: parseNumberInRange(
+        nextConfig.manual_steering_angle_default_deg,
+        DEFAULT_MANUAL_STEERING_ANGLE_DEG,
+        nextLimits.steeringAngleMinDeg,
+        nextLimits.steeringAngleMaxDeg
+      ),
       loopIntervalMs: parseLoopIntervalMs(nextConfig.manual_loop_interval_ms, 50)
     });
   });
@@ -1690,17 +2170,10 @@ function registerServices(ctx: ModuleContext, dispatcher: RobotDispatcher): Navi
     service: sensorInfoService
   });
 
-  return navigationService;
+  return { navigationService, connectionService };
 }
 
 function registerSidebarPanels(ctx: ModuleContext): void {
-  ctx.contributions.register({
-    id: "sidebar.connection",
-    slot: "sidebar",
-    label: "Connection",
-    icon: "🔌",
-    render: () => <ConnectionSidebarPanel runtime={ctx} />
-  });
   ctx.contributions.register({
     id: "sidebar.navigation",
     slot: "sidebar",
@@ -1736,7 +2209,76 @@ function registerFooterItems(ctx: ModuleContext): void {
   });
 }
 
-function registerCommands(ctx: ModuleContext, navigationService: NavigationService): void {
+function registerCommands(
+  ctx: ModuleContext,
+  navigationService: NavigationService,
+  connectionService: ConnectionService
+): void {
+  ctx.commands.register(
+    { id: NavigationCommands.connectionConnect, title: "Connection Connect", category: "Navigation" },
+    () => {
+      void connectionService.connect().catch((error: unknown) => {
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: `Connection command failed: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.connectionDisconnect, title: "Connection Disconnect", category: "Navigation" },
+    () => {
+      void connectionService.disconnect().catch((error: unknown) => {
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: `Disconnect command failed: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.connectionSetPreset, title: "Connection Set Preset", category: "Navigation" },
+    (preset?: unknown) => {
+      connectionService.setPreset(preset === "sim" ? "sim" : "real");
+      const state = connectionService.getState();
+      ctx.eventBus.emit("console.event", {
+        level: "info",
+        text: `Connection preset set to ${state.preset}`,
+        timestamp: Date.now()
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.connectionSetHost, title: "Connection Set Host", category: "Navigation" },
+    (host?: unknown) => {
+      if (typeof host !== "string" || host.trim().length === 0) return;
+      connectionService.setHost(host.trim());
+      ctx.eventBus.emit("console.event", {
+        level: "info",
+        text: `Connection host set to ${host.trim()}`,
+        timestamp: Date.now()
+      });
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.connectionSetPort, title: "Connection Set Port", category: "Navigation" },
+    (port?: unknown) => {
+      if (typeof port !== "string" || port.trim().length === 0) return;
+      connectionService.setPort(port.trim());
+      ctx.eventBus.emit("console.event", {
+        level: "info",
+        text: `Connection port set to ${port.trim()}`,
+        timestamp: Date.now()
+      });
+    }
+  );
+
   ctx.commands.register(
     { id: NavigationCommands.openSnapshotModal, title: "Open Snapshot Modal", category: "Navigation" },
     () => {
@@ -1897,10 +2439,10 @@ function registerCommands(ctx: ModuleContext, navigationService: NavigationServi
   ctx.keybindings.register({ key: "s:up", commandId: NavigationCommands.manualKeySUp, source: "default" });
   ctx.keybindings.register({ key: "d:up", commandId: NavigationCommands.manualKeyDUp, source: "default" });
   ctx.keybindings.register({ key: "space:up", commandId: NavigationCommands.manualBrakeUp, source: "default" });
-  ctx.keybindings.register({ key: "up", commandId: NavigationCommands.panCameraUp, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "down", commandId: NavigationCommands.panCameraDown, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "left", commandId: NavigationCommands.panCameraLeft, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "right", commandId: NavigationCommands.panCameraRight, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+up", commandId: NavigationCommands.panCameraUp, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+down", commandId: NavigationCommands.panCameraDown, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+left", commandId: NavigationCommands.panCameraLeft, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "shift+right", commandId: NavigationCommands.panCameraRight, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "escape", commandId: NavigationCommands.dismissEscape, source: "default", when: "!modalOpen", weight: -1 });
 }
 
@@ -1912,8 +2454,8 @@ export function createNavigationModule(): CockpitModule {
     register(ctx: ModuleContext): void {
       registerTransport(ctx);
       const dispatcher = registerDispatcher(ctx);
-      const navigationService = registerServices(ctx, dispatcher);
-      registerCommands(ctx, navigationService);
+      const { navigationService, connectionService } = registerServices(ctx, dispatcher);
+      registerCommands(ctx, navigationService, connectionService);
       registerSidebarPanels(ctx);
       registerModals(ctx);
       registerFooterItems(ctx);

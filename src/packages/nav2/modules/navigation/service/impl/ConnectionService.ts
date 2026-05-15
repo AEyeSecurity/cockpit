@@ -18,7 +18,7 @@ export interface ConnectionState {
 
 type ConnectionListener = (state: ConnectionState) => void;
 
-const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v1";
+const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v2";
 
 export interface ConnectionPresetDefaults {
   real: { host: string; port: string };
@@ -68,7 +68,7 @@ export class ConnectionService {
     private readonly eventBus: EventBus,
     presetDefaults?: ConnectionPresetDefaults
   ) {
-    const wsRealHost = env.wsRealHost ?? "100.111.4.7";
+    const wsRealHost = env.wsRealHost ?? "localhost";
     const wsSimHost = env.wsSimHost ?? "localhost";
     const wsDefaultPort = env.wsDefaultPort ?? "8766";
     const parsed = parseWsUrl(env.wsUrl, wsRealHost, wsDefaultPort);

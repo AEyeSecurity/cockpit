@@ -12,8 +12,8 @@ function joinClassNames(...values: Array<string | undefined | false>): string {
 
 export function PanelSection({ title, className, children }: PanelSectionProps): JSX.Element {
   return (
-    <section className={joinClassNames("panel-card", "panel-section", className)}>
-      {title ? <h4 className="panel-section-title">{title}</h4> : null}
+    <section className={joinClassNames("panel-card", "panel-section", "ps", className)}>
+      {title ? <h4 className="panel-section-title ps-title">{title}</h4> : null}
       <div className="panel-section-body">{children}</div>
     </section>
   );

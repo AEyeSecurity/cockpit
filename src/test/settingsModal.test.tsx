@@ -109,14 +109,15 @@ function createRuntime(): AppRuntime {
 }
 
 describe("settings modal", () => {
-  it("opens from direct toolbar action and renders tabs", async () => {
+  it("opens from sidebar panel action and renders tabs", async () => {
     const runtime = createRuntime();
     render(<AppShell runtime={runtime} />);
 
-    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Configuración" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
     expect(await screen.findByLabelText("Notifications Enabled")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Global" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "nav2" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Global" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "NAV2" })).toBeInTheDocument();
   });
 
   it("validates typed values and blocks save on invalid number", async () => {
@@ -124,8 +125,9 @@ describe("settings modal", () => {
     const setConfigSpy = vi.spyOn(runtime, "setPackageConfig");
     render(<AppShell runtime={runtime} />);
 
-    fireEvent.click(screen.getByText("Settings"));
-    fireEvent.click(screen.getByRole("button", { name: "nav2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configuración" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "NAV2" }));
 
     const fontsizeInput = screen.getByLabelText("Font Size");
     fireEvent.change(fontsizeInput, { target: { value: "bad-number" } });
@@ -144,7 +146,8 @@ describe("settings modal", () => {
     const setConfigSpy = vi.spyOn(runtime, "setPackageConfig");
     render(<AppShell runtime={runtime} />);
 
-    fireEvent.click(screen.getByText("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Configuración" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
     const enabledInput = await screen.findByLabelText("Notifications Enabled");
     fireEvent.click(enabledInput);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

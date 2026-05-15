@@ -11,14 +11,97 @@ import type { AppRuntime } from "../core/types/module";
 import { DIALOG_SERVICE_ID, type DialogService } from "../packages/core/modules/runtime/service/impl/DialogService";
 import { SYSTEM_NOTIFICATION_SERVICE_ID, type SystemNotificationService } from "../packages/core/modules/runtime/service/impl/SystemNotificationService";
 import { UiZoomController } from "./zoomController";
+import { emitConsoleEvent, emitProjection, emitSidebarSnapshot, isHostBridgeAvailable } from "../platform/host/bridge";
 
 interface AppShellProps {
   runtime: AppRuntime;
+  layoutMode?: "default" | "vscode";
 }
 
 interface ConnectionServiceLike {
-  getState(): { connected: boolean; lastError: string };
-  subscribe(listener: (state: { connected: boolean; lastError: string }) => void): () => void;
+  getState(): SidebarConnectionState;
+  subscribe(listener: (state: SidebarConnectionState) => void): () => void;
+}
+
+interface SidebarConnectionState {
+  connected: boolean;
+  connecting?: boolean;
+  preset?: string;
+  host?: string;
+  port?: string;
+  lastError?: string;
+}
+
+interface NavigationServiceLike {
+  getState(): {
+    goalMode: boolean;
+    manualMode: boolean;
+    controlLocked: boolean;
+    controlLockReason?: string;
+    selectedWaypointIndexes: number[];
+    cameraStreamConnected?: boolean;
+  };
+  subscribe(listener: (state: ReturnType<NavigationServiceLike["getState"]>) => void): () => void;
+}
+
+interface SensorInfoServiceLike {
+  getState(): {
+    payloads?: {
+      general?: {
+        snapshot?: {
+          datum?: { already_set?: boolean };
+          rtk_source_state?: { connected?: boolean };
+        };
+      };
+      pixhawk_gps?: {
+        snapshot?: {
+          diagnostics?: {
+            yaw_delta_deg?: number;
+          };
+        };
+      };
+    };
+  };
+  subscribe(listener: (state: ReturnType<SensorInfoServiceLike["getState"]>) => void): () => void;
+}
+
+interface TelemetryServiceLike {
+  getSnapshot(): {
+    recentEvents: Array<unknown>;
+    alerts: Array<unknown>;
+  };
+  subscribeTelemetry(listener: (snapshot: ReturnType<TelemetryServiceLike["getSnapshot"]>) => void): () => void;
+}
+
+type ShellStatusTone = "ok" | "warn" | "bad" | "neutral";
+
+interface ShellStatusItem {
+  id: string;
+  label: string;
+  value: string;
+  detail?: string;
+  tone: ShellStatusTone;
+}
+
+interface ShellTelemetryState {
+  alerts: number;
+  recentEvents: number;
+  datumSet: boolean;
+  rtkConnected: boolean;
+}
+
+interface HostCommandMessage {
+  type: "cockpit.host.command";
+  commandId?: string;
+  args?: unknown[];
+  activateWorkspaceId?: string;
+  activateConsoleId?: string;
+  openModalId?: string;
+}
+
+function isHostCommandMessage(payload: unknown): payload is HostCommandMessage {
+  if (!payload || typeof payload !== "object") return false;
+  return (payload as { type?: unknown }).type === "cockpit.host.command";
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -28,9 +111,49 @@ function isEditingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-const CONNECTION_SERVICE_ID = "service.connection";
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
 
-export function AppShell({ runtime }: AppShellProps): JSX.Element {
+const CONNECTION_SERVICE_ID = "service.connection";
+const NAVIGATION_SERVICE_ID = "service.navigation";
+const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
+const TELEMETRY_SERVICE_ID = "service.telemetry";
+const SIDEBAR_RAIL_WIDTH = 46;
+const SPLITTER_THICKNESS = 4;
+const SHELL_BODY_GAP = 6;
+
+function routeStatusLabel(state: ReturnType<NavigationServiceLike["getState"]> | null): string {
+  if (!state) return "No data";
+  if (state.manualMode) return "Manual";
+  if (state.goalMode) return "Goal";
+  if (state.selectedWaypointIndexes.length > 0) return `${state.selectedWaypointIndexes.length} selected`;
+  return "Standby";
+}
+
+function routeStatusTone(state: ReturnType<NavigationServiceLike["getState"]> | null): ShellStatusTone {
+  if (!state) return "neutral";
+  if (state.controlLocked) return "bad";
+  if (state.manualMode) return "warn";
+  if (state.goalMode || state.selectedWaypointIndexes.length > 0) return "ok";
+  return "neutral";
+}
+
+function connectionDetail(state: SidebarConnectionState | null): string {
+  if (!state) return "Service unavailable";
+  const endpoint = [state.host, state.port].filter(Boolean).join(":");
+  if (state.connecting) return endpoint ? `Dialing ${endpoint}` : "Opening session";
+  if (state.connected) {
+    const preset = state.preset ? state.preset.toUpperCase() : "LIVE";
+    return endpoint ? `${preset} · ${endpoint}` : preset;
+  }
+  if (state.lastError?.trim()) return endpoint ? `Fault · ${endpoint}` : "Fault reported";
+  return endpoint ? `Idle · ${endpoint}` : "Idle";
+}
+
+export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JSX.Element {
+  const usingVscodeLayout = layoutMode === "vscode";
   const toolbarMenus = useSlot(runtime.contributions, "toolbar");
   const sidebarPanels = useSlot(runtime.contributions, "sidebar");
   const workspaceViews = useSlot(runtime.contributions, "workspace");
@@ -45,8 +168,16 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [consoleHeight, setConsoleHeight] = useState(220);
+  const [consoleHeight, setConsoleHeight] = useState(360);
   const [zoomController] = useState(() => new UiZoomController());
+  const [shellConnectionState, setShellConnectionState] = useState<SidebarConnectionState | null>(null);
+  const [shellNavigationState, setShellNavigationState] = useState<ReturnType<NavigationServiceLike["getState"]> | null>(null);
+  const [shellTelemetryState, setShellTelemetryState] = useState<ShellTelemetryState>({
+    alerts: 0,
+    recentEvents: 0,
+    datumSet: false,
+    rtkConnected: false
+  });
 
   const resolveModalId = (modalId: string): string => {
     if (modalDialogs.some((dialog) => dialog.id === modalId)) return modalId;
@@ -57,8 +188,14 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
 
   useEffect(() => {
     const disposables = registerShellCommands(runtime, {
-      toggleSidebar: () => setSidebarCollapsed((prev) => !prev),
-      toggleConsole: () => setConsoleCollapsed((prev) => !prev),
+      toggleSidebar: () => {
+        if (usingVscodeLayout) return;
+        setSidebarCollapsed((prev) => !prev);
+      },
+      toggleConsole: () => {
+        if (usingVscodeLayout) return;
+        setConsoleCollapsed((prev) => !prev);
+      },
       openModal: (modalId: string) => setActiveModalId(resolveModalId(modalId)),
       closeModal: () => setActiveModalId(null),
       getActiveModalId: () => activeModalId,
@@ -73,7 +210,318 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
       }
     });
     return () => disposables.forEach((d) => d.dispose());
-  }, [runtime, activeModalId, modalDialogs, zoomController]);
+  }, [runtime, activeModalId, modalDialogs, zoomController, usingVscodeLayout]);
+
+  useEffect(() => {
+    emitProjection(
+      "toolbar",
+      toolbarMenus.map((menu) => ({
+        id: menu.id,
+        label: menu.label,
+        commandId: menu.commandId,
+        order: menu.order,
+        items: menu.items?.map((item) => ({
+          id: item.id,
+          label: item.label,
+          commandId: item.commandId
+        }))
+      }))
+    );
+  }, [toolbarMenus]);
+
+  useEffect(() => {
+    emitProjection(
+      "footer",
+      footerItems.map((item) => ({
+        id: item.id,
+        align: item.align,
+        beforeId: item.beforeId,
+        order: item.order,
+        statusBarPriority: item.statusBarPriority
+      }))
+    );
+  }, [footerItems]);
+
+  useEffect(() => {
+    let connectionService: ConnectionServiceLike | null = null;
+    let navigationService: NavigationServiceLike | null = null;
+    let sensorInfoService: SensorInfoServiceLike | null = null;
+    let telemetryService: TelemetryServiceLike | null = null;
+
+    try {
+      connectionService = runtime.getService<ConnectionServiceLike>(CONNECTION_SERVICE_ID);
+    } catch {
+      connectionService = null;
+    }
+
+    try {
+      navigationService = runtime.getService<NavigationServiceLike>(NAVIGATION_SERVICE_ID);
+    } catch {
+      navigationService = null;
+    }
+
+    try {
+      sensorInfoService = runtime.getService<SensorInfoServiceLike>(SENSOR_INFO_SERVICE_ID);
+    } catch {
+      sensorInfoService = null;
+    }
+
+    try {
+      telemetryService = runtime.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
+    } catch {
+      telemetryService = null;
+    }
+
+    const publishTelemetry = (): void => {
+      const sensorState = sensorInfoService?.getState();
+      const payloads = asRecord(sensorState?.payloads ?? null);
+      const generalSnapshot = asRecord(asRecord(payloads?.general)?.snapshot);
+      const datum = asRecord(generalSnapshot?.datum);
+      const rtkSource = asRecord(generalSnapshot?.rtk_source_state);
+      const telemetrySnapshot = telemetryService?.getSnapshot();
+
+      setShellTelemetryState({
+        alerts: Array.isArray(telemetrySnapshot?.alerts) ? telemetrySnapshot.alerts.length : 0,
+        recentEvents: Array.isArray(telemetrySnapshot?.recentEvents) ? telemetrySnapshot.recentEvents.length : 0,
+        datumSet: datum?.already_set === true,
+        rtkConnected: rtkSource?.connected === true
+      });
+    };
+
+    const unsubscribers: Array<() => void> = [];
+
+    if (connectionService) {
+      setShellConnectionState(connectionService.getState());
+      unsubscribers.push(connectionService.subscribe((state) => setShellConnectionState(state)));
+    } else {
+      setShellConnectionState(null);
+    }
+
+    if (navigationService) {
+      setShellNavigationState(navigationService.getState());
+      unsubscribers.push(navigationService.subscribe((state) => setShellNavigationState(state)));
+    } else {
+      setShellNavigationState(null);
+    }
+
+    publishTelemetry();
+
+    if (sensorInfoService) {
+      unsubscribers.push(
+        sensorInfoService.subscribe(() => {
+          publishTelemetry();
+        })
+      );
+    }
+
+    if (telemetryService) {
+      unsubscribers.push(
+        telemetryService.subscribeTelemetry(() => {
+          publishTelemetry();
+        })
+      );
+    }
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [runtime]);
+
+  const shellStatusItems = useMemo<ShellStatusItem[]>(
+    () => [
+      {
+        id: "link",
+        label: "Link",
+        value:
+          shellConnectionState?.connecting ? "Connecting" :
+          shellConnectionState?.connected ? [shellConnectionState.host, shellConnectionState.port].filter(Boolean).join(":") || "Online" :
+          "Disconnected",
+        detail: connectionDetail(shellConnectionState),
+        tone:
+          shellConnectionState?.connecting ? "warn" :
+          shellConnectionState?.connected ? "ok" :
+          "bad"
+      },
+      {
+        id: "route",
+        label: "Route",
+        value: routeStatusLabel(shellNavigationState),
+        detail:
+          shellNavigationState?.controlLocked ?
+            shellNavigationState.controlLockReason || "Operator lock engaged" :
+          shellNavigationState?.cameraStreamConnected ?
+            "Camera feed synchronized" :
+            "No live route activity",
+        tone: routeStatusTone(shellNavigationState)
+      },
+      {
+        id: "camera",
+        label: "Camera",
+        value: shellNavigationState?.cameraStreamConnected ? "Live" : "Idle",
+        detail:
+          shellTelemetryState.datumSet ?
+            shellTelemetryState.rtkConnected ? "Datum set · RTK linked" : "Datum set · RTK idle" :
+            "Datum pending",
+        tone:
+          shellNavigationState?.cameraStreamConnected ? "ok" :
+          shellTelemetryState.datumSet ? "neutral" :
+          "warn"
+      },
+      {
+        id: "alerts",
+        label: "Alerts",
+        value: shellTelemetryState.alerts > 0 ? String(shellTelemetryState.alerts) : "Clear",
+        detail: `${shellTelemetryState.recentEvents} recent events`,
+        tone:
+          shellTelemetryState.alerts > 0 ? "bad" :
+          shellTelemetryState.recentEvents > 0 ? "neutral" :
+          "ok"
+      }
+    ],
+    [shellConnectionState, shellNavigationState, shellTelemetryState]
+  );
+
+  useEffect(() => {
+    if (!usingVscodeLayout || !isHostBridgeAvailable()) return;
+
+    let connectionService: ConnectionServiceLike | null = null;
+    let navigationService: NavigationServiceLike | null = null;
+    let sensorInfoService: SensorInfoServiceLike | null = null;
+    let telemetryService: TelemetryServiceLike | null = null;
+
+    try {
+      connectionService = runtime.getService<ConnectionServiceLike>(CONNECTION_SERVICE_ID);
+    } catch {
+      connectionService = null;
+    }
+
+    try {
+      navigationService = runtime.getService<NavigationServiceLike>(NAVIGATION_SERVICE_ID);
+    } catch {
+      navigationService = null;
+    }
+
+    try {
+      sensorInfoService = runtime.getService<SensorInfoServiceLike>(SENSOR_INFO_SERVICE_ID);
+    } catch {
+      sensorInfoService = null;
+    }
+
+    try {
+      telemetryService = runtime.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
+    } catch {
+      telemetryService = null;
+    }
+
+    const publishConnection = (state: SidebarConnectionState): void => {
+      const host = String(state.host ?? "").trim();
+      const port = String(state.port ?? "").trim();
+      emitSidebarSnapshot("connection", {
+        connected: state.connected === true,
+        connecting: state.connecting === true,
+        preset: typeof state.preset === "string" ? state.preset : "",
+        endpoint: host && port ? `${host}:${port}` : "",
+        host,
+        port,
+        lastError: typeof state.lastError === "string" ? state.lastError : ""
+      });
+    };
+
+    const publishNavigation = (state: ReturnType<NavigationServiceLike["getState"]>): void => {
+      emitSidebarSnapshot("navigation", {
+        goalMode: state.goalMode === true,
+        manualMode: state.manualMode === true,
+        controlLocked: state.controlLocked === true,
+        controlLockReason: typeof state.controlLockReason === "string" ? state.controlLockReason : "",
+        selectedWaypoints: Array.isArray(state.selectedWaypointIndexes) ? state.selectedWaypointIndexes.length : 0,
+        cameraConnected: state.cameraStreamConnected === true
+      });
+    };
+
+    const publishTelemetry = (): void => {
+      const sensorState = sensorInfoService?.getState();
+      const payloads = asRecord(sensorState?.payloads ?? null);
+      const generalSnapshot = asRecord(asRecord(payloads?.general)?.snapshot);
+      const pixhawkSnapshot = asRecord(asRecord(payloads?.pixhawk_gps)?.snapshot);
+      const datum = asRecord(generalSnapshot?.datum);
+      const rtkSource = asRecord(generalSnapshot?.rtk_source_state);
+      const diagnostics = asRecord(pixhawkSnapshot?.diagnostics);
+      const telemetrySnapshot = telemetryService?.getSnapshot();
+
+      const yawRaw = Number(diagnostics?.yaw_delta_deg);
+      emitSidebarSnapshot("telemetry", {
+        datumSet: datum?.already_set === true,
+        rtkConnected: rtkSource?.connected === true,
+        yawDeltaDeg: Number.isFinite(yawRaw) ? yawRaw : null,
+        recentEvents: Array.isArray(telemetrySnapshot?.recentEvents) ? telemetrySnapshot.recentEvents.length : 0,
+        alerts: Array.isArray(telemetrySnapshot?.alerts) ? telemetrySnapshot.alerts.length : 0
+      });
+    };
+
+    const unsubscribers: Array<() => void> = [];
+
+    if (connectionService) {
+      publishConnection(connectionService.getState() as SidebarConnectionState);
+      unsubscribers.push(connectionService.subscribe((state) => publishConnection(state as SidebarConnectionState)));
+    } else {
+      publishConnection({ connected: false, lastError: "Connection service unavailable" });
+    }
+
+    if (navigationService) {
+      publishNavigation(navigationService.getState());
+      unsubscribers.push(navigationService.subscribe((state) => publishNavigation(state)));
+    } else {
+      emitSidebarSnapshot("navigation", {
+        goalMode: false,
+        manualMode: false,
+        controlLocked: true,
+        controlLockReason: "Navigation service unavailable",
+        selectedWaypoints: 0,
+        cameraConnected: false
+      });
+    }
+
+    publishTelemetry();
+
+    if (sensorInfoService) {
+      unsubscribers.push(
+        sensorInfoService.subscribe(() => {
+          publishTelemetry();
+        })
+      );
+    }
+
+    if (telemetryService) {
+      unsubscribers.push(
+        telemetryService.subscribeTelemetry(() => {
+          publishTelemetry();
+        })
+      );
+    }
+
+    const stopConsoleEvents = runtime.eventBus.on<{
+      level?: unknown;
+      text?: unknown;
+      timestamp?: unknown;
+      source?: unknown;
+    }>("console.event", (event) => {
+      const text = String(event?.text ?? "").trim();
+      if (!text) return;
+      const level = String(event?.level ?? "info").toLowerCase();
+      const timestampRaw = Number(event?.timestamp ?? Date.now());
+      emitConsoleEvent({
+        level,
+        text,
+        timestamp: Number.isFinite(timestampRaw) ? timestampRaw : Date.now(),
+        source: typeof event?.source === "string" ? event.source : undefined
+      });
+    });
+
+    return () => {
+      stopConsoleEvents();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [runtime, usingVscodeLayout]);
 
   const keybindingContext = useMemo<KeybindingContext>(
     () => ({
@@ -140,12 +588,13 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     };
 
     const unsubscribeConnection = connectionService.subscribe((next) => {
-      const lostByTransition = connected && !next.connected && next.lastError.trim().length > 0;
+      const reason = String(next.lastError ?? "").trim();
+      const lostByTransition = connected && !next.connected && reason.length > 0;
       connected = next.connected;
       if (next.connected) {
         notifiedLoss = false;
       } else if (lostByTransition) {
-        notifyLostConnection(next.lastError);
+        notifyLostConnection(reason);
       }
     });
 
@@ -179,6 +628,34 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     };
   }, [runtime]);
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<unknown>): void => {
+      if (!isHostCommandMessage(event.data)) return;
+      const payload = event.data;
+
+      if (payload.activateWorkspaceId && workspaceViews.some((view) => view.id === payload.activateWorkspaceId)) {
+        setActiveWorkspaceId(payload.activateWorkspaceId);
+      }
+
+      if (payload.activateConsoleId && consoleTabs.some((tab) => tab.id === payload.activateConsoleId)) {
+        setActiveConsoleId(payload.activateConsoleId);
+      }
+
+      if (payload.openModalId) {
+        setActiveModalId(resolveModalId(payload.openModalId));
+      }
+
+      if (typeof payload.commandId === "string" && payload.commandId.trim().length > 0) {
+        void runtime.commands.execute(payload.commandId, ...(payload.args ?? []));
+      }
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+    };
+  }, [runtime, workspaceViews, consoleTabs, modalDialogs]);
+
   const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>): void => {
     if (sidebarCollapsed) return;
     event.preventDefault();
@@ -187,7 +664,13 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
     const shellBody = event.currentTarget.closest(".shell-body") as HTMLElement | null;
     const onMove = (moveEvent: MouseEvent): void => {
       const maxWidthByViewport = shellBody
-        ? Math.max(260, Math.floor(shellBody.getBoundingClientRect().width) - 52 - 4)
+        ? Math.max(
+            260,
+            Math.floor(shellBody.getBoundingClientRect().width) -
+              SIDEBAR_RAIL_WIDTH -
+              SPLITTER_THICKNESS -
+              SHELL_BODY_GAP * 3
+          )
         : Number.POSITIVE_INFINITY;
       const next = Math.max(260, Math.min(maxWidthByViewport, initial + (moveEvent.clientX - startX)));
       setSidebarWidth(next);
@@ -222,58 +705,67 @@ export function AppShell({ runtime }: AppShellProps): JSX.Element {
   };
 
   const shellBodyColumns = sidebarCollapsed
-    ? "52px minmax(0, 1fr)"
-    : `52px ${sidebarWidth}px 4px minmax(0, 1fr)`;
+    ? `${SIDEBAR_RAIL_WIDTH}px minmax(0, 1fr)`
+    : `${SIDEBAR_RAIL_WIDTH}px ${sidebarWidth}px ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
+  const shellColumns = usingVscodeLayout ? "minmax(0, 1fr)" : shellBodyColumns;
 
   return (
     <div className="shell">
       <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
-      <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
+      <ToolbarMenu runtime={runtime} menus={toolbarMenus} statusItems={shellStatusItems} />
       <div
         className="shell-body"
         style={{
-          gridTemplateColumns: shellBodyColumns
+          gap: SHELL_BODY_GAP,
+          gridTemplateColumns: shellColumns
         }}
       >
-        <Panel
-          panels={sidebarPanels}
-          activePanelId={activeSidebarId}
-          onSelectPanel={(id) => {
-            if (id === activeSidebarId) {
-              setSidebarCollapsed((prev) => !prev);
-              return;
-            }
-            setActiveSidebarId(id);
-            setSidebarCollapsed(false);
-          }}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-          width={sidebarWidth}
-          onResizeStart={startSidebarResize}
-        />
-        <WorkspacePanel views={workspaceViews} activeViewId={activeWorkspaceId} onSelectView={setActiveWorkspaceId}>
-          <div
-            className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
-            onMouseDown={startConsoleResize}
-            role="separator"
-            aria-orientation="horizontal"
-          />
-          <ConsolePanel
-            tabs={consoleTabs}
-            activeTabId={activeConsoleId}
-            onSelectTab={setActiveConsoleId}
-            collapsed={consoleCollapsed}
-            height={consoleCollapsed ? 36 : consoleHeight}
-          />
-        </WorkspacePanel>
+        {usingVscodeLayout ? (
+          <WorkspacePanel views={workspaceViews} activeViewId={activeWorkspaceId} onSelectView={setActiveWorkspaceId} />
+        ) : (
+          <>
+            <Panel
+              panels={sidebarPanels}
+              activePanelId={activeSidebarId}
+              onSelectPanel={(id) => {
+                if (id === activeSidebarId) {
+                  setSidebarCollapsed((prev) => !prev);
+                  return;
+                }
+                setActiveSidebarId(id);
+                setSidebarCollapsed(false);
+              }}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+              width={sidebarWidth}
+              onResizeStart={startSidebarResize}
+            />
+            <WorkspacePanel views={workspaceViews} activeViewId={activeWorkspaceId} onSelectView={setActiveWorkspaceId}>
+              <div
+                className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
+                onMouseDown={startConsoleResize}
+                role="separator"
+                aria-orientation="horizontal"
+              />
+              <ConsolePanel
+                tabs={consoleTabs}
+                activeTabId={activeConsoleId}
+                onSelectTab={setActiveConsoleId}
+                collapsed={consoleCollapsed}
+                height={consoleCollapsed ? 36 : consoleHeight}
+              />
+            </WorkspacePanel>
+          </>
+        )}
       </div>
       <ModalHost dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
       <GlobalDialogHost runtime={runtime} />
       <Footer
         items={footerItems}
-        consoleCollapsed={consoleCollapsed}
+        consoleCollapsed={usingVscodeLayout ? true : consoleCollapsed}
         onToggleConsoleCollapse={() => setConsoleCollapsed((prev) => !prev)}
+        showConsoleToggle={!usingVscodeLayout}
       />
     </div>
   );

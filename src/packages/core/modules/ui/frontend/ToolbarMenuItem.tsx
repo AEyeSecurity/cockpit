@@ -10,11 +10,13 @@ export function ToolbarMenuItem({ item, onExecute, onClose }: ToolbarMenuItemPro
   return (
     <button
       type="button"
+      className="dd-item"
       onClick={() => {
         onClose();
         onExecute(item.commandId);
       }}
     >
+      <span className="dd-item-ico" aria-hidden="true">•</span>
       {item.label}
     </button>
   );

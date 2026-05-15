@@ -32,22 +32,22 @@ export function PanelCollapsibleSection({
   };
 
   return (
-    <section className={joinClassNames("panel-card", "collapsible-section", collapsed && "collapsed", className)}>
+    <section className={joinClassNames("panel-card", "collapsible-section", "cs", collapsed && "collapsed", className)}>
       <div className="collapsible-section-header-row">
         <div
-          className="collapsible-section-header"
+          className={joinClassNames("collapsible-section-header", "cs-hdr", !collapsed && "open")}
           role="button"
           tabIndex={0}
           aria-expanded={collapsed ? "false" : "true"}
           onClick={toggle}
           onKeyDown={onHeaderKeyDown}
         >
-          <span className="collapsible-section-chevron" aria-hidden="true" />
+          <span className="collapsible-section-chevron cs-chevron" aria-hidden="true" />
           <h4 className="collapsible-section-title">{title}</h4>
         </div>
         {actions ? <div className="collapsible-section-actions">{actions}</div> : null}
       </div>
-      {!collapsed ? <div className="collapsible-section-body">{children}</div> : null}
+      {!collapsed ? <div className="collapsible-section-body cs-body">{children}</div> : null}
     </section>
   );
 }

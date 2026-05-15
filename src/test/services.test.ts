@@ -53,7 +53,7 @@ describe("services", () => {
 
   it("prioritizes localStorage over config defaults for ConnectionService", () => {
     installStorageMock({
-      "map_tools.connection_presets.v1": JSON.stringify({
+      "map_tools.connection_presets.v2": JSON.stringify({
         preset: "sim",
         presets: {
           real: { host: "ls-real", port: "1111" },
@@ -195,15 +195,18 @@ describe("services", () => {
     const service = new NavigationService(dispatcher as never);
 
     service.queueWaypoint({ x: 1, y: 2, yawDeg: 90 });
-    expect(service.getState().waypoints).toHaveLength(1);
+    service.queueWaypoint({ x: 3, y: 4 });
+    expect(service.getState().waypoints).toHaveLength(2);
     const count = service.saveWaypoints();
-    expect(count).toBe(1);
+    expect(count).toBe(2);
 
     service.clearWaypoints();
     expect(service.getState().waypoints).toHaveLength(0);
     const loaded = service.loadWaypoints();
-    expect(loaded).toBe(1);
-    expect(service.getState().waypoints).toHaveLength(1);
+    expect(loaded).toBe(2);
+    expect(service.getState().waypoints).toHaveLength(2);
+    expect(service.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, yawDeg: 90 });
+    expect(service.getState().waypoints[1]).toEqual({ x: 3, y: 4 });
   });
 
   it("supports waypoint selection and selective removal", () => {
@@ -267,6 +270,46 @@ describe("services", () => {
     expect(dispatcher.requestGoal).toHaveBeenCalledTimes(1);
   });
 
+  it("omits yaw_deg for automatic queued waypoints", async () => {
+    const dispatcher = {
+      requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "navigation.goal.result",
+        ok: true
+      }),
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      }),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.queueWaypoint({ x: 5, y: 6, yawDeg: 45 });
+
+    await service.sendQueuedGoal();
+
+    expect(dispatcher.requestGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waypoints: [
+          { lat: 3, lon: 4 },
+          { lat: 5, lon: 6, yaw_deg: 45 }
+        ]
+      })
+    );
+  });
+
   it("sends route missions through NavigationService", async () => {
     const dispatcher = {
       requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
@@ -304,6 +347,43 @@ describe("services", () => {
     expect(dispatcher.requestRouteMission).toHaveBeenCalledTimes(1);
   });
 
+  it("saves and loads file waypoints without yaw for auto mode", async () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestSaveWaypointsFile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        waypoint_count: 2
+      }),
+      requestLoadWaypointsFile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        waypoints: [{ lat: 1, lon: 2 }, { lat: 3, lon: 4, yaw_deg: 30 }]
+      }),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+    service.queueWaypoint({ x: 1, y: 2 });
+    service.queueWaypoint({ x: 3, y: 4, yawDeg: 30 });
+
+    await service.saveWaypointsFile();
+    await service.loadWaypointsFile();
+
+    expect(dispatcher.requestSaveWaypointsFile).toHaveBeenCalledWith([
+      { lat: 1, lon: 2 },
+      { lat: 3, lon: 4, yaw_deg: 30 }
+    ]);
+    expect(service.getState().waypoints).toEqual([{ x: 1, y: 2 }, { x: 3, y: 4, yawDeg: 30 }]);
+  });
+
   it("applies route mission state from backend messages", () => {
     let onState: ((message: Record<string, unknown>) => void) | undefined;
     const dispatcher = {
@@ -333,6 +413,12 @@ describe("services", () => {
         input_waypoint_count: 3,
         expanded_waypoint_count: 7,
         active_chunk_size: 4,
+        blocked_state: "BLOCKED_WAITING",
+        blocked_reason_code: "NO_VALID_PATH",
+        blocked_reason_text: "no valid path found",
+        blocked_retry_attempt: 1,
+        blocked_retry_max_attempts: 3,
+        blocked_wait_remaining_s: 8.5,
         mission_waypoints: [{ lat: 1, lon: 2, yaw_deg: 3 }],
         active_chunk_waypoints: [{ lat: 4, lon: 5, yaw_deg: 6 }]
       }
@@ -342,7 +428,13 @@ describe("services", () => {
       active: true,
       loop: true,
       expandedWaypointCount: 7,
-      activeChunkSize: 4
+      activeChunkSize: 4,
+      blockedState: "BLOCKED_WAITING",
+      blockedReasonCode: "NO_VALID_PATH",
+      blockedReasonText: "no valid path found",
+      blockedRetryAttempt: 1,
+      blockedRetryMaxAttempts: 3,
+      blockedWaitRemainingS: 8.5
     });
     expect(service.getState().routeMission.missionWaypoints[0]).toMatchObject({
       x: 1,

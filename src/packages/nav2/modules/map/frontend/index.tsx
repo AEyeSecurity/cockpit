@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
@@ -29,6 +29,46 @@ const MAP_WHEEL_DEBOUNCE_MS = 80;
 const MAP_TOOL_COLOR = "#55ff7f";
 const PROTRACTOR_MIN_ARM_METERS = 0.05;
 const PROTRACTOR_SNAP_THRESHOLD_DEG = 12;
+const VISION_DATA_URL = "http://localhost:8088/data";
+const VISION_DATA_POLL_INTERVAL_MS = 200;
+const MIN_DETECTION_CONFIDENCE = 0.70;
+const NAV_GOAL_STATUS_SUCCEEDED = 4;
+
+interface CameraDetectionOverlayItem {
+  id: string;
+  label: string;
+  score: number;
+  bbox: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+}
+
+type CameraRiskLevel = "normal" | "low" | "medium" | "high";
+
+const RELEVANT_CENTER_LABELS = new Set([
+  "person",
+  "persona",
+  "car",
+  "auto",
+  "vehicle",
+  "vehiculo",
+  "truck",
+  "bus",
+  "motorcycle",
+  "bicycle",
+  "obstacle",
+  "obstaculo"
+]);
+
+interface MapViewportControlHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  cancelZoneTool: () => void;
+  confirmZoneTool: () => boolean;
+}
 
 interface Nav2MapConfig {
   map_default_center_lat?: unknown;
@@ -58,6 +98,12 @@ function parseZoom(config: Nav2MapConfig): number {
   return Math.max(0, Math.min(GPS_NATIVE_MAX_ZOOM, parsed));
 }
 
+function isNavigationGoalSucceeded(snapshot: TelemetrySnapshot | null): boolean {
+  if (!snapshot) return false;
+  const resultText = String(snapshot.navResultText ?? "").trim().toLowerCase();
+  return Number(snapshot.navResultStatus) === NAV_GOAL_STATUS_SUCCEEDED || resultText === "succeeded" || resultText.includes("succeeded");
+}
+
 function parseCameraProbeTimeout(config: Nav2MapConfig, runtime: ModuleContext): number {
   const fallback = Math.max(500, Number(runtime.env.cameraProbeTimeoutMs ?? 3000));
   const parsed = Number(config.camera_probe_timeout_ms);
@@ -70,6 +116,75 @@ function parseCameraLoadTimeout(config: Nav2MapConfig, runtime: ModuleContext): 
   const parsed = Number(config.camera_load_timeout_ms);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(1000, Math.round(parsed));
+}
+
+function parseCameraDetections(payload: unknown): CameraDetectionOverlayItem[] {
+  if (!payload || typeof payload !== "object") return [];
+  const root = payload as Record<string, unknown>;
+  const camera = root.camera && typeof root.camera === "object" ? root.camera as Record<string, unknown> : {};
+  const ai = root.ai && typeof root.ai === "object" ? root.ai as Record<string, unknown> : {};
+  const width = Number(camera.width ?? 0);
+  const height = Number(camera.height ?? 0);
+  const detections = Array.isArray(ai.detections) ? ai.detections : [];
+  if (width <= 0 || height <= 0) return [];
+
+  return detections
+    .map((raw, index): CameraDetectionOverlayItem | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const det = raw as Record<string, unknown>;
+      const bbox = det.bbox && typeof det.bbox === "object" ? det.bbox as Record<string, unknown> : null;
+      if (!bbox) return null;
+
+      const score = Math.max(0, Math.min(1, Number(det.score ?? 0)));
+      if (score < MIN_DETECTION_CONFIDENCE) return null;
+
+      const cx = Number(bbox.cx);
+      const cy = Number(bbox.cy);
+      const boxW = Number(bbox.width);
+      const boxH = Number(bbox.height);
+      if (![cx, cy, boxW, boxH].every(Number.isFinite) || boxW <= 0 || boxH <= 0) return null;
+
+      return {
+        id: String(det.id ?? `${det.label ?? "obj"}-${index}`),
+        label: String(det.label ?? "objeto"),
+        score,
+        bbox: {
+          x: Math.max(0, Math.min(1, (cx - boxW / 2) / width)),
+          y: Math.max(0, Math.min(1, (cy - boxH / 2) / height)),
+          w: Math.max(0, Math.min(1, boxW / width)),
+          h: Math.max(0, Math.min(1, boxH / height))
+        }
+      };
+    })
+    .filter((det): det is CameraDetectionOverlayItem => det !== null);
+}
+
+function cameraDetectionZone(det: CameraDetectionOverlayItem): "left" | "center" | "right" {
+  const centerX = det.bbox.x + det.bbox.w / 2;
+  if (centerX < 0.33) return "left";
+  if (centerX > 0.66) return "right";
+  return "center";
+}
+
+function cameraDetectionRisk(det: CameraDetectionOverlayItem): CameraRiskLevel {
+  const zone = cameraDetectionZone(det);
+  if (zone === "center" && RELEVANT_CENTER_LABELS.has(det.label.trim().toLowerCase())) return "high";
+  if (zone === "center") return "medium";
+  return "low";
+}
+
+function cameraRiskRank(risk: CameraRiskLevel): number {
+  if (risk === "high") return 3;
+  if (risk === "medium") return 2;
+  if (risk === "low") return 1;
+  return 0;
+}
+
+function cameraRiskFromDetections(detections: CameraDetectionOverlayItem[]): CameraRiskLevel {
+  return detections.reduce<CameraRiskLevel>((current, det) => {
+    const next = cameraDetectionRisk(det);
+    return cameraRiskRank(next) > cameraRiskRank(current) ? next : current;
+  }, "normal");
 }
 
 interface TelemetryServiceLike {
@@ -174,18 +289,131 @@ function normalizeYawDeg(yawDeg: number): number {
 }
 
 function yawDegFromLatLng(origin: L.LatLng, target: L.LatLng): number {
+  const vector = vectorFromLatLng(origin, target);
+  if (!vector) return 0;
+  return yawDegFromVector(vector);
+}
+
+function vectorFromLatLng(origin: L.LatLng, target: L.LatLng): { east: number; north: number } | null {
   const refLat = Number(origin.lat);
   const metersPerDegLat = 111320;
   const metersPerDegLon = metersPerDegLat * Math.max(1e-6, Math.abs(Math.cos((refLat * Math.PI) / 180)));
   const eastM = (Number(target.lng) - Number(origin.lng)) * metersPerDegLon;
   const northM = (Number(target.lat) - Number(origin.lat)) * metersPerDegLat;
-  return normalizeYawDeg((Math.atan2(northM, eastM) * 180) / Math.PI);
+  if (!Number.isFinite(eastM) || !Number.isFinite(northM) || Math.hypot(eastM, northM) <= 1e-6) {
+    return null;
+  }
+  return { east: eastM, north: northM };
 }
 
-function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false): L.DivIcon {
+function yawDegFromVector(vector: { east: number; north: number }): number {
+  return normalizeYawDeg((Math.atan2(vector.north, vector.east) * 180) / Math.PI);
+}
+
+function tangentYawDeg(
+  incoming: { east: number; north: number } | null,
+  outgoing: { east: number; north: number } | null
+): number | null {
+  if (!incoming) return outgoing ? yawDegFromVector(outgoing) : null;
+  if (!outgoing) return yawDegFromVector(incoming);
+  const incomingLength = Math.hypot(incoming.east, incoming.north);
+  const outgoingLength = Math.hypot(outgoing.east, outgoing.north);
+  if (incomingLength <= 1e-6) return yawDegFromVector(outgoing);
+  if (outgoingLength <= 1e-6) return yawDegFromVector(incoming);
+  const east = incoming.east / incomingLength + outgoing.east / outgoingLength;
+  const north = incoming.north / incomingLength + outgoing.north / outgoingLength;
+  if (Math.hypot(east, north) <= 1e-6) return yawDegFromVector(outgoing);
+  return yawDegFromVector({ east, north });
+}
+
+function waypointHasManualYaw(waypoint: NavigationState["waypoints"][number]): boolean {
+  return waypoint.yawDeg !== undefined && waypoint.yawDeg !== null && Number.isFinite(Number(waypoint.yawDeg));
+}
+
+function resolveWaypointPreviewYawDeg(
+  points: Array<{ lat: number; lon: number; yawDeg?: number; manual: boolean }>,
+  index: number,
+  loopRoute: boolean,
+  robotPose: TelemetrySnapshot["robotPose"]
+): number {
+  const point = points[index];
+  if (!point) return 0;
+  if (point.manual && Number.isFinite(Number(point.yawDeg))) {
+    return normalizeYawDeg(Number(point.yawDeg));
+  }
+  const origin = L.latLng(point.lat, point.lon);
+  const next = index + 1 < points.length ? points[index + 1] : loopRoute && points.length > 1 ? points[0] : null;
+  const prev = index > 0 ? points[index - 1] : loopRoute && points.length > 1 ? points[points.length - 1] : null;
+  const incoming = prev ? vectorFromLatLng(L.latLng(prev.lat, prev.lon), origin) : null;
+  const outgoing = next ? vectorFromLatLng(origin, L.latLng(next.lat, next.lon)) : null;
+  const tangent = tangentYawDeg(incoming, outgoing);
+  if (tangent !== null) return tangent;
+
+  if (next) {
+    const nextVector = vectorFromLatLng(origin, L.latLng(next.lat, next.lon));
+    if (nextVector) return yawDegFromVector(nextVector);
+  }
+  if (prev) {
+    const prevVector = vectorFromLatLng(L.latLng(prev.lat, prev.lon), origin);
+    if (prevVector) return yawDegFromVector(prevVector);
+  }
+  if (robotPose && Number.isFinite(Number(robotPose.lat)) && Number.isFinite(Number(robotPose.lon))) {
+    const robotVector = vectorFromLatLng(L.latLng(robotPose.lat, robotPose.lon), origin);
+    if (robotVector) return yawDegFromVector(robotVector);
+    if (Number.isFinite(Number(robotPose.headingDeg))) return normalizeYawDeg(Number(robotPose.headingDeg));
+  }
+  return 0;
+}
+
+interface GeoPoint {
+  lat: number;
+  lon: number;
+}
+
+function metersPerLongitudeDegree(lat: number): number {
+  return 111320 * Math.max(1e-6, Math.abs(Math.cos((Number(lat) * Math.PI) / 180)));
+}
+
+function geoDeltaMeters(origin: GeoPoint, target: GeoPoint): { eastM: number; northM: number } {
+  return {
+    eastM: (Number(target.lon) - Number(origin.lon)) * metersPerLongitudeDegree(origin.lat),
+    northM: (Number(target.lat) - Number(origin.lat)) * 111320
+  };
+}
+
+function offsetGeoPoint(origin: GeoPoint, eastM: number, northM: number): GeoPoint {
+  return {
+    lat: Number(origin.lat) + northM / 111320,
+    lon: Number(origin.lon) + eastM / metersPerLongitudeDegree(origin.lat)
+  };
+}
+
+function distanceBetweenGeoPointsMeters(a: GeoPoint, b: GeoPoint): number {
+  const delta = geoDeltaMeters(a, b);
+  return Math.hypot(delta.eastM, delta.northM);
+}
+
+function planarAreaSqMeters(points: GeoPoint[]): number {
+  if (points.length < 3) return 0;
+  const origin = points[0];
+  const projected = points.map((point) => geoDeltaMeters(origin, point));
+  let area = 0;
+  for (let index = 0; index < projected.length; index += 1) {
+    const current = projected[index];
+    const next = projected[(index + 1) % projected.length];
+    area += current.eastM * next.northM - next.eastM * current.northM;
+  }
+  return Math.abs(area / 2);
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}`;
+  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}`;
   return L.divIcon({
     className: "",
     html:
@@ -201,21 +429,28 @@ function buildWaypointIcon(index: number, yawDeg: number, draft = false, selecte
 function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
   const hasHeading = headingDeg !== null && headingDeg !== undefined && Number.isFinite(Number(headingDeg));
   const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0;
-  // Glyph `➤` points to the right by default; ENU yaw 0 also points East.
-  const cssRotationDeg = normalizeYawDeg(-yaw);
+  const cssRotationDeg = normalizeYawDeg(90 - yaw);
   const classes = hasHeading ? "robot-icon" : "robot-icon no-heading";
   return L.divIcon({
     className: "",
-    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><span class="robot-glyph">➤</span></div>`,
+    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><div class="robot-arrow"></div></div>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
 }
 
 function buildDatumIcon(): L.DivIcon {
+  const datumSvg =
+    '<svg class="datum-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="3.2" />' +
+    '<path d="M12 4v4" />' +
+    '<path d="M12 16v4" />' +
+    '<path d="M4 12h4" />' +
+    '<path d="M16 12h4" />' +
+    "</svg>";
   return L.divIcon({
     className: "",
-    html: '<div class="datum-icon"><span class="datum-dot"></span></div>',
+    html: `<div class="datum-icon">${datumSvg}</div>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
@@ -247,9 +482,13 @@ function LeafletMapCanvas({
   onQueueWaypoint,
   onToggleWaypointSelection,
   onMoveWaypoint,
+  onZoneToolSettled,
+  loopRoute,
   initialCenterLat,
   initialCenterLon,
-  initialZoom
+  initialZoom,
+  onZoomChange,
+  mapControlRef
 }: {
   state: MapWorkspaceState;
   mapService: MapService;
@@ -261,12 +500,16 @@ function LeafletMapCanvas({
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
-  onQueueWaypoint: (lat: number, lon: number, yawDeg: number) => void;
+  onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
+  onZoneToolSettled: () => void;
+  loopRoute: boolean;
   initialCenterLat: number;
   initialCenterLon: number;
   initialZoom: number;
+  onZoomChange?: (zoom: number) => void;
+  mapControlRef?: { current: MapViewportControlHandle | null };
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -276,7 +519,7 @@ function LeafletMapCanvas({
   const robotMarkerRef = useRef<L.Marker | null>(null);
   const datumMarkerRef = useRef<L.Marker | null>(null);
   const draftMarkerRef = useRef<L.Marker | null>(null);
-  const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg: number; dragYaw: boolean } | null>(null);
+  const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg?: number; dragYaw: boolean } | null>(null);
   const goalCreateSessionRef = useRef<{ active: boolean; hasMoved: boolean }>({ active: false, hasMoved: false });
   const waypointDragEndMsRef = useRef(0);
   const waypointRenderKeyRef = useRef("");
@@ -298,6 +541,7 @@ function LeafletMapCanvas({
   const onQueueWaypointRef = useRef(onQueueWaypoint);
   const onToggleWaypointSelectionRef = useRef(onToggleWaypointSelection);
   const onMoveWaypointRef = useRef(onMoveWaypoint);
+  const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const appliedMapOriginKeyRef = useRef<string>("");
 
   useEffect(() => {
@@ -321,6 +565,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     onMoveWaypointRef.current = onMoveWaypoint;
   }, [onMoveWaypoint]);
+  useEffect(() => {
+    onZoneToolSettledRef.current = onZoneToolSettled;
+  }, [onZoneToolSettled]);
 
   const clearGoalDraft = (): void => {
     goalDraftRef.current = null;
@@ -343,7 +590,7 @@ function LeafletMapCanvas({
     }
     layer.clearLayers();
     const marker = L.marker([draft.lat, draft.lon], {
-      icon: buildWaypointIcon(waypointCountRef.current, draft.yawDeg, true, false),
+      icon: buildWaypointIcon(waypointCountRef.current, draft.yawDeg ?? 0, true, false, draft.dragYaw),
       interactive: false
     });
     marker.addTo(layer);
@@ -717,6 +964,16 @@ function LeafletMapCanvas({
         attribution: "Tiles © Esri"
       }
     ).addTo(map);
+    L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 26,
+        maxNativeZoom: 19,
+        opacity: 0.84,
+        attribution: "Labels © Esri",
+        className: "map-label-overlay"
+      }
+    ).addTo(map);
 
     const drawnItems = new L.FeatureGroup();
     const waypointLayer = L.layerGroup();
@@ -735,6 +992,12 @@ function LeafletMapCanvas({
     draftLayerRef.current = draftLayer;
     toolDraftLayerRef.current = toolDraftLayer;
     toolDrawingsLayerRef.current = toolDrawingsLayer;
+    onZoomChange?.(map.getZoom());
+
+    const handleZoomEnd = (): void => {
+      onZoomChange?.(map.getZoom());
+    };
+    map.on("zoomend", handleZoomEnd);
 
     const drawControl = new L.Control.Draw({
       edit: {
@@ -751,6 +1014,85 @@ function LeafletMapCanvas({
     });
     map.addControl(drawControl);
 
+    const actionLinks = (): HTMLAnchorElement[] =>
+      Array.from(
+        document.querySelectorAll<HTMLAnchorElement>(
+          ".leaflet-draw-actions a, .leaflet-draw-actions-top a, .leaflet-draw-actions-bottom a"
+        )
+      );
+    const clickDrawAction = (patterns: string[]): boolean => {
+      const action = actionLinks().find((link) => {
+        const label = `${link.textContent ?? ""} ${link.title ?? ""} ${link.getAttribute("aria-label") ?? ""}`.toLowerCase();
+        return patterns.some((pattern) => label.includes(pattern));
+      });
+      if (!action) return false;
+      action.click();
+      return true;
+    };
+    type LeafletDrawHandler = {
+      enabled?: () => boolean;
+      disable?: () => void;
+      save?: () => void;
+      completeShape?: () => void;
+    };
+    const drawModeHandlers = (): LeafletDrawHandler[] => {
+      const control = drawControl as L.Control.Draw & {
+        _toolbars?: Record<string, { _modes?: Record<string, { handler?: LeafletDrawHandler }> }>;
+      };
+      return Object.values(control._toolbars ?? {}).flatMap((toolbar) =>
+        Object.values(toolbar._modes ?? {})
+          .map((mode) => mode.handler)
+          .filter((handler): handler is LeafletDrawHandler => Boolean(handler))
+      );
+    };
+    const disableDrawHandlers = (): void => {
+      drawModeHandlers().forEach((handler) => {
+        if (!handler.disable) return;
+        if (handler.enabled && !handler.enabled()) return;
+        handler.disable();
+      });
+    };
+    const commitDrawHandlers = (): boolean => {
+      let committed = false;
+      drawModeHandlers().forEach((handler) => {
+        if (handler.enabled && !handler.enabled()) return;
+        let handlerCommitted = false;
+        try {
+          if (handler.save) {
+            handler.save();
+            handlerCommitted = true;
+          } else if (handler.completeShape) {
+            handler.completeShape();
+            handlerCommitted = true;
+          }
+        } catch {
+          // Leaflet Draw throws when a polygon cannot be completed yet.
+        }
+        if (handlerCommitted) {
+          committed = true;
+        }
+        if (handlerCommitted && handler.disable) {
+          handler.disable();
+        }
+      });
+      return committed;
+    };
+    if (mapControlRef) {
+      mapControlRef.current = {
+        zoomIn: () => {
+          map.zoomIn();
+        },
+        zoomOut: () => {
+          map.zoomOut();
+        },
+        cancelZoneTool: () => {
+          clickDrawAction(["cancel", "cancelar"]);
+          disableDrawHandlers();
+        },
+        confirmZoneTool: () => commitDrawHandlers() || clickDrawAction(["save", "finish", "guardar", "finalizar", "terminar"])
+      };
+    }
+
     map.on(L.Draw.Event.CREATED, (event) => {
       if (toolModeRef.current !== "idle") return;
       const layer = event.layer;
@@ -760,14 +1102,9 @@ function LeafletMapCanvas({
       (layer as L.Polygon & { zoneId?: string }).zoneId = zone.id;
       drawnItems.addLayer(layer);
       if (mapService.getState().autoSync) {
-        void mapService.pushZonesToBackend().catch((error) => {
-          runtime.eventBus.emit("console.event", {
-            level: "error",
-            text: `set_zones_geojson failed: ${String(error)}`,
-            timestamp: Date.now()
-          });
-        });
+        void mapService.pushZonesToBackend().catch(() => undefined);
       }
+      onZoneToolSettledRef.current();
     });
 
     map.on(L.Draw.Event.EDITED, (event: L.LeafletEvent) => {
@@ -782,6 +1119,7 @@ function LeafletMapCanvas({
       if (mapService.getState().autoSync) {
         void mapService.pushZonesToBackend().catch(() => undefined);
       }
+      onZoneToolSettledRef.current();
     });
 
     map.on(L.Draw.Event.DELETED, (event: L.LeafletEvent) => {
@@ -796,6 +1134,7 @@ function LeafletMapCanvas({
       if (mapService.getState().autoSync) {
         void mapService.pushZonesToBackend().catch(() => undefined);
       }
+      onZoneToolSettledRef.current();
     });
 
     map.on("click", (evt: L.LeafletMouseEvent) => {
@@ -894,7 +1233,6 @@ function LeafletMapCanvas({
       goalDraftRef.current = {
         lat: Number(evt.latlng.lat),
         lon: Number(evt.latlng.lng),
-        yawDeg: 0,
         dragYaw: false
       };
       if (map.dragging.enabled()) {
@@ -943,7 +1281,7 @@ function LeafletMapCanvas({
       const draft = goalDraftRef.current;
       clearGoalDraft();
       if (!draft) return;
-      onQueueWaypointRef.current(draft.lat, draft.lon, draft.yawDeg);
+      onQueueWaypointRef.current(draft.lat, draft.lon, draft.dragYaw ? draft.yawDeg : undefined);
     });
 
     map.on("mouseout", () => {
@@ -957,6 +1295,10 @@ function LeafletMapCanvas({
       clearToolDrawings();
       inspectCopyHandlersRef.current.forEach((cleanup) => cleanup());
       inspectCopyHandlersRef.current = [];
+      map.off("zoomend", handleZoomEnd);
+      if (mapControlRef) {
+        mapControlRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
       drawnItemsRef.current = null;
@@ -972,7 +1314,7 @@ function LeafletMapCanvas({
       protractorVertexRef.current = null;
       protractorArm1Ref.current = null;
     };
-  }, [initialCenterLat, initialCenterLon, initialZoom, mapService, runtime.eventBus]);
+  }, [initialCenterLat, initialCenterLon, initialZoom, mapControlRef, mapService, onZoomChange, runtime.eventBus]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1061,32 +1403,37 @@ function LeafletMapCanvas({
         index,
         lat: Number(waypoint.x),
         lon: Number(waypoint.y),
-        yawDeg: Number(waypoint.yawDeg ?? 0),
+        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(waypoint),
         selected: selectedWaypointIndexes.includes(index)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
+    const previewPoints = points.map((entry) => ({
+      lat: entry.lat,
+      lon: entry.lon,
+      yawDeg: entry.yawDeg,
+      manual: entry.manual
+    }));
+    const displayPoints = points.map((entry, displayIndex) => ({
+      ...entry,
+      displayYawDeg: resolveWaypointPreviewYawDeg(previewPoints, displayIndex, loopRoute, robotPose)
+    }));
     const renderKey =
-      points.length === 0
+      displayPoints.length === 0
         ? "__empty__"
-        : points
+        : displayPoints
             .map(
               (entry) =>
-                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.yawDeg.toFixed(2)}:${entry.selected ? 1 : 0}`
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
     waypointRenderKeyRef.current = renderKey;
     layer.clearLayers();
-    if (points.length === 0) return;
-    if (points.length > 1) {
-      L.polyline(
-        points.map((entry) => [entry.lat, entry.lon]),
-        { color: "#ff8095", weight: 2, opacity: 0.9 }
-      ).addTo(layer);
-    }
-    points.forEach((entry) => {
+    if (displayPoints.length === 0) return;
+    displayPoints.forEach((entry) => {
       const marker = L.marker([entry.lat, entry.lon], {
-        icon: buildWaypointIcon(entry.index, entry.yawDeg, false, entry.selected),
+        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual),
         interactive: true,
         draggable: true
       }).bindTooltip(`#${entry.index + 1}`, { direction: "top" });
@@ -1111,7 +1458,7 @@ function LeafletMapCanvas({
       });
       marker.addTo(layer);
     });
-  }, [selectedWaypointIndexes, waypoints]);
+  }, [loopRoute, robotPose, selectedWaypointIndexes, waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1209,6 +1556,644 @@ function LeafletMapCanvas({
   return <div ref={hostRef} className="leaflet-host map-host-canvas" />;
 }
 
+function CockpitMapCanvas({
+  state,
+  mapService,
+  interactive,
+  goalMode,
+  waypoints,
+  selectedWaypointIndexes,
+  robotPose,
+  datumPose,
+  centerRequestKey,
+  onQueueWaypoint,
+  onToggleWaypointSelection,
+  onMoveWaypoint,
+  loopRoute,
+  initialCenterLat,
+  initialCenterLon,
+  initialZoom,
+  onZoomChange,
+  mapControlRef,
+  activeWaypointIndex
+}: {
+  state: MapWorkspaceState;
+  mapService: MapService;
+  interactive: boolean;
+  goalMode: boolean;
+  waypoints: NavigationState["waypoints"];
+  selectedWaypointIndexes: number[];
+  robotPose: TelemetrySnapshot["robotPose"];
+  datumPose: { lat: number; lon: number } | null;
+  centerRequestKey: number;
+  onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
+  onToggleWaypointSelection: (index: number) => void;
+  onMoveWaypoint: (index: number, lat: number, lon: number) => void;
+  loopRoute: boolean;
+  initialCenterLat: number;
+  initialCenterLon: number;
+  initialZoom: number;
+  onZoomChange?: (zoom: number) => void;
+  mapControlRef?: { current: MapViewportControlHandle | null };
+  activeWaypointIndex: number | null;
+}): JSX.Element {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const previousToolModeRef = useRef<MapToolMode>(state.toolMode);
+  const suppressCanvasClickRef = useRef(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [zoom, setZoom] = useState(initialZoom);
+  const [previewPoint, setPreviewPoint] = useState<GeoPoint | null>(null);
+  const [inspectPoint, setInspectPoint] = useState<GeoPoint | null>(null);
+  const [measurePoints, setMeasurePoints] = useState<GeoPoint[]>([]);
+  const [protractorVertex, setProtractorVertex] = useState<GeoPoint | null>(null);
+  const [protractorArm, setProtractorArm] = useState<GeoPoint | null>(null);
+  const [protractorEnd, setProtractorEnd] = useState<GeoPoint | null>(null);
+  const [goalDraft, setGoalDraft] = useState<{
+    pointerId: number;
+    origin: GeoPoint;
+    yawDeg?: number;
+  } | null>(null);
+  const [dragWaypoint, setDragWaypoint] = useState<{
+    pointerId: number;
+    index: number;
+    lat: number;
+    lon: number;
+    startClientX: number;
+    startClientY: number;
+    moved: boolean;
+  } | null>(null);
+
+  const fallbackCenter = { lat: initialCenterLat, lon: initialCenterLon };
+  const centerPoint: GeoPoint = robotPose
+    ? { lat: robotPose.lat, lon: robotPose.lon }
+    : datumPose ?? fallbackCenter;
+
+  const geometryPoints: GeoPoint[] = [];
+  if (robotPose) {
+    geometryPoints.push({ lat: robotPose.lat, lon: robotPose.lon });
+  }
+  if (datumPose) {
+    geometryPoints.push(datumPose);
+  }
+  waypoints.forEach((waypoint) => {
+    const lat = Number(waypoint.x);
+    const lon = Number(waypoint.y);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    geometryPoints.push({ lat, lon });
+  });
+  state.zones.forEach((zone) => {
+    zone.polygon?.forEach((vertex) => geometryPoints.push(vertex));
+  });
+
+  const maxDistanceMeters = geometryPoints.reduce((currentMax, point) => {
+    return Math.max(currentMax, distanceBetweenGeoPointsMeters(centerPoint, point));
+  }, 0);
+  const zoomFactor = Math.pow(1.26, zoom - initialZoom);
+  const visibleRadiusMeters = clampNumber(
+    (maxDistanceMeters > 0 ? maxDistanceMeters * 1.35 : 34) / zoomFactor,
+    14,
+    800
+  );
+  const stageWidth = viewportSize.width || 960;
+  const stageHeight = viewportSize.height || 540;
+  const centerX = stageWidth / 2;
+  const centerY = stageHeight / 2;
+  const usableRadiusPx = Math.max(120, Math.min(stageWidth, stageHeight) * 0.36);
+  const pixelsPerMeter = usableRadiusPx / visibleRadiusMeters;
+
+  const projectPoint = (point: GeoPoint): { x: number; y: number } => {
+    const delta = geoDeltaMeters(centerPoint, point);
+    return {
+      x: centerX + delta.eastM * pixelsPerMeter,
+      y: centerY - delta.northM * pixelsPerMeter
+    };
+  };
+
+  const resolvePointFromClient = (clientX: number, clientY: number): GeoPoint | null => {
+    const host = hostRef.current;
+    if (!host) return null;
+    const rect = host.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const eastM = (localX - centerX) / pixelsPerMeter;
+    const northM = (centerY - localY) / pixelsPerMeter;
+    return offsetGeoPoint(centerPoint, eastM, northM);
+  };
+
+  const resolveProtractorPoint = (rawPoint: GeoPoint, shiftPressed: boolean): GeoPoint => {
+    if (!shiftPressed || !protractorVertex) return rawPoint;
+    const snapped = snapToCartesianAxis(
+      L.latLng(protractorVertex.lat, protractorVertex.lon),
+      L.latLng(rawPoint.lat, rawPoint.lon),
+      PROTRACTOR_SNAP_THRESHOLD_DEG,
+      PROTRACTOR_MIN_ARM_METERS
+    );
+    return { lat: snapped.lat, lon: snapped.lng };
+  };
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const updateSize = (): void => {
+      setViewportSize({
+        width: host.clientWidth,
+        height: host.clientHeight
+      });
+    };
+    updateSize();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setZoom(initialZoom);
+  }, [initialZoom]);
+
+  useEffect(() => {
+    onZoomChange?.(zoom);
+  }, [onZoomChange, zoom]);
+
+  useEffect(() => {
+    if (!mapControlRef) return;
+    mapControlRef.current = {
+      zoomIn: () => setZoom((current) => clampNumber(current + 1, 0, GPS_NATIVE_MAX_ZOOM)),
+      zoomOut: () => setZoom((current) => clampNumber(current - 1, 0, GPS_NATIVE_MAX_ZOOM)),
+      cancelZoneTool: () => undefined,
+      confirmZoneTool: () => false
+    };
+    return () => {
+      mapControlRef.current = null;
+    };
+  }, [mapControlRef]);
+
+  useEffect(() => {
+    if (previousToolModeRef.current === state.toolMode) return;
+    previousToolModeRef.current = state.toolMode;
+    setPreviewPoint(null);
+    setMeasurePoints([]);
+    setProtractorVertex(null);
+    setProtractorArm(null);
+    setProtractorEnd(null);
+  }, [state.toolMode]);
+
+  useEffect(() => {
+    if (!goalMode) {
+      setGoalDraft(null);
+    }
+  }, [goalMode]);
+
+  useEffect(() => {
+    if (centerRequestKey <= 0) return;
+    setPreviewPoint(null);
+    setGoalDraft(null);
+  }, [centerRequestKey]);
+
+  useEffect(() => {
+    if (state.toolMode === "ruler") {
+      const displayPoints = previewPoint && measurePoints.length > 0 ? [...measurePoints, previewPoint] : measurePoints;
+      let totalMeters = 0;
+      for (let index = 1; index < displayPoints.length; index += 1) {
+        totalMeters += distanceBetweenGeoPointsMeters(displayPoints[index - 1], displayPoints[index]);
+      }
+      mapService.setToolInfo(`Ruler: ${formatDistanceMeters(totalMeters)} (${displayPoints.length} puntos)`);
+      return;
+    }
+    if (state.toolMode === "area") {
+      const displayPoints = previewPoint && measurePoints.length > 0 ? [...measurePoints, previewPoint] : measurePoints;
+      let perimeter = 0;
+      for (let index = 1; index < displayPoints.length; index += 1) {
+        perimeter += distanceBetweenGeoPointsMeters(displayPoints[index - 1], displayPoints[index]);
+      }
+      if (displayPoints.length > 2) {
+        perimeter += distanceBetweenGeoPointsMeters(displayPoints[displayPoints.length - 1], displayPoints[0]);
+      }
+      mapService.setToolInfo(`Area ${formatAreaSqMeters(planarAreaSqMeters(displayPoints))} · Perim ${formatDistanceMeters(perimeter)}`);
+      return;
+    }
+    if (state.toolMode === "protractor") {
+      if (!protractorVertex) {
+        mapService.setToolInfo("Transportador activo. Click define vertice. Shift alinea ejes.");
+        return;
+      }
+      if (!protractorArm) {
+        mapService.setToolInfo("Transportador activo. Click define brazo referencia.");
+        return;
+      }
+      const endPoint = protractorEnd ?? previewPoint;
+      if (!endPoint) {
+        mapService.setToolInfo("Transportador activo. Click define brazo final.");
+        return;
+      }
+      const angle = calculateProtractorAngleDeg(
+        L.latLng(protractorVertex.lat, protractorVertex.lon),
+        L.latLng(protractorArm.lat, protractorArm.lon),
+        L.latLng(endPoint.lat, endPoint.lon),
+        PROTRACTOR_MIN_ARM_METERS
+      );
+      if (angle === null) {
+        mapService.setToolInfo("Transportador activo. Brazo final invalido.");
+        return;
+      }
+      mapService.setToolInfo(`Transportador ${formatAngleDegrees(angle)}. Shift alinea ejes.`);
+      return;
+    }
+    if (state.toolMode === "inspect" && inspectPoint) {
+      mapService.setToolInfo(`Inspect ${inspectPoint.lat.toFixed(6)}, ${inspectPoint.lon.toFixed(6)}`);
+    }
+  }, [
+    inspectPoint,
+    mapService,
+    measurePoints,
+    previewPoint,
+    protractorArm,
+    protractorEnd,
+    protractorVertex,
+    state.toolMode
+  ]);
+
+  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean }> = waypoints
+    .flatMap((waypoint, index) => {
+      const lat = Number(waypoint.x);
+      const lon = Number(waypoint.y);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+      return [{
+        index,
+        lat,
+        lon,
+        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(waypoint)
+      }];
+    });
+  const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
+    lat: entry.lat,
+    lon: entry.lon,
+    yawDeg: entry.yawDeg,
+    manual: entry.manual
+  }));
+  const displayRoutePolylinePoints = routePolylinePoints.map((entry, displayIndex) => ({
+    ...entry,
+    displayYawDeg: resolveWaypointPreviewYawDeg(waypointPreviewPoints, displayIndex, loopRoute, robotPose)
+  }));
+  const decorativeWaypoints = routePolylinePoints.length === 0
+    ? [
+        { ...offsetGeoPoint(centerPoint, -14, 8), done: true },
+        { ...offsetGeoPoint(centerPoint, -2, 14), done: true },
+        { ...offsetGeoPoint(centerPoint, 12, 10), done: true },
+        { ...offsetGeoPoint(centerPoint, 18, 0), done: true },
+        { ...offsetGeoPoint(centerPoint, 10, -12), done: false },
+        { ...offsetGeoPoint(centerPoint, -6, -16), done: false }
+      ]
+    : [];
+
+  const zoneShapes = state.zones
+    .map((zone) => {
+      const polygon = Array.isArray(zone.polygon) ? zone.polygon : [];
+      if (polygon.length < 3) return null;
+      return {
+        id: zone.id,
+        enabled: zone.enabled !== false,
+        points: polygon.map((vertex) => projectPoint(vertex))
+      };
+    })
+    .filter((entry): entry is { id: string; enabled: boolean; points: Array<{ x: number; y: number }> } => entry !== null);
+
+  const rulerDisplayPoints =
+    state.toolMode === "ruler" && previewPoint && measurePoints.length > 0 ? [...measurePoints, previewPoint] : measurePoints;
+  const areaDisplayPoints =
+    state.toolMode === "area" && previewPoint && measurePoints.length > 0 ? [...measurePoints, previewPoint] : measurePoints;
+  const protractorPreviewPoint = state.toolMode === "protractor" ? protractorEnd ?? previewPoint : null;
+  const protractorArc =
+    protractorVertex && protractorArm && protractorPreviewPoint
+      ? buildProtractorArcGeometry(
+          L.latLng(protractorVertex.lat, protractorVertex.lon),
+          L.latLng(protractorArm.lat, protractorArm.lon),
+          L.latLng(protractorPreviewPoint.lat, protractorPreviewPoint.lon)
+        )
+      : { arcPoints: [], labelLatLng: null };
+
+  const handleCanvasClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (!interactive) return;
+    if (suppressCanvasClickRef.current) {
+      suppressCanvasClickRef.current = false;
+      return;
+    }
+    const point = resolvePointFromClient(event.clientX, event.clientY);
+    if (!point) return;
+    if (goalMode && state.toolMode === "idle") return;
+    if (state.toolMode === "inspect") {
+      setInspectPoint(point);
+      mapService.setInspectCoords(point.lat, point.lon);
+      return;
+    }
+    if (state.toolMode === "ruler") {
+      setMeasurePoints((current) => [...current, point].slice(-12));
+      return;
+    }
+    if (state.toolMode === "area") {
+      setMeasurePoints((current) => [...current, point].slice(-12));
+      return;
+    }
+    if (state.toolMode === "protractor") {
+      if (!protractorVertex) {
+        setProtractorVertex(point);
+        return;
+      }
+      const snappedPoint = resolveProtractorPoint(point, event.shiftKey);
+      if (!protractorArm) {
+        setProtractorArm(snappedPoint);
+        return;
+      }
+      if (!protractorEnd) {
+        setProtractorEnd(snappedPoint);
+        return;
+      }
+      setProtractorVertex(snappedPoint);
+      setProtractorArm(null);
+      setProtractorEnd(null);
+    }
+  };
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!interactive || !goalMode || state.toolMode !== "idle" || event.button !== 0) return;
+    const point = resolvePointFromClient(event.clientX, event.clientY);
+    if (!point) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setGoalDraft({
+      pointerId: event.pointerId,
+      origin: point
+    });
+  };
+
+  const handleCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!interactive) return;
+    const point = resolvePointFromClient(event.clientX, event.clientY);
+    if (!point) return;
+    if (goalDraft && goalDraft.pointerId === event.pointerId) {
+      const yawDeg = yawDegFromLatLng(
+        L.latLng(goalDraft.origin.lat, goalDraft.origin.lon),
+        L.latLng(point.lat, point.lon)
+      );
+      setGoalDraft({ ...goalDraft, yawDeg });
+      return;
+    }
+    if (state.toolMode === "ruler" || state.toolMode === "area") {
+      setPreviewPoint(point);
+      return;
+    }
+    if (state.toolMode === "protractor") {
+      setPreviewPoint(resolveProtractorPoint(point, event.shiftKey));
+      return;
+    }
+    setPreviewPoint(null);
+  };
+
+  const handleCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!goalDraft || goalDraft.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onQueueWaypoint(goalDraft.origin.lat, goalDraft.origin.lon, goalDraft.yawDeg);
+    setGoalDraft(null);
+    suppressCanvasClickRef.current = true;
+  };
+
+  const handleCanvasPointerLeave = (): void => {
+    if (goalDraft) return;
+    if (state.toolMode === "ruler" || state.toolMode === "area" || state.toolMode === "protractor") {
+      setPreviewPoint(null);
+    }
+  };
+
+  const handleCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    if (!interactive) return;
+    event.preventDefault();
+    setZoom((current) =>
+      clampNumber(current + (event.deltaY < 0 ? 1 : -1), 0, GPS_NATIVE_MAX_ZOOM)
+    );
+  };
+
+  const renderProjectedPoints = (points: GeoPoint[]): string =>
+    points
+      .map((point) => {
+        const projected = projectPoint(point);
+        return `${projected.x},${projected.y}`;
+      })
+      .join(" ");
+
+  return (
+    <div
+      ref={hostRef}
+      className={`map-abstract-canvas${interactive ? " interactive" : ""}`}
+      onClick={handleCanvasClick}
+      onPointerDown={handleCanvasPointerDown}
+      onPointerMove={handleCanvasPointerMove}
+      onPointerUp={handleCanvasPointerUp}
+      onPointerLeave={handleCanvasPointerLeave}
+      onWheel={handleCanvasWheel}
+    >
+      <div className="map-grid" />
+      <div className="map-grid map-grid-secondary" />
+      <div className="map-radar-ring radar-ring-1" aria-hidden="true" />
+      <div className="map-radar-ring radar-ring-2" aria-hidden="true" />
+      <svg className="map-abstract-overlay map-abstract-overlay-zones" viewBox={`0 0 ${stageWidth} ${stageHeight}`} preserveAspectRatio="none">
+        {zoneShapes.map((zone) => (
+          <polygon
+            key={zone.id}
+            className={`map-zone-shape${zone.enabled ? "" : " disabled"}`}
+            points={zone.points.map((point) => `${point.x},${point.y}`).join(" ")}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (state.toolMode !== "idle") return;
+              mapService.toggleZoneEnabled(zone.id);
+            }}
+          />
+        ))}
+      </svg>
+      <svg className="map-abstract-overlay map-abstract-overlay-passive" viewBox={`0 0 ${stageWidth} ${stageHeight}`} preserveAspectRatio="none" aria-hidden="true">
+        {rulerDisplayPoints.length > 1 ? <polyline className="map-tool-line" points={renderProjectedPoints(rulerDisplayPoints)} /> : null}
+        {areaDisplayPoints.length > 2 ? <polygon className="map-tool-area" points={renderProjectedPoints(areaDisplayPoints)} /> : null}
+        {areaDisplayPoints.length > 1 ? <polyline className="map-tool-line" points={renderProjectedPoints(areaDisplayPoints)} /> : null}
+        {protractorVertex && protractorArm ? (
+          <line
+            className="map-tool-line"
+            x1={projectPoint(protractorVertex).x}
+            y1={projectPoint(protractorVertex).y}
+            x2={projectPoint(protractorArm).x}
+            y2={projectPoint(protractorArm).y}
+          />
+        ) : null}
+        {protractorVertex && protractorPreviewPoint ? (
+          <line
+            className="map-tool-line dashed"
+            x1={projectPoint(protractorVertex).x}
+            y1={projectPoint(protractorVertex).y}
+            x2={projectPoint(protractorPreviewPoint).x}
+            y2={projectPoint(protractorPreviewPoint).y}
+          />
+        ) : null}
+        {protractorArc.arcPoints.length > 1 ? (
+          <polyline className="map-tool-line faint" points={renderProjectedPoints(protractorArc.arcPoints.map((point) => ({ lat: point.lat, lon: point.lng })))} />
+        ) : null}
+      </svg>
+      {datumPose ? (
+        <div
+          className="map-datum"
+          style={{
+            left: projectPoint(datumPose).x,
+            top: projectPoint(datumPose).y
+          }}
+          title={`Datum ${datumPose.lat.toFixed(6)}, ${datumPose.lon.toFixed(6)}`}
+        >
+          <span className="map-datum-cross" />
+        </div>
+      ) : null}
+      {displayRoutePolylinePoints.map((waypoint) => {
+        const activeDrag = dragWaypoint?.index === waypoint.index ? dragWaypoint : null;
+        const point = {
+          lat: activeDrag ? activeDrag.lat : waypoint.lat,
+          lon: activeDrag ? activeDrag.lon : waypoint.lon
+        };
+        if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return null;
+        const projected = projectPoint(point);
+        const isSelected = selectedWaypointIndexes.includes(waypoint.index);
+        const isCurrent = activeWaypointIndex === waypoint.index;
+        return (
+          <button
+            key={`waypoint-${waypoint.index}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`}
+            type="button"
+            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}`}
+            data-index={waypoint.index + 1}
+            style={{
+              left: projected.x,
+              top: projected.y,
+              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
+            }}
+            title={`WP ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+              waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
+            }`}
+            disabled={!interactive}
+            onPointerDown={(event) => {
+              if (!interactive || event.button !== 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDragWaypoint({
+                pointerId: event.pointerId,
+                index: waypoint.index,
+                lat: point.lat,
+                lon: point.lon,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                moved: false
+              });
+            }}
+            onPointerMove={(event) => {
+              if (!dragWaypoint || dragWaypoint.index !== waypoint.index || dragWaypoint.pointerId !== event.pointerId) return;
+              const nextPoint = resolvePointFromClient(event.clientX, event.clientY);
+              if (!nextPoint) return;
+              const moved =
+                dragWaypoint.moved ||
+                Math.hypot(event.clientX - dragWaypoint.startClientX, event.clientY - dragWaypoint.startClientY) > 5;
+              setDragWaypoint({
+                ...dragWaypoint,
+                lat: nextPoint.lat,
+                lon: nextPoint.lon,
+                moved
+              });
+            }}
+            onPointerUp={(event) => {
+              if (!dragWaypoint || dragWaypoint.index !== waypoint.index || dragWaypoint.pointerId !== event.pointerId) return;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              event.stopPropagation();
+              if (dragWaypoint.moved) {
+                onMoveWaypoint(waypoint.index, dragWaypoint.lat, dragWaypoint.lon);
+              } else {
+                onToggleWaypointSelection(waypoint.index);
+              }
+              setDragWaypoint(null);
+              suppressCanvasClickRef.current = true;
+            }}
+            onPointerCancel={() => {
+              setDragWaypoint(null);
+            }}
+          />
+        );
+      })}
+      {routePolylinePoints.length === 0
+        ? decorativeWaypoints.map((waypoint, index) => {
+            const projected = projectPoint({ lat: waypoint.lat, lon: waypoint.lon });
+            return (
+              <div
+                key={`decorative-waypoint-${index}`}
+                className={`wp${waypoint.done ? " done" : ""}`}
+                style={{ left: projected.x, top: projected.y, pointerEvents: "none" }}
+                data-decorative="true"
+                aria-hidden="true"
+              />
+            );
+          })
+        : null}
+      {goalDraft ? (
+        <>
+          <div
+            className={`wp draft${goalDraft.yawDeg === undefined ? " auto" : " manual"}`}
+            data-index={waypoints.length + 1}
+            style={{
+              left: projectPoint(goalDraft.origin).x,
+              top: projectPoint(goalDraft.origin).y,
+              transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - (goalDraft.yawDeg ?? 0))}deg)`
+            }}
+          />
+          <div
+            className="map-goal-heading"
+            style={{
+              left: projectPoint(goalDraft.origin).x,
+              top: projectPoint(goalDraft.origin).y,
+              transform: `translate(-50%, -50%) rotate(${90 - (goalDraft.yawDeg ?? 0)}deg)`
+            }}
+            aria-hidden="true"
+          />
+        </>
+      ) : null}
+      {inspectPoint ? (
+        <div className="map-inspect-tag" style={{ left: projectPoint(inspectPoint).x, top: projectPoint(inspectPoint).y }}>
+          {inspectPoint.lat.toFixed(4)}, {inspectPoint.lon.toFixed(4)}
+        </div>
+      ) : null}
+      <div className="robot" style={{ left: projectPoint(centerPoint).x, top: projectPoint(centerPoint).y }}>
+        <div className="robot-ring">
+          <div className="robot-inner" style={{ fontSize: 16, fontFamily: "var(--font-mono)" }}>
+            ⊙
+          </div>
+        </div>
+        <div className="robot-lbl">SALUS-01</div>
+      </div>
+      {protractorArc.labelLatLng ? (
+        <div
+          className="map-angle-label"
+          style={{
+            left: projectPoint({ lat: protractorArc.labelLatLng.lat, lon: protractorArc.labelLatLng.lng }).x,
+            top: projectPoint({ lat: protractorArc.labelLatLng.lat, lon: protractorArc.labelLatLng.lng }).y
+          }}
+        >
+          {formatAngleDegrees(
+            calculateProtractorAngleDeg(
+              L.latLng(protractorVertex!.lat, protractorVertex!.lon),
+              L.latLng(protractorArm!.lat, protractorArm!.lon),
+              L.latLng(protractorPreviewPoint!.lat, protractorPreviewPoint!.lon),
+              PROTRACTOR_MIN_ARM_METERS
+            ) ?? 0
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
   const mapService = runtime.services.getService<MapService>(SERVICE_ID);
@@ -1240,9 +2225,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [mainPane, setMainPane] = useState<"map" | "camera">("map");
   const [frameSrc, setFrameSrc] = useState("");
   const [frameReady, setFrameReady] = useState(false);
+  const [snapSrc, setSnapSrc] = useState("");
+  const [cameraDetections, setCameraDetections] = useState<CameraDetectionOverlayItem[]>([]);
   const [cameraStreamPending, setCameraStreamPending] = useState<"idle" | "connecting">("idle");
   const [cameraConnectError, setCameraConnectError] = useState("");
+  const [leafletZoneToolActive, setLeafletZoneToolActive] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
+  const [mapZoom, setMapZoom] = useState(GPS_DEFAULT_ZOOM);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
   );
@@ -1252,18 +2241,29 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
+  const [displayMissionProgressPct, setDisplayMissionProgressPct] = useState(0);
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     sensorInfoService ? sensorInfoService.getState() : null
   );
-  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(
-    mapService.getDatumProfilesState()
-  );
+  const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(mapService.getDatumProfilesState());
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
   const cameraStreamSeqRef = useRef(0);
   const cameraLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraDetectionLastMsRef = useRef(0);
+  const missionProgressHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousLoopWaypointRef = useRef<number | null>(null);
+  const mapControlRef = useRef<MapViewportControlHandle | null>(null);
 
   useEffect(() => mapService.subscribe((next) => setState(next)), [mapService]);
+  useEffect(() => {
+    return () => {
+      if (missionProgressHoldTimerRef.current) {
+        clearTimeout(missionProgressHoldTimerRef.current);
+        missionProgressHoldTimerRef.current = null;
+      }
+    };
+  }, []);
   useEffect(() => {
     return runtime.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
       const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
@@ -1282,6 +2282,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     if (!connectionService) return;
     return connectionService.subscribe((next) => setConnectionState(next));
   }, [connectionService]);
+
+  useEffect(() => {
+    mapService.setBackendSyncTransportState({
+      connected: connectionState?.connected === true,
+      host: connectionState?.host,
+      port: connectionState?.port
+    });
+  }, [mapService, connectionState?.connected, connectionState?.host, connectionState?.port]);
+  useEffect(() => mapService.subscribeDatumProfiles((next) => setDatumProfiles(next)), [mapService]);
+  useEffect(() => {
+    if (connectionState?.connected !== true) return;
+    void mapService.getDatums().catch(() => undefined);
+  }, [connectionState?.connected, mapService]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
@@ -1297,14 +2310,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       void sensorInfoService.close();
     };
   }, [sensorInfoService]);
-  useEffect(() => {
-    void mapService.getDatums().then(setDatumProfiles).catch(() => undefined);
-  }, [mapService]);
-  useEffect(() => mapService.subscribeDatumProfiles((next) => setDatumProfiles(next)), [mapService]);
-  useEffect(() => {
-    if (connectionState?.connected !== true) return;
-    void mapService.getDatums().then(setDatumProfiles).catch(() => undefined);
-  }, [connectionState?.connected, mapService]);
   useEffect(() => {
     const connected = connectionState?.connected === true;
     const previous = wasConnectedRef.current;
@@ -1365,6 +2370,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const isSimPreset = connectionState?.preset === "sim";
   const cameraPaneAvailable = !isSimPreset;
   const mainIsMap = !cameraPaneAvailable || mainPane === "map";
+  const showMiniCameraPane = mainIsMap;
   const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
   const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
   const cameraProbeTimeoutMs = parseCameraProbeTimeout(nav2Config, runtime);
@@ -1376,6 +2382,117 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const cameraStreamConnected = navigationState?.cameraStreamConnected === true;
   const mapInteractive = mainIsMap;
   const mapToolsEnabled = mainIsMap;
+  const routeMission = navigationState?.routeMission ?? null;
+  const routePointCount = Math.max(0, routeMission?.expandedWaypointCount ?? 0);
+  const routeStatusText = routeMission?.status?.toLowerCase() ?? "";
+  const routeComplete = routePointCount > 0 && (routeStatusText.includes("complete") || routeStatusText.includes("done") || routeStatusText.includes("succeeded"));
+  const routeCompletedCount =
+    routePointCount > 0
+      ? routeComplete
+        ? routePointCount
+        : Math.min(routePointCount, Math.max(0, Math.round(routeMission?.currentStartIndex ?? 0)))
+      : 0;
+  const goalActive = telemetrySnapshot?.goalActive === true;
+  const goalSucceeded = isNavigationGoalSucceeded(telemetrySnapshot) && !goalActive;
+  const queuedWaypointCount = navigationState?.waypoints.length ?? 0;
+  const fwCurrentWp = telemetrySnapshot?.currentWaypoint ?? 0;
+  const fwTotalWp = telemetrySnapshot?.totalWaypoints ?? 0;
+  const loopTotalWaypoints = telemetrySnapshot?.loopTotalWaypoints ?? 0;
+  const displayTotal = loopTotalWaypoints > 0 ? loopTotalWaypoints : fwTotalWp;
+  const simpleGoalTotal = routePointCount === 0 && (goalActive || goalSucceeded) ? Math.max(1, queuedWaypointCount) : queuedWaypointCount;
+  const missionProgressTotal = routePointCount > 0 ? routePointCount : simpleGoalTotal;
+  const missionCompletedCount = routePointCount > 0 ? routeCompletedCount : goalSucceeded ? simpleGoalTotal : 0;
+  const goalProgressPct =
+    goalActive && displayTotal > 0
+      ? Math.min(100, Math.max(0, (fwCurrentWp / displayTotal) * 100))
+      : goalSucceeded
+        ? 100
+        : 0;
+  const missionProgressPct =
+    routePointCount > 0
+      ? (missionProgressTotal > 0 ? Math.min(100, Math.max(0, (missionCompletedCount / missionProgressTotal) * 100)) : 0)
+      : goalActive || goalSucceeded
+        ? goalProgressPct
+        : 0;
+  useEffect(() => {
+    const nextProgress = Math.min(100, Math.max(0, missionProgressPct));
+    const loopTelemetryActive = goalActive && loopTotalWaypoints > 0 && displayTotal > 0;
+    const previousLoopWaypoint = previousLoopWaypointRef.current;
+    const loopCycleComplete =
+      loopTelemetryActive &&
+      previousLoopWaypoint === displayTotal - 1 &&
+      fwCurrentWp === 0;
+    previousLoopWaypointRef.current = loopTelemetryActive ? fwCurrentWp : null;
+
+    if (missionProgressHoldTimerRef.current) return undefined;
+
+    const progressIsComplete = Math.round(nextProgress) === 100;
+    if (loopCycleComplete || (progressIsComplete && (goalSucceeded || routeComplete))) {
+      setDisplayMissionProgressPct(100);
+      missionProgressHoldTimerRef.current = setTimeout(() => {
+        setDisplayMissionProgressPct(0);
+        missionProgressHoldTimerRef.current = null;
+      }, 2000);
+      return undefined;
+    }
+    setDisplayMissionProgressPct(nextProgress);
+    return undefined;
+  }, [displayTotal, fwCurrentWp, goalActive, goalSucceeded, loopTotalWaypoints, missionProgressPct, routeComplete]);
+  const missionProgressLabel = `${Math.round(displayMissionProgressPct)}%`;
+  const blockedState = routeMission?.blockedState ?? "";
+  const blockedReason =
+    routeMission?.blockedReasonText || routeMission?.blockedReasonCode || (blockedState ? "obstacle or path blockage" : "");
+  const blockedRetryMax = Math.max(0, Math.round(routeMission?.blockedRetryMaxAttempts ?? 0));
+  const blockedRetryAttempt = Math.max(0, Math.round(routeMission?.blockedRetryAttempt ?? 0));
+  const blockedWait = Math.max(0, Number(routeMission?.blockedWaitRemainingS ?? 0));
+  const blockedRetryText = blockedRetryMax > 0 ? `retry ${Math.min(blockedRetryAttempt + 1, blockedRetryMax)}/${blockedRetryMax}` : "";
+  const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
+  const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
+  const missionTitle =
+    blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
+    blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
+    blockedState === "BLOCKED_WAITING" ? "Route blocked" :
+    routeComplete ? "Route complete" :
+    routeMission?.paused ? "Route paused" :
+    routeMission?.active ? "Following route" :
+    navigationState?.manualMode ? "Manual control" :
+    goalActive ? "Goal active" :
+    navigationState?.goalMode ? "Goal mode" :
+    "Ready";
+  const missionDetail =
+    blockedState ? blockedDetail :
+    routePointCount > 0
+      ? `${missionCompletedCount}/${missionProgressTotal} goals completed`
+      : goalActive
+        ? displayTotal > 0
+          ? `Waypoint ${fwCurrentWp + 1} of ${displayTotal}`
+          : `${queuedWaypointCount} queued waypoints`
+        : goalSucceeded
+          ? `${simpleGoalTotal}/${simpleGoalTotal} goals completed`
+        : navigationState?.manualMode
+          ? "Operator control"
+          : `${queuedWaypointCount} queued waypoints`;
+  const missionToneClass =
+    blockedState === "BLOCKED_NEEDS_OPERATOR" || routeStatusText.includes("fail") || routeStatusText.includes("error")
+      ? "error"
+      : blockedState || routeMission?.paused || navigationState?.manualMode
+        ? "warn"
+        : routeMission?.active || routeComplete || goalActive || navigationState?.goalMode
+          ? "active"
+          : "";
+  const linearMin = navigationState?.manualLinearMin ?? 1;
+  const linearMax = navigationState?.manualLinearMax ?? 4;
+  const steeringAngleMin = navigationState?.manualSteeringAngleMinDeg ?? 1;
+  const steeringAngleMax = navigationState?.manualSteeringAngleMaxDeg ?? 30;
+  const linearSpeed = navigationState?.manualLinearSpeed ?? 1.2;
+  const steeringAngleDeg = navigationState?.manualSteeringAngleDeg ?? 18;
+  const linearFillPct = linearMax > linearMin ? Math.min(100, Math.max(0, ((linearSpeed - linearMin) / (linearMax - linearMin)) * 100)) : 0;
+  const steeringFillPct =
+    steeringAngleMax > steeringAngleMin
+      ? Math.min(100, Math.max(0, ((steeringAngleDeg - steeringAngleMin) / (steeringAngleMax - steeringAngleMin)) * 100))
+      : 0;
+  const routeBadgeText =
+    routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
 
   const clearCameraLoadTimer = (): void => {
     if (!cameraLoadTimerRef.current) return;
@@ -1391,99 +2508,79 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }, [cameraPaneAvailable, mainPane]);
 
   useEffect(() => {
-    cameraStreamSeqRef.current += 1;
-    clearCameraLoadTimer();
-    setCameraConnectError("");
+    setMapZoom(initialZoom);
+  }, [initialZoom]);
 
-    if (!cameraStreamConnected || !cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
-      setFrameSrc("");
+  useEffect(() => {
+    if (!cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
+      setSnapSrc("");
       setFrameReady(false);
-      setCameraStreamPending("idle");
-      if (!cameraEnabled && cameraStreamConnected) {
-        navigationService?.setCameraStreamConnected(false);
-      }
       return;
     }
 
-    const sequence = cameraStreamSeqRef.current;
-    let cancelled = false;
-    setCameraStreamPending("connecting");
     setFrameReady(false);
+    const snapUrl = cameraUrl.replace(/\/?$/, "/snap.jpg");
+    let cancelled = false;
 
-    const connectStream = async (): Promise<void> => {
-      let probeOk = true;
-      let probeError = "";
-      let controller: AbortController | null = null;
-      let probeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    function pollNext(): void {
+      if (cancelled) return;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        setSnapSrc(img.src);
+        setFrameReady(true);
+        setTimeout(pollNext, 100);
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        setTimeout(pollNext, 1000);
+      };
+      img.src = `${snapUrl}?_=${Date.now()}`;
+    }
+
+    pollNext();
+    return () => { cancelled = true; };
+  }, [cameraEnabled, cameraPaneAvailable, cameraUrl]);
+
+  useEffect(() => {
+    if (!cameraPaneAvailable) {
+      setCameraDetections([]);
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function pollDetections(): Promise<void> {
       try {
-        if (typeof AbortController !== "undefined") {
-          controller = new AbortController();
-          probeTimeoutId = setTimeout(() => {
-            controller?.abort();
-          }, cameraProbeTimeoutMs);
+        const response = await fetch(`${VISION_DATA_URL}?_=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`vision data ${response.status}`);
+        const payload = await response.json() as unknown;
+        if (!cancelled) {
+          const next = parseCameraDetections(payload);
+          const now = Date.now();
+          if (next.length > 0) {
+            cameraDetectionLastMsRef.current = now;
+            setCameraDetections(next);
+          } else if (now - cameraDetectionLastMsRef.current > 500) {
+            setCameraDetections([]);
+          }
         }
-        await fetch(cameraUrl, {
-          method: "GET",
-          mode: "no-cors",
-          cache: "no-store",
-          signal: controller?.signal
-        });
-      } catch (error) {
-        probeOk = false;
-        probeError = error instanceof Error && error.name === "AbortError" ? "probe timeout" : "probe failed";
+      } catch {
+        if (!cancelled && Date.now() - cameraDetectionLastMsRef.current > 500) setCameraDetections([]);
       } finally {
-        if (probeTimeoutId) {
-          clearTimeout(probeTimeoutId);
+        if (!cancelled) {
+          timer = setTimeout(() => void pollDetections(), VISION_DATA_POLL_INTERVAL_MS);
         }
       }
+    }
 
-      if (cancelled || sequence !== cameraStreamSeqRef.current) return;
-      if (!probeOk) {
-        setCameraConnectError(probeError);
-        setCameraStreamPending("idle");
-        setFrameSrc("");
-        setFrameReady(false);
-        navigationService?.setCameraStreamConnected(false);
-        runtime.eventBus.emit("console.event", {
-          level: "warn",
-          text: `Camera connection failed (${probeError})`,
-          timestamp: Date.now()
-        });
-        return;
-      }
-
-      const separator = cameraUrl.includes("?") ? "&" : "?";
-      setFrameSrc(`${cameraUrl}${separator}_ts=${Date.now()}`);
-      cameraLoadTimerRef.current = setTimeout(() => {
-        if (sequence !== cameraStreamSeqRef.current) return;
-        setCameraConnectError("stream timeout");
-        setCameraStreamPending("idle");
-        setFrameSrc("");
-        setFrameReady(false);
-        navigationService?.setCameraStreamConnected(false);
-        runtime.eventBus.emit("console.event", {
-          level: "warn",
-          text: "Camera stream timeout",
-          timestamp: Date.now()
-        });
-      }, cameraLoadTimeoutMs);
-    };
-
-    void connectStream();
+    void pollDetections();
     return () => {
       cancelled = true;
-      clearCameraLoadTimer();
+      if (timer) clearTimeout(timer);
     };
-  }, [
-    cameraEnabled,
-    cameraPaneAvailable,
-    cameraStreamConnected,
-    cameraUrl,
-    cameraLoadTimeoutMs,
-    cameraProbeTimeoutMs,
-    navigationService,
-    runtime.eventBus
-  ]);
+  }, [cameraPaneAvailable]);
 
   useEffect(() => {
     if (mainIsMap) return;
@@ -1494,9 +2591,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     ? connectionState?.preset === "sim"
       ? "camera disabled in sim"
       : "camera unavailable"
-    : !cameraStreamConnected
-      ? "camara desconectada"
-      : cameraStreamPending === "connecting"
+    : cameraStreamPending === "connecting"
         ? "camera connecting"
         : cameraConnectError
           ? `camera ${cameraConnectError}`
@@ -1504,24 +2599,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
         ? ""
         : "camera connecting";
   const toolStatusText = mainIsMap ? state.toolInfo : "Herramientas disponibles con mapa principal";
+  const cameraRisk = cameraRiskFromDetections(cameraDetections);
   const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
   const datumFromSensor = generalSnapshot.datum as Record<string, unknown> | undefined;
-  const selectedDatum = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId) ?? null;
-  const datumLat = Number(
-    datumFromSensor?.datum_lat ??
-      datumProfiles?.runtime.lat ??
-      selectedDatum?.lat ??
-      state.map?.originLat ??
-      Number.NaN
-  );
-  const datumLon = Number(
-    datumFromSensor?.datum_lon ??
-      datumProfiles?.runtime.lon ??
-      selectedDatum?.lon ??
-      state.map?.originLon ??
-      Number.NaN
-  );
+  const selectedDatumProfile = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+  const datumLat = Number(datumFromSensor?.datum_lat ?? datumProfiles?.runtime.lat ?? selectedDatumProfile?.lat ?? state.map?.originLat ?? Number.NaN);
+  const datumLon = Number(datumFromSensor?.datum_lon ?? datumProfiles?.runtime.lon ?? selectedDatumProfile?.lon ?? state.map?.originLon ?? Number.NaN);
   const datumPose =
     Number.isFinite(datumLat) &&
     Number.isFinite(datumLon) &&
@@ -1531,6 +2615,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           lon: datumLon
         }
       : null;
+  const coordsText =
+    telemetrySnapshot?.robotPose
+      ? `${telemetrySnapshot.robotPose.lat.toFixed(4)}°, ${telemetrySnapshot.robotPose.lon.toFixed(4)}°`
+      : datumPose
+        ? `${datumPose.lat.toFixed(4)}°, ${datumPose.lon.toFixed(4)}°`
+        : "n/a";
   const selectTool = (tool: MapToolMode, infoLabel: string): void => {
     if (!mapToolsEnabled) {
       runtime.eventBus.emit("console.event", {
@@ -1548,16 +2638,69 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     });
   };
 
-  const queueWaypointFromMap = (lat: number, lon: number, yawDeg: number): void => {
-    if (!navigationService || !navigationState?.goalMode) return;
-    navigationService.queueWaypoint({
-      x: lat,
-      y: lon,
-      yawDeg
-    });
+  const clickLeafletTool = (selector: string, label: string): void => {
+    if (!mapToolsEnabled) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: "Map tools available only with map as main view",
+        timestamp: Date.now()
+      });
+      return;
+    }
+    const control = document.querySelector<HTMLAnchorElement>(selector);
+    if (!control || control.classList.contains("leaflet-disabled")) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `${label} unavailable`,
+        timestamp: Date.now()
+      });
+      return;
+    }
+    control.click();
+    setLeafletZoneToolActive(true);
     runtime.eventBus.emit("console.event", {
       level: "info",
-      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)}) yaw=${yawDeg.toFixed(1)}°`,
+      text: `Map tool: ${label}`,
+      timestamp: Date.now()
+    });
+  };
+
+  const closeMapTools = (): void => {
+    mapControlRef.current?.cancelZoneTool();
+    setLeafletZoneToolActive(false);
+    mapService.setToolMode("idle");
+  };
+
+  const confirmZoneTool = (): void => {
+    const confirmed = mapControlRef.current?.confirmZoneTool() ?? false;
+    if (!confirmed) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: "Zone edit has nothing to confirm yet",
+        timestamp: Date.now()
+      });
+      return;
+    }
+    setLeafletZoneToolActive(false);
+    mapService.setToolMode("idle");
+  };
+
+  const queueWaypointFromMap = (lat: number, lon: number, yawDeg?: number): void => {
+    if (!navigationService || !navigationState?.goalMode) return;
+    navigationService.queueWaypoint(
+      yawDeg === undefined
+        ? { x: lat, y: lon }
+        : {
+            x: lat,
+            y: lon,
+            yawDeg
+          }
+    );
+    runtime.eventBus.emit("console.event", {
+      level: "info",
+      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
+        yawDeg === undefined ? " auto-yaw" : ` yaw=${yawDeg.toFixed(1)}°`
+      }`,
       timestamp: Date.now()
     });
   };
@@ -1580,8 +2723,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!mainIsMap || !mapToolsEnabled || isEditingTarget(event.target)) return;
-      if (event.key === "Escape" && state.toolMode !== "idle") {
-        mapService.setToolMode("idle");
+      if (event.key === "Escape" && (state.toolMode !== "idle" || leafletZoneToolActive)) {
+        closeMapTools();
         event.preventDefault();
         return;
       }
@@ -1609,149 +2752,416 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [mainIsMap, mapToolsEnabled, mapService, selectTool, state.toolMode]);
+  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, selectTool, state.toolMode]);
 
   return (
-    <div className="map-workspace-root">
-      <div className="map-workspace-toolbar">
-        <div className="map-workspace-toolbar-left">
-          <div className="map-toolbar map-toolbar-icons">
-            <button
-              type="button"
-              className={toolButtonClass(state.toolMode, "ruler")}
-              onClick={() => selectTool("ruler", "ruler")}
-              title="Regla"
-              aria-label="Regla"
-              disabled={!mapToolsEnabled}
-            >
-              📏
-            </button>
-            <button
-              type="button"
-              className={toolButtonClass(state.toolMode, "area")}
-              onClick={() => selectTool("area", "area")}
-              title="Área"
-              aria-label="Área"
-              disabled={!mapToolsEnabled}
-            >
-              📐
-            </button>
-            <button
-              type="button"
-              className={toolButtonClass(state.toolMode, "inspect")}
-              onClick={() => selectTool("inspect", "inspect")}
-              title="Inspeccionar"
-              aria-label="Inspeccionar"
-              disabled={!mapToolsEnabled}
-            >
-              📍
-            </button>
-            <button
-              type="button"
-              className={toolButtonClass(state.toolMode, "protractor")}
-              onClick={() => selectTool("protractor", "protractor")}
-              title="Transportador"
-              aria-label="Transportador"
-              disabled={!mapToolsEnabled}
-            >
-              ∠
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCenterRequestKey((value) => value + 1);
-                mapService.centerRobot();
-                runtime.eventBus.emit("console.event", {
-                  level: "info",
-                  text: "Map centered on robot",
-                  timestamp: Date.now()
-                });
-              }}
-              title="Centrar robot"
-              aria-label="Centrar robot"
-              disabled={!mapToolsEnabled}
-            >
-              🎯
-            </button>
-            <button
-              type="button"
-              onClick={() => selectTool("idle", "idle")}
-              title="Cerrar herramientas"
-              aria-label="Cerrar herramientas"
-              disabled={!mapToolsEnabled}
-            >
-              ❌
-            </button>
-          </div>
-        </div>
-        <div className="map-workspace-toolbar-right">
-          <div className="map-tool-status">{toolStatusText}</div>
-        </div>
-      </div>
-      <div className={`stage map-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
-        <section className={`stage-pane ${mainIsMap ? "main" : "mini"} map-stage-pane`}>
-          <div className="map-canvas map-pane-canvas">
-            <LeafletMapCanvas
-              state={state}
-              mapService={mapService}
-              runtime={runtime}
-              interactive={mapInteractive}
-              goalMode={navigationState?.goalMode === true}
-              waypoints={navigationState?.waypoints ?? []}
-              selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
-              robotPose={telemetrySnapshot?.robotPose ?? null}
-              datumPose={datumPose}
-              centerRequestKey={centerRequestKey}
-              onQueueWaypoint={queueWaypointFromMap}
-              onToggleWaypointSelection={toggleWaypointSelectionFromMap}
-              onMoveWaypoint={moveWaypointFromMap}
-              initialCenterLat={initialCenterLat}
-              initialCenterLon={initialCenterLon}
-              initialZoom={initialZoom}
-            />
-          </div>
-        </section>
-        {cameraPaneAvailable ? (
-          <section className={`stage-pane ${mainIsMap ? "mini" : "main"} map-camera-stage-pane`}>
-            <h4>Camera</h4>
-            <div className="camera-frame-wrap">
-              <iframe
-                className="camera-frame"
-                src={frameSrc}
-                title="Vista de cámara"
-                loading="lazy"
-                onLoad={() => {
-                  if (!(navigationService?.getState().cameraStreamConnected === true)) return;
-                  clearCameraLoadTimer();
-                  setFrameReady(true);
-                  setCameraConnectError("");
-                  setCameraStreamPending("idle");
-                }}
-                onError={() => {
-                  clearCameraLoadTimer();
-                  setFrameReady(false);
-                  setCameraConnectError("load error");
-                  setCameraStreamPending("idle");
-                  navigationService?.setCameraStreamConnected(false);
-                  runtime.eventBus.emit("console.event", {
-                    level: "warn",
-                    text: "Camera frame load error",
-                    timestamp: Date.now()
-                  });
-                }}
+    <div className="map-workspace-root map-html-root">
+      <div className={`stage map-stage map-html-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
+        {mainIsMap ? (
+          <section className="stage-pane main map-stage-pane">
+            <div className="map-canvas map-pane-canvas">
+              <LeafletMapCanvas
+                state={state}
+                mapService={mapService}
+                runtime={runtime}
+                interactive={mapInteractive}
+                goalMode={navigationState?.goalMode === true}
+                waypoints={navigationState?.waypoints ?? []}
+                selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                robotPose={telemetrySnapshot?.robotPose ?? null}
+                datumPose={datumPose}
+                centerRequestKey={centerRequestKey}
+                onQueueWaypoint={queueWaypointFromMap}
+                onToggleWaypointSelection={toggleWaypointSelectionFromMap}
+                onMoveWaypoint={moveWaypointFromMap}
+                onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                loopRoute={navigationState?.loopRoute === true}
+                initialCenterLat={initialCenterLat}
+                initialCenterLon={initialCenterLon}
+                initialZoom={initialZoom}
+                onZoomChange={setMapZoom}
+                mapControlRef={mapControlRef}
               />
-              {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
             </div>
           </section>
         ) : null}
-        <div className="stage-bottom-left-actions">
-          {cameraPaneAvailable ? (
-            <button type="button" className="swap-btn" onClick={() => setMainPane(mainIsMap ? "camera" : "map")}>
-              🔄
-            </button>
-          ) : null}
-        </div>
-        {cameraPaneAvailable && !mainIsMap ? <div className="stage-gps-mini-badge">Map minimapa</div> : null}
+        {cameraPaneAvailable && !mainIsMap ? (
+          <section className="stage-pane main map-camera-stage-pane map-camera-stage-pane-full">
+            <div className="map-camera-full-card">
+              <div className={`camera-frame-wrap map-camera-frame-wrap map-camera-alert-${cameraRisk}`}>
+                {snapSrc ? (
+                  <img className="camera-frame map-camera-frame" src={snapSrc} alt="camera" draggable={false} />
+                ) : null}
+                {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
+              </div>
+            </div>
+          </section>
+        ) : null}
+        {cameraPaneAvailable && !mainIsMap ? (
+          <section className="map-stage-pane map-map-stage-pane-mini">
+            <div className="map-camera-mini-head map-map-mini-head">
+              <span>Map</span>
+              <div className="map-camera-mini-head-right">
+                <button type="button" className="map-camera-expand-btn map-map-return-btn" onClick={() => setMainPane("map")} title="Volver al mapa" aria-label="Volver al mapa">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M10 2h4v4"/>
+                    <path d="M14 2 9 7"/>
+                    <path d="M6 14H2v-4"/>
+                    <path d="M2 14l5-5"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="map-mini-frame">
+              <LeafletMapCanvas
+                state={state}
+                mapService={mapService}
+                runtime={runtime}
+                interactive={false}
+                goalMode={false}
+                waypoints={navigationState?.waypoints ?? []}
+                selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                robotPose={telemetrySnapshot?.robotPose ?? null}
+                datumPose={datumPose}
+                centerRequestKey={centerRequestKey}
+                onQueueWaypoint={queueWaypointFromMap}
+                onToggleWaypointSelection={toggleWaypointSelectionFromMap}
+                onMoveWaypoint={moveWaypointFromMap}
+                onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                loopRoute={navigationState?.loopRoute === true}
+                initialCenterLat={initialCenterLat}
+                initialCenterLon={initialCenterLon}
+                initialZoom={initialZoom}
+              />
+            </div>
+          </section>
+        ) : null}
+        {mainIsMap ? (
+          <>
+            <div className="map-right-stack">
+              {showMiniCameraPane ? (
+                <section className="map-camera-stage-pane map-camera-stage-pane-mini">
+                  <div className="map-camera-mini-head">
+                    <span>Camera</span>
+                    <div className="map-camera-mini-head-right">
+                      {cameraPaneAvailable ? (
+                        <button type="button" className="map-camera-expand-btn" onClick={() => setMainPane("camera")} title="Abrir cámara">
+                          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M10 2h4v4"/>
+                            <path d="M14 2 9 7"/>
+                            <path d="M6 14H2v-4"/>
+                            <path d="M2 14l5-5"/>
+                          </svg>
+                        </button>
+                      ) : null}
+                      <span className={cameraStreamConnected ? "online" : ""} aria-hidden="true" />
+                    </div>
+                  </div>
+                  <div className={`camera-frame-wrap map-camera-frame-wrap map-camera-alert-${cameraRisk}`}>
+                    {snapSrc ? (
+                      <img className="camera-frame map-camera-frame" src={snapSrc} alt="camera" draggable={false} />
+                    ) : null}
+                    {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
+                    <div className="map-camera-crosshair" aria-hidden="true" />
+                  </div>
+                </section>
+              ) : null}
+              <div className="map-html-overlay-cards map-html-overlay-cards-inline">
+                <div className={`mission-status ${missionToneClass}`.trim()}>
+                  <div className="ms-main">
+                    <span className="ms-dot" aria-hidden="true" />
+                    <div className="ms-copy">
+                      <div className="ms-title">{missionTitle}</div>
+                      <div className="ms-detail">{missionDetail}</div>
+                    </div>
+                  </div>
+                  <div className="ms-progress">
+                    <div
+                      className="ms-bar"
+                      role="progressbar"
+                      aria-label="Route progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(displayMissionProgressPct)}
+                    >
+                      <div className="ms-bar-fill" style={{ width: `${displayMissionProgressPct}%` }} />
+                    </div>
+                    <span className="ms-progress-label">{missionProgressLabel}</span>
+                  </div>
+                </div>
+                <div className="map-html-speed-card">
+                  <div className="map-html-speed-head">
+                    <span className="map-html-speed-title">Speed limits</span>
+                    <button
+                      type="button"
+                      className="map-html-inline-action"
+                      disabled={!mapToolsEnabled}
+                      onClick={() => {
+                        void mapService
+                          .setDatumOnBackend()
+                          .then(() => {
+                            runtime.eventBus.emit("console.event", {
+                              level: "info",
+                              text: "Datum updated from robot pose",
+                              timestamp: Date.now()
+                            });
+                          })
+                          .catch((error) => {
+                            runtime.eventBus.emit("console.event", {
+                              level: "error",
+                              text: `Set datum failed: ${String(error)}`,
+                              timestamp: Date.now()
+                            });
+                          });
+                      }}
+                    >
+                      Datum
+                    </button>
+                  </div>
+                  <div className="map-html-range">
+                    <div className="range-label">
+                      Linear speed (m/s) <span className="range-val">{linearSpeed.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={linearMin}
+                      max={linearMax}
+                      step={0.01}
+                      value={linearSpeed}
+                      disabled={!navigationService}
+                      style={{ "--range-fill": `${linearFillPct}%` } as CSSProperties}
+                      onChange={(event) => navigationService?.setManualLinearSpeed(Number(event.target.value))}
+                    />
+                    <div className="map-range-scale" aria-hidden="true">
+                      <span>{linearMin.toFixed(1)}</span>
+                      <span>{((linearMin + linearMax) / 2).toFixed(1)}</span>
+                      <span>{linearMax.toFixed(1)}</span>
+                    </div>
+                  </div>
+                  <div className="map-html-range">
+                    <div className="range-label">
+                      Steering angle (deg) <span className="range-val">{steeringAngleDeg.toFixed(1)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={steeringAngleMin}
+                      max={steeringAngleMax}
+                      step={0.1}
+                      value={steeringAngleDeg}
+                      disabled={!navigationService}
+                      style={{ "--range-fill": `${steeringFillPct}%` } as CSSProperties}
+                      onChange={(event) => navigationService?.setManualSteeringAngleDeg(Number(event.target.value))}
+                    />
+                    <div className="map-range-scale" aria-hidden="true">
+                      <span>{steeringAngleMin.toFixed(1)}</span>
+                      <span>{((steeringAngleMin + steeringAngleMax) / 2).toFixed(1)}</span>
+                      <span>{steeringAngleMax.toFixed(1)}</span>
+                    </div>
+                  </div>
+                  <div className="map-html-tool-status">{toolStatusText}</div>
+                </div>
+              </div>
+            </div>
+            <div className="map-toolbar map-html-toolbar map-left-action-toolbar">
+              <div className="map-tool-group map-tool-group-zoom">
+                <div className="map-tool-group-title">Zoom</div>
+                <div className="map-tool-buttons">
+              <button
+                type="button"
+                className="map-btn"
+                onClick={() => mapControlRef.current?.zoomIn()}
+                title="Zoom in"
+                aria-label="Zoom in"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="8" y1="3" x2="8" y2="13"/>
+                  <line x1="3" y1="8" x2="13" y2="8"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn"
+                onClick={() => mapControlRef.current?.zoomOut()}
+                title="Zoom out"
+                aria-label="Zoom out"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="3" y1="8" x2="13" y2="8"/>
+                </svg>
+              </button>
+                </div>
+              </div>
+              <div className="map-tool-group map-tool-group-zone">
+                <div className="map-tool-group-title">Zone Editing</div>
+                <div className="map-tool-buttons">
+              <button
+                type="button"
+                className="map-btn"
+                onClick={() => clickLeafletTool(".leaflet-draw-draw-polygon", "draw zone")}
+                title="Dibujar zona"
+                aria-label="Dibujar zona"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 11.5 6 3l7 2.5-2.5 7.5L3 11.5Z"/>
+                  <circle cx="6" cy="3" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="13" cy="5.5" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="10.5" cy="13" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="3" cy="11.5" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn"
+                onClick={() => clickLeafletTool(".leaflet-draw-edit-edit", "edit zones")}
+                title="Editar zonas"
+                aria-label="Editar zonas"
+                disabled={!mapToolsEnabled || state.zones.length === 0}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 13 4 9.5 11.5 2 14 4.5 6.5 12 3 13Z"/>
+                  <path d="M10 3.5 12.5 6"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn"
+                onClick={() => {
+                  const count = state.zones.length;
+                  mapService.clearZones();
+                  runtime.eventBus.emit("console.event", {
+                    level: "info",
+                    text: `No-go zones deleted (${count})`,
+                    timestamp: Date.now()
+                  });
+                }}
+                title="Borrar zonas"
+                aria-label="Borrar zonas"
+                disabled={!mapToolsEnabled || state.zones.length === 0}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2.5 4.5h11"/>
+                  <path d="M6 4.5V3h4v1.5"/>
+                  <path d="m4 4.5.7 8.5h6.6l.7-8.5"/>
+                  <path d="M6.8 7v4"/>
+                  <path d="M9.2 7v4"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`map-btn map-btn-confirm ${leafletZoneToolActive ? "active" : ""}`}
+                onClick={confirmZoneTool}
+                title="Confirmar edición de zonas"
+                aria-label="Confirmar edición de zonas"
+                disabled={!mapToolsEnabled || !leafletZoneToolActive}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 8.4 6.6 12 13 4"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`map-btn map-btn-close ${state.toolMode !== "idle" || leafletZoneToolActive ? "active" : ""}`}
+                onClick={closeMapTools}
+                title="Cerrar herramientas"
+                aria-label="Cerrar herramientas"
+                disabled={!mapToolsEnabled || (state.toolMode === "idle" && !leafletZoneToolActive)}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="4" y1="4" x2="12" y2="12"/>
+                  <line x1="12" y1="4" x2="4" y2="12"/>
+                </svg>
+              </button>
+                </div>
+              </div>
+              <div className="map-tool-group map-tool-group-measure">
+                <div className="map-tool-group-title">Measure</div>
+                <div className="map-tool-buttons">
+              <button
+                type="button"
+                className={`map-btn ${toolButtonClass(state.toolMode, "ruler")}`}
+                onClick={() => selectTool("ruler", "ruler")}
+                title="Regla"
+                aria-label="Regla"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                  <rect x="1" y="5.5" width="14" height="5" rx="1"/>
+                  <line x1="4" y1="5.5" x2="4" y2="8"/>
+                  <line x1="7" y1="5.5" x2="7" y2="7.5"/>
+                  <line x1="10" y1="5.5" x2="10" y2="8"/>
+                  <line x1="13" y1="5.5" x2="13" y2="7.5"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`map-btn ${toolButtonClass(state.toolMode, "area")}`}
+                onClick={() => selectTool("area", "area")}
+                title="Área"
+                aria-label="Área"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polygon points="8,2 14,13 2,13"/>
+                  <circle cx="8" cy="2" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="14" cy="13" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="2" cy="13" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+                </div>
+              </div>
+              <div className="map-tool-group map-tool-group-nav">
+                <div className="map-tool-group-title">Nav</div>
+                <div className="map-tool-buttons">
+              <button
+                type="button"
+                className={`map-btn ${toolButtonClass(state.toolMode, "inspect")}`}
+                onClick={() => selectTool("inspect", "inspect")}
+                title="Inspección"
+                aria-label="Inspección"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                  <circle cx="8" cy="7" r="3"/>
+                  <line x1="8" y1="1" x2="8" y2="4"/>
+                  <line x1="8" y1="10" x2="8" y2="13"/>
+                  <line x1="1" y1="7" x2="4" y2="7"/>
+                  <line x1="12" y1="7" x2="15" y2="7"/>
+                  <line x1="8" y1="13" x2="8" y2="15.5"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn map-btn-sep"
+                onClick={() => {
+                  setCenterRequestKey((value) => value + 1);
+                  mapService.centerRobot();
+                  runtime.eventBus.emit("console.event", {
+                    level: "info",
+                    text: "Map centered on robot",
+                    timestamp: Date.now()
+                  });
+                }}
+                title="Centrar robot"
+                aria-label="Centrar robot"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                  <circle cx="8" cy="8" r="5"/>
+                  <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+                  <line x1="8" y1="1" x2="8" y2="3"/>
+                  <line x1="8" y1="13" x2="8" y2="15"/>
+                  <line x1="1" y1="8" x2="3" y2="8"/>
+                  <line x1="13" y1="8" x2="15" y2="8"/>
+                </svg>
+              </button>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -1770,6 +3180,20 @@ export function createMapModule(): CockpitModule {
       });
 
       const service = new MapService(dispatcher);
+      try {
+        const connectionService = ctx.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+        const applyConnectionState = (state: ConnectionState): void => {
+          service.setBackendSyncTransportState({
+            connected: state.connected === true,
+            host: state.host,
+            port: state.port
+          });
+        };
+        applyConnectionState(connectionService.getState());
+        connectionService.subscribe((state) => applyConnectionState(state));
+      } catch {
+        service.setBackendSyncTransportState({ connected: false });
+      }
       ctx.services.registerService({
         id: SERVICE_ID,
         service

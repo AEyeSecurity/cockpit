@@ -1,6 +1,8 @@
+import { createElement } from "react";
 import type { CockpitModule, CockpitPackage, ModuleContext } from "../../core/types/module";
 import { createMetricsModule } from "./modules/metrics/frontend";
-import { createTerminalModule } from "./modules/terminal/frontend";
+import { LogConsoleTab } from "./modules/ui/frontend/LogConsoleTab";
+import { TerminalConsoleTab } from "./modules/ui/frontend/TerminalConsoleTab";
 
 // UI components
 export { ToolbarMenu } from "./modules/ui/frontend/ToolbarMenu";
@@ -27,13 +29,27 @@ export { DialogService, DIALOG_SERVICE_ID } from "./modules/runtime/service/impl
 export type { ActiveGlobalDialog } from "./modules/runtime/service/impl/DialogService";
 export { SystemNotificationService, SYSTEM_NOTIFICATION_SERVICE_ID } from "./modules/runtime/service/impl/SystemNotificationService";
 export { MetricsService, METRICS_SERVICE_ID } from "./modules/metrics/service/impl/MetricsService";
-export { TerminalService } from "./modules/terminal/service/impl/TerminalService";
 
 const uiModule: CockpitModule = {
   id: "ui",
   version: "1.0.0",
   enabledByDefault: true,
-  register(_ctx: ModuleContext): void {}
+  register(ctx: ModuleContext): void {
+    ctx.contributions.register({
+      id: "console.log",
+      slot: "console",
+      label: "Log",
+      order: -10,
+      render: () => createElement(LogConsoleTab, { runtime: ctx })
+    });
+    ctx.contributions.register({
+      id: "console.terminal",
+      slot: "console",
+      label: "Terminal",
+      order: -5,
+      render: () => createElement(TerminalConsoleTab, { runtime: ctx })
+    });
+  }
 };
 
 const runtimeModule: CockpitModule = {
@@ -48,6 +64,6 @@ export function createPackage(): CockpitPackage {
     id: "core",
     version: "1.0.0",
     enabledByDefault: true,
-    modules: [uiModule, runtimeModule, createMetricsModule(), createTerminalModule()]
+    modules: [uiModule, runtimeModule, createMetricsModule()]
   };
 }

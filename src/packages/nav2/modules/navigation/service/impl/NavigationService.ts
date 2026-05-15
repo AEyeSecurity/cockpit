@@ -1,9 +1,10 @@
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
+import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface GoalInput {
   x: number;
   y: number;
-  yawDeg: number;
+  yawDeg?: number;
 }
 
 export interface RouteMissionWaypoint extends GoalInput {}
@@ -21,6 +22,12 @@ export interface RouteMissionStateData {
   legSpacingM: number;
   chunkSpanM: number;
   chunkMaxWaypoints: number;
+  blockedState: string;
+  blockedReasonCode: string;
+  blockedReasonText: string;
+  blockedRetryAttempt: number;
+  blockedRetryMaxAttempts: number;
+  blockedWaitRemainingS: number;
   missionWaypoints: RouteMissionWaypoint[];
   activeChunkWaypoints: RouteMissionWaypoint[];
 }
@@ -51,6 +58,19 @@ export interface ManualKeysState {
   d: boolean;
 }
 
+export interface RecordingState {
+  active: boolean;
+  count: number;
+  lastMessage: string;
+}
+
+export interface PatrolLoopState {
+  active: boolean;
+  currentWaypoint: number;
+  totalWaypoints: number;
+  label: string;
+}
+
 export interface NavigationState {
   waypoints: GoalInput[];
   selectedWaypointIndexes: number[];
@@ -60,6 +80,7 @@ export interface NavigationState {
   manualMode: boolean;
   manualDisablePending: boolean;
   manualLinearSpeed: number;
+  manualWaypointDirection: boolean;
   manualSteeringAngleDeg: number;
   manualLinearMin: number;
   manualLinearMax: number;
@@ -75,6 +96,8 @@ export interface NavigationState {
   controlLocked: boolean;
   controlLockReason: string;
   unlockGraceUntilMs: number;
+  recording: RecordingState;
+  patrolLoop: PatrolLoopState;
   lastStatus: string;
   lastSnapshot: SnapshotData | null;
 }
@@ -94,16 +117,6 @@ const MANUAL_STEERING_FALLBACK_SPEED_MPS = 0.5;
 const MANUAL_LOOP_INTERVAL_MS = 50;
 const navigationMemoryStorage = new Map<string, string>();
 
-function ackermannYawRateFromSteering(linearX: number, steerDeg: number): number {
-  const requestedSteerDeg = Number.isFinite(steerDeg) ? steerDeg : 0;
-  if (Math.abs(requestedSteerDeg) <= 1.0e-6) return 0;
-  const steeringRad = (requestedSteerDeg * Math.PI) / 180.0;
-  const signedSpeed = Number.isFinite(linearX) ? linearX : 0;
-  const referenceSpeed =
-    Math.abs(signedSpeed) > 1.0e-3 ? signedSpeed : MANUAL_STEERING_FALLBACK_SPEED_MPS;
-  return (referenceSpeed * Math.tan(steeringRad)) / MANUAL_ACKERMANN_WHEELBASE_M;
-}
-
 export interface NavigationManualDefaults {
   linearSpeed: number;
   steeringAngleDeg: number;
@@ -112,6 +125,16 @@ export interface NavigationManualDefaults {
   linearMax: number;
   steeringAngleMinDeg: number;
   steeringAngleMaxDeg: number;
+}
+
+function ackermannYawRateFromSteering(linearX: number, steerDeg: number): number {
+  const requestedSteerDeg = Number.isFinite(steerDeg) ? steerDeg : 0;
+  if (Math.abs(requestedSteerDeg) <= 1.0e-6) return 0;
+  const steeringRad = (requestedSteerDeg * Math.PI) / 180.0;
+  const signedSpeed = Number.isFinite(linearX) ? linearX : 0;
+  const referenceSpeed =
+    Math.abs(signedSpeed) > 1.0e-3 ? signedSpeed : MANUAL_STEERING_FALLBACK_SPEED_MPS;
+  return (referenceSpeed * Math.tan(steeringRad)) / MANUAL_ACKERMANN_WHEELBASE_M;
 }
 
 function clampInRange(value: unknown, fallback: number, min: number, max: number): number {
@@ -161,15 +184,17 @@ function getStorageAdapter(): {
 }
 
 function parseGoal(input: GoalInput): GoalInput {
+  const yawRaw = input.yawDeg;
+  const hasYaw = yawRaw !== undefined && yawRaw !== null;
   const parsed = {
     x: Number(input.x),
     y: Number(input.y),
-    yawDeg: Number(input.yawDeg)
+    yawDeg: hasYaw ? Number(yawRaw) : undefined
   };
-  if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y) || !Number.isFinite(parsed.yawDeg)) {
+  if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y) || (hasYaw && !Number.isFinite(parsed.yawDeg))) {
     throw new Error("Invalid goal input");
   }
-  return parsed;
+  return hasYaw ? { x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg } : { x: parsed.x, y: parsed.y };
 }
 
 function parseStoredWaypoints(raw: string): GoalInput[] {
@@ -205,6 +230,22 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function extractMessageText(message: Record<string, unknown>): string {
+  const direct = typeof message.message === "string" ? message.message.trim() : "";
+  if (direct) return direct;
+  const payload = asRecord(message.payload);
+  const nested = payload && typeof payload.message === "string" ? payload.message.trim() : "";
+  return nested || "";
+}
+
+function normalizeRecordingError(response: Nav2IncomingMessage, fallback: string): string {
+  const raw = String(response.error ?? (extractMessageText(response as Record<string, unknown>) || fallback)).trim();
+  if (/unknown\s+op/i.test(raw)) {
+    return "El backend conectado no soporta la operación de grabación de waypoints. Actualizá o levantá map_tools web_zone_server con soporte start_recording.";
+  }
+  return raw || fallback;
+}
+
 function messageCandidates(message: Record<string, unknown>): Record<string, unknown>[] {
   const direct = message;
   const payload = asRecord(message.payload);
@@ -231,6 +272,12 @@ function createDefaultRouteMission(): RouteMissionStateData {
     legSpacingM: 0,
     chunkSpanM: 0,
     chunkMaxWaypoints: 0,
+    blockedState: "",
+    blockedReasonCode: "",
+    blockedReasonText: "",
+    blockedRetryAttempt: 0,
+    blockedRetryMaxAttempts: 0,
+    blockedWaitRemainingS: 0,
     missionWaypoints: [],
     activeChunkWaypoints: []
   };
@@ -250,6 +297,22 @@ function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
     y: lon,
     yawDeg
   };
+}
+
+function hasExplicitYaw(input: GoalInput): input is GoalInput & { yawDeg: number } {
+  return input.yawDeg !== undefined && input.yawDeg !== null && Number.isFinite(Number(input.yawDeg));
+}
+
+function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
+  const parsed = parseGoal(input);
+  const waypoint: { lat: number; lon: number; yaw_deg?: number } = {
+    lat: parsed.x,
+    lon: parsed.y
+  };
+  if (hasExplicitYaw(parsed)) {
+    waypoint.yaw_deg = Number(parsed.yawDeg);
+  }
+  return waypoint;
 }
 
 function parseRouteMissionState(message: Record<string, unknown>): RouteMissionStateData | null {
@@ -280,6 +343,13 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     legSpacingM: Number(candidate.leg_spacing_m ?? 0) || 0,
     chunkSpanM: Number(candidate.chunk_span_m ?? 0) || 0,
     chunkMaxWaypoints: Number(candidate.chunk_max_waypoints ?? 0) || 0,
+    blockedState: String(candidate.blocked_state ?? candidate.blockedState ?? ""),
+    blockedReasonCode: String(candidate.blocked_reason_code ?? candidate.blockedReasonCode ?? ""),
+    blockedReasonText: String(candidate.blocked_reason_text ?? candidate.blockedReasonText ?? ""),
+    blockedRetryAttempt: Number(candidate.blocked_retry_attempt ?? candidate.blockedRetryAttempt ?? 0) || 0,
+    blockedRetryMaxAttempts:
+      Number(candidate.blocked_retry_max_attempts ?? candidate.blockedRetryMaxAttempts ?? 0) || 0,
+    blockedWaitRemainingS: Number(candidate.blocked_wait_remaining_s ?? candidate.blockedWaitRemainingS ?? 0) || 0,
     missionWaypoints,
     activeChunkWaypoints
   };
@@ -346,6 +416,70 @@ function extractControlLockFromNavEvent(message: Record<string, unknown>): { loc
   return {};
 }
 
+function extractRecordingCount(message: Record<string, unknown>): number | null {
+  for (const candidate of messageCandidates(message)) {
+    if (!Object.prototype.hasOwnProperty.call(candidate, "recording_count")) continue;
+    const count = Number(candidate.recording_count);
+    if (Number.isFinite(count)) {
+      return Math.max(0, Math.trunc(count));
+    }
+  }
+
+  const isRecordingCountMessage = String(message.op ?? "").trim() === "recording_count";
+  if (!isRecordingCountMessage) return null;
+  const payload = asRecord(message.payload);
+  const count = Number(message.count ?? payload?.count);
+  if (!Number.isFinite(count)) return null;
+  return Math.max(0, Math.trunc(count));
+}
+
+function parsePatrolLoopUpdate(raw: Record<string, unknown> | null): Partial<PatrolLoopState> | null {
+  if (!raw) return null;
+  const update: Partial<PatrolLoopState> = {};
+  let hasValue = false;
+
+  if (typeof raw.active === "boolean") {
+    update.active = raw.active === true;
+    hasValue = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "current_wp") || Object.prototype.hasOwnProperty.call(raw, "currentWaypoint")) {
+    const currentWaypoint = Number(raw.current_wp ?? raw.currentWaypoint);
+    if (Number.isFinite(currentWaypoint)) {
+      update.currentWaypoint = Math.trunc(currentWaypoint);
+      hasValue = true;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "total_wp") || Object.prototype.hasOwnProperty.call(raw, "totalWaypoints")) {
+    const totalWaypoints = Number(raw.total_wp ?? raw.totalWaypoints);
+    if (Number.isFinite(totalWaypoints)) {
+      update.totalWaypoints = Math.max(0, Math.trunc(totalWaypoints));
+      hasValue = true;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, "label")) {
+    update.label = String(raw.label ?? "");
+    hasValue = true;
+  }
+
+  return hasValue ? update : null;
+}
+
+function extractPatrolLoopUpdate(message: Record<string, unknown>): Partial<PatrolLoopState> | null {
+  const directPatrolStatus = parsePatrolLoopUpdate(asRecord(message.patrol_status));
+  if (directPatrolStatus) return directPatrolStatus;
+
+  for (const candidate of messageCandidates(message)) {
+    const nested = parsePatrolLoopUpdate(asRecord(candidate.patrol_status));
+    if (nested) return nested;
+  }
+
+  if (String(message.op ?? "").trim() !== "patrol_status") return null;
+  return parsePatrolLoopUpdate(message) ?? parsePatrolLoopUpdate(asRecord(message.payload));
+}
+
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -364,6 +498,7 @@ export class NavigationService {
     manualMode: false,
     manualDisablePending: false,
     manualLinearSpeed: DEFAULT_MANUAL_LINEAR_SPEED,
+    manualWaypointDirection: false,
     manualSteeringAngleDeg: DEFAULT_MANUAL_STEERING_ANGLE_DEG,
     manualLinearMin: DEFAULT_MANUAL_LINEAR_MIN,
     manualLinearMax: DEFAULT_MANUAL_LINEAR_MAX,
@@ -384,6 +519,17 @@ export class NavigationService {
     controlLocked: true,
     controlLockReason: "locked",
     unlockGraceUntilMs: 0,
+    recording: {
+      active: false,
+      count: 0,
+      lastMessage: ""
+    },
+    patrolLoop: {
+      active: false,
+      currentWaypoint: -1,
+      totalWaypoints: 0,
+      label: ""
+    },
     lastStatus: "No active goal",
     lastSnapshot: null
   };
@@ -436,10 +582,14 @@ export class NavigationService {
       subscribeNavTelemetry?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeAck?: (callback: (message: Record<string, unknown>) => void) => () => void;
       subscribeNavEvent?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribeRecordingCount?: (callback: (message: Record<string, unknown>) => void) => () => void;
+      subscribePatrolStatus?: (callback: (message: Record<string, unknown>) => void) => () => void;
     };
     dispatcher.subscribeState?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
+      this.applyRecordingCountPayload(message);
+      this.applyPatrolLoopPayload(message);
       this.applyRouteMissionPayload(message);
     });
     dispatcher.subscribeNavTelemetry?.((message) => {
@@ -461,6 +611,12 @@ export class NavigationService {
       const fromEvent = extractControlLockFromNavEvent(message);
       this.applyControlLockUpdate(fromEvent);
     });
+    dispatcher.subscribeRecordingCount?.((message) => {
+      this.applyRecordingCountPayload(message);
+    });
+    dispatcher.subscribePatrolStatus?.((message) => {
+      this.applyPatrolLoopPayload(message);
+    });
   }
 
   getState(): NavigationState {
@@ -475,6 +631,8 @@ export class NavigationService {
       selectedWaypointIndexes: [...this.state.selectedWaypointIndexes],
       manualCommand: { ...this.state.manualCommand },
       manualKeys: { ...this.state.manualKeys },
+      recording: { ...this.state.recording },
+      patrolLoop: { ...this.state.patrolLoop },
       lastSnapshot: this.state.lastSnapshot ? { ...this.state.lastSnapshot } : null
     };
   }
@@ -500,10 +658,42 @@ export class NavigationService {
     this.state = {
       ...this.state,
       goalMode: next,
+      manualMode: next ? false : this.state.manualMode,
+      manualWaypointDirection: next,
+      manualDisablePending: next ? false : this.state.manualDisablePending,
       lastStatus: next ? "Goal mode ON" : "Goal mode OFF"
     };
+    if (next) {
+      this.clearManualIntent();
+      this.updateManualLoopLifecycle();
+    }
     this.emit();
     return next;
+  }
+
+  async setGoalMode(enabled: boolean): Promise<void> {
+    if (enabled && this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    if (enabled && this.state.manualMode) {
+      const response = await this.robotDispatcher.requestManualMode(false);
+      if (response.ok === false) {
+        throw new Error(response.error ?? "Disable manual mode failed");
+      }
+    }
+    this.state = {
+      ...this.state,
+      goalMode: enabled,
+      manualMode: enabled ? false : this.state.manualMode,
+      manualWaypointDirection: enabled,
+      manualDisablePending: enabled ? false : this.state.manualDisablePending,
+      lastStatus: enabled ? "Goal mode ON" : "Goal mode OFF"
+    };
+    if (enabled) {
+      this.clearManualIntent();
+      this.updateManualLoopLifecycle();
+    }
+    this.emit();
   }
 
   queueWaypoint(input: GoalInput): void {
@@ -523,7 +713,7 @@ export class NavigationService {
     const next = parseGoal({
       x,
       y,
-      yawDeg: current.yawDeg
+      ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {})
     });
     const waypoints = this.state.waypoints.map((entry, entryIndex) => (entryIndex === index ? next : entry));
     this.state = {
@@ -616,11 +806,7 @@ export class NavigationService {
     if (this.state.waypoints.length === 0) {
       throw new Error("No waypoints to save");
     }
-    const waypoints = this.state.waypoints.map((entry) => ({
-      lat: Number(entry.x),
-      lon: Number(entry.y),
-      yaw_deg: Number(entry.yawDeg ?? 0)
-    }));
+    const waypoints = this.state.waypoints.map((entry) => goalToWireWaypoint(entry));
     const response = await this.robotDispatcher.requestSaveWaypointsFile(waypoints);
     if (response.ok === false) {
       throw new Error(response.error ?? "Save waypoints failed");
@@ -667,15 +853,20 @@ export class NavigationService {
         const value = entry as Record<string, unknown>;
         const lat = Number(value.lat);
         const lon = Number(value.lon);
-        const yawDeg = Number(value.yaw_deg ?? value.yawDeg ?? 0);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+        const yawRaw = value.yaw_deg ?? value.yawDeg;
+        const hasYaw = yawRaw !== undefined && yawRaw !== null;
+        const yawDeg = hasYaw ? Number(yawRaw) : undefined;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || (hasYaw && !Number.isFinite(yawDeg))) {
           return null;
         }
-        return {
+        const waypoint: GoalInput = {
           x: lat,
-          y: lon,
-          yawDeg
-        } satisfies GoalInput;
+          y: lon
+        };
+        if (hasYaw) {
+          waypoint.yawDeg = yawDeg;
+        }
+        return waypoint;
       })
       .filter((entry): entry is GoalInput => entry !== null)
       .slice(0, MAX_WAYPOINTS);
@@ -688,6 +879,91 @@ export class NavigationService {
     };
     this.emit();
     return loaded.length;
+  }
+
+  async startRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestStartRecording();
+    if (response.ok === false) {
+      throw new Error(normalizeRecordingError(response, "Start recording failed"));
+    }
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        active: true,
+        lastMessage: ""
+      },
+      lastStatus: "Waypoint recording started"
+    };
+    this.emit();
+  }
+
+  async stopRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestStopRecording();
+    if (response.ok === false) {
+      throw new Error(normalizeRecordingError(response, "Stop recording failed"));
+    }
+    const message = extractMessageText(response as Record<string, unknown>) || "saved";
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        active: false,
+        lastMessage: message
+      },
+      lastStatus: "Waypoint recording stopped"
+    };
+    this.emit();
+  }
+
+  async clearRecording(): Promise<void> {
+    const response = await this.robotDispatcher.requestClearRecording();
+    if (response.ok === false) {
+      throw new Error(normalizeRecordingError(response, "Clear recording failed"));
+    }
+    const message = extractMessageText(response as Record<string, unknown>) || "recording cleared";
+    this.state = {
+      ...this.state,
+      recording: {
+        active: false,
+        count: 0,
+        lastMessage: message
+      },
+      lastStatus: "Waypoint recording cleared"
+    };
+    this.emit();
+  }
+
+  async startPatrol(): Promise<void> {
+    const response = await this.robotDispatcher.requestStartPatrol();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Start patrol failed");
+    }
+    this.state = {
+      ...this.state,
+      patrolLoop: {
+        ...this.state.patrolLoop,
+        active: true
+      },
+      lastStatus: "Loop patrol started"
+    };
+    this.emit();
+  }
+
+  async stopPatrol(): Promise<void> {
+    const response = await this.robotDispatcher.requestStopPatrol();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Stop patrol failed");
+    }
+    this.state = {
+      ...this.state,
+      patrolLoop: {
+        ...this.state.patrolLoop,
+        active: false
+      },
+      lastStatus: "Loop patrol stopped"
+    };
+    this.emit();
   }
 
   toggleCameraStream(): boolean {
@@ -716,6 +992,13 @@ export class NavigationService {
 
   async unlockControls(graceMs = 2000): Promise<void> {
     await this.setControlLock(false, graceMs);
+  }
+
+  applyLocalControlLock(locked: boolean, reason: string): void {
+    this.applyControlLockUpdate({
+      locked,
+      reason
+    });
   }
 
   startControlHeartbeat(intervalMs = 1000): void {
@@ -750,11 +1033,7 @@ export class NavigationService {
       throw new Error("No waypoint queued");
     }
 
-    const waypoints = queued.map((entry) => parseGoal(entry)).map((entry) => ({
-      lat: entry.x,
-      lon: entry.y,
-      yaw_deg: entry.yawDeg
-    }));
+    const waypoints = queued.map((entry) => goalToWireWaypoint(entry));
     const response = await this.robotDispatcher.requestGoal({
       waypoints,
       loop: this.state.loopRoute
@@ -804,11 +1083,7 @@ export class NavigationService {
     }
 
     const payload: Record<string, unknown> = {
-      waypoints: queued.map((entry) => ({
-        lat: entry.x,
-        lon: entry.y,
-        yaw_deg: entry.yawDeg
-      })),
+      waypoints: queued.map((entry) => goalToWireWaypoint(entry)),
       loop: this.state.loopRoute
     };
     if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
@@ -824,7 +1099,7 @@ export class NavigationService {
     const expandedCount = Number(response.expanded_waypoint_count ?? queued.length) || queued.length;
     this.state = {
       ...this.state,
-      lastStatus: `Route mission sent (${inputCount} → ${expandedCount})`
+      lastStatus: `Route mission sent (${inputCount} -> ${expandedCount})`
     };
     this.emit();
     return {
@@ -841,11 +1116,7 @@ export class NavigationService {
     const validated = parseGoal(input);
     const payload = {
       waypoints: [
-        {
-          lat: validated.x,
-          lon: validated.y,
-          yaw_deg: validated.yawDeg
-        }
+        goalToWireWaypoint(validated)
       ],
       loop: this.state.loopRoute
     } as never;
@@ -898,6 +1169,7 @@ export class NavigationService {
     }
     this.state = {
       ...this.state,
+      goalMode: enabled ? false : this.state.goalMode,
       manualMode: enabled,
       manualDisablePending: false,
       lastStatus: enabled ? "Manual mode ON" : "Manual mode OFF"
@@ -997,10 +1269,6 @@ export class NavigationService {
       manualSteeringAngleDeg: clamped
     };
     this.emit();
-  }
-
-  setManualAngularSpeed(value: number): void {
-    this.setManualSteeringAngleDeg(value);
   }
 
   applyRuntimeDefaults(defaults: Partial<NavigationManualDefaults>): void {
@@ -1233,6 +1501,7 @@ export class NavigationService {
 
     this.state = {
       ...this.state,
+      goalMode: enabledFromServer ? false : this.state.goalMode,
       manualMode: enabledFromServer,
       manualDisablePending: enabledFromServer ? this.state.manualDisablePending : false,
       manualCommand: {
@@ -1245,6 +1514,39 @@ export class NavigationService {
       this.clearManualIntent();
     }
     this.updateManualLoopLifecycle();
+    this.emit();
+  }
+
+  private applyRecordingCountPayload(message: Record<string, unknown>): void {
+    const count = extractRecordingCount(message);
+    if (count === null || count === this.state.recording.count) return;
+    this.state = {
+      ...this.state,
+      recording: {
+        ...this.state.recording,
+        count
+      }
+    };
+    this.emit();
+  }
+
+  private applyPatrolLoopPayload(message: Record<string, unknown>): void {
+    const update = extractPatrolLoopUpdate(message);
+    if (!update) return;
+    const next = {
+      ...this.state.patrolLoop,
+      ...update
+    };
+    const changed =
+      next.active !== this.state.patrolLoop.active ||
+      next.currentWaypoint !== this.state.patrolLoop.currentWaypoint ||
+      next.totalWaypoints !== this.state.patrolLoop.totalWaypoints ||
+      next.label !== this.state.patrolLoop.label;
+    if (!changed) return;
+    this.state = {
+      ...this.state,
+      patrolLoop: next
+    };
     this.emit();
   }
 

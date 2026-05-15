@@ -18,6 +18,10 @@ export class MapDispatcher extends Nav2DispatcherBase {
     return this.request("load_zones_file", {}, { timeoutMs: 6000 });
   }
 
+  async setDatum(): Promise<Nav2IncomingMessage> {
+    return this.request("set_datum", {}, { timeoutMs: 6000 });
+  }
+
   async getDatums(): Promise<Nav2IncomingMessage> {
     return this.request("get_datums", {}, { timeoutMs: 6000 });
   }

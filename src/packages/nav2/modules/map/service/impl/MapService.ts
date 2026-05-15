@@ -91,6 +91,8 @@ export class MapService {
   private datumProfilesState: DatumProfilesState | null = null;
   private savedZonesPayload = "[]";
   private readonly zoneStorageKey = "cockpit.map.zones.v1";
+  private backendSyncConnected = false;
+  private backendSyncEndpoint = "";
 
   constructor(private readonly mapDispatcher: MapDispatcher) {
     this.mapDispatcher.subscribe("state", (message) => {
@@ -341,11 +343,23 @@ export class MapService {
   }
 
   async pushZonesToBackend(): Promise<void> {
+    if (!this.backendSyncConnected) {
+      const endpoint = this.backendSyncEndpoint ? ` (${this.backendSyncEndpoint})` : "";
+      throw new Error(`Zones backend transport is disconnected${endpoint}`);
+    }
     const geojson = this.buildGeoJsonFromState();
     const response = await this.mapDispatcher.setZonesGeoJson(geojson);
     if (response.ok === false) {
       throw new Error(String(response.error ?? "set_zones_geojson failed"));
     }
+  }
+
+  setBackendSyncTransportState(options: { connected: boolean; host?: string; port?: string }): void {
+    const host = String(options.host ?? "").trim();
+    const port = String(options.port ?? "").trim();
+    const hasEndpoint = host.length > 0 && port.length > 0;
+    this.backendSyncConnected = options.connected === true && hasEndpoint;
+    this.backendSyncEndpoint = hasEndpoint ? `${host}:${port}` : "";
   }
 
   async loadZonesFromBackend(): Promise<number> {
@@ -394,6 +408,14 @@ export class MapService {
       toolInfo: "Datum updated from current robot pose."
     };
     this.emit();
+  }
+
+  async setDatumOnBackend(): Promise<void> {
+    const response = await this.mapDispatcher.setDatum();
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "set_datum failed"));
+    }
+    this.setDatumFromRobot();
   }
 
   async getDatums(): Promise<DatumProfilesState> {
@@ -491,7 +513,7 @@ export class MapService {
 
   private syncZonesIfEnabled(options?: { sync?: boolean }): void {
     const shouldSync = options?.sync ?? true;
-    if (!shouldSync || !this.state.autoSync) return;
+    if (!shouldSync || !this.state.autoSync || !this.backendSyncConnected) return;
     void this.pushZonesToBackend().catch(() => undefined);
   }
 

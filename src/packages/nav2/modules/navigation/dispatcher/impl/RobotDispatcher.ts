@@ -50,13 +50,33 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestSaveWaypointsFile(
-    waypoints: Array<{ lat: number; lon: number; yaw_deg: number }>
+    waypoints: Array<{ lat: number; lon: number; yaw_deg?: number }>
   ): Promise<Nav2IncomingMessage> {
     return this.request("save_waypoints_file", { waypoints } as never, { timeoutMs: 7000 });
   }
 
   async requestLoadWaypointsFile(): Promise<Nav2IncomingMessage> {
     return this.request("load_waypoints_file", {}, { timeoutMs: 7000 });
+  }
+
+  async requestStartRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("start_recording", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStopRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("stop_recording", {}, { timeoutMs: 7000 });
+  }
+
+  async requestClearRecording(): Promise<Nav2IncomingMessage> {
+    return this.request("clear_recording", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStartPatrol(): Promise<Nav2IncomingMessage> {
+    return this.request("start_patrol", {}, { timeoutMs: 5000 });
+  }
+
+  async requestStopPatrol(): Promise<Nav2IncomingMessage> {
+    return this.request("stop_patrol", {}, { timeoutMs: 5000 });
   }
 
   async requestCameraPan(angleDeg: number): Promise<Nav2IncomingMessage> {
@@ -124,6 +144,14 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.subscribe("nav_event", callback);
   }
 
+  subscribeRecordingCount(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("recording_count", callback);
+  }
+
+  subscribePatrolStatus(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("patrol_status", callback);
+  }
+
   subscribeNavAlerts(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("nav_alerts", callback);
   }
@@ -138,5 +166,9 @@ export class RobotDispatcher extends Nav2DispatcherBase {
 
   subscribeAck(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("ack", callback);
+  }
+
+  subscribeRtkSourceState(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("rtk_source_state", callback);
   }
 }
