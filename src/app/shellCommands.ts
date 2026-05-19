@@ -6,6 +6,8 @@ export const ShellCommands = {
   toggleConsole: "cockpit.shell.toggleConsole",
   openModal: "cockpit.shell.openModal",
   closeModal: "cockpit.shell.closeModal",
+  openWorkspace: "cockpit.shell.openWorkspace",
+  closeFocusedWorkspace: "cockpit.shell.closeFocusedWorkspace",
   dismiss: "cockpit.shell.dismiss",
   zoomIn: "cockpit.shell.zoomIn",
   zoomOut: "cockpit.shell.zoomOut",
@@ -22,6 +24,8 @@ export interface ShellCommandCallbacks {
   toggleConsole: () => void;
   openModal: (modalId: string) => void;
   closeModal: () => void;
+  openWorkspace: (workspaceId: string, options?: { focused?: boolean; toggleFocused?: boolean }) => void;
+  closeFocusedWorkspace: () => void;
   getActiveModalId: () => string | null;
   zoomIn: () => void | Promise<void>;
   zoomOut: () => void | Promise<void>;
@@ -75,6 +79,27 @@ export function registerShellCommands(
     runtime.commands.register(
       { id: LegacyShellCommands.closeModal, title: "Close Modal", category: "Shell" },
       () => callbacks.closeModal()
+    )
+  );
+
+  disposables.push(
+    runtime.commands.register(
+      { id: ShellCommands.openWorkspace, title: "Open Workspace", category: "Shell" },
+      (workspaceId: unknown, options: unknown) => {
+        if (typeof workspaceId !== "string") return;
+        const optionRecord = options && typeof options === "object" ? (options as Record<string, unknown>) : null;
+        callbacks.openWorkspace(workspaceId, {
+          focused: optionRecord?.focused === true,
+          toggleFocused: optionRecord?.toggleFocused === true
+        });
+      }
+    )
+  );
+
+  disposables.push(
+    runtime.commands.register(
+      { id: ShellCommands.closeFocusedWorkspace, title: "Close Focused Workspace", category: "Shell" },
+      () => callbacks.closeFocusedWorkspace()
     )
   );
 

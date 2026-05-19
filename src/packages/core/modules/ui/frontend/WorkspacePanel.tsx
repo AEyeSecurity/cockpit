@@ -5,6 +5,7 @@ interface WorkspacePanelProps {
   views: WorkspaceContribution[];
   activeViewId: string;
   onSelectView: (id: string) => void;
+  hideTabs?: boolean;
   children?: ReactNode;
 }
 
@@ -40,27 +41,43 @@ function workspaceTabIcon(id: string, label: string): JSX.Element | null {
     );
   }
 
+  if (normalized.includes("session") || normalized.includes("record")) {
+    return (
+      <svg {...baseProps}>
+        <path d="M8 6h11" />
+        <path d="M8 12h11" />
+        <path d="M8 18h11" />
+        <path d="M4 6h.01" />
+        <path d="M4 12h.01" />
+        <path d="M4 18h.01" />
+      </svg>
+    );
+  }
+
   return null;
 }
 
-export function WorkspacePanel({ views, activeViewId, onSelectView, children }: WorkspacePanelProps): JSX.Element {
+export function WorkspacePanel({ views, activeViewId, onSelectView, hideTabs = false, children }: WorkspacePanelProps): JSX.Element {
   const activeView = views.find((v) => v.id === activeViewId) ?? null;
+  const visibleViews = views.filter((view) => view.hiddenFromTabs !== true);
 
   return (
     <main className="workspace-column ws-col">
-      <section className="workspace-selector ws-tabs" aria-label="Workspace tabs">
-        {views.map((view) => (
-          <button
-            key={view.id}
-            type="button"
-            className={`ws-tab ${view.id === activeViewId ? "active" : ""}`}
-            onClick={() => onSelectView(view.id)}
-          >
-            <span className="ws-tab-icon" aria-hidden="true">{workspaceTabIcon(view.id, view.label)}</span>
-            <span className="ws-tab-label">{view.label}</span>
-          </button>
-        ))}
-      </section>
+      {!hideTabs ? (
+        <section className="workspace-selector ws-tabs" aria-label="Workspace tabs">
+          {visibleViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className={`ws-tab ${view.id === activeViewId ? "active" : ""}`}
+              onClick={() => onSelectView(view.id)}
+            >
+              <span className="ws-tab-icon" aria-hidden="true">{workspaceTabIcon(view.id, view.label)}</span>
+              <span className="ws-tab-label">{view.label}</span>
+            </button>
+          ))}
+        </section>
+      ) : null}
       <section className="workspace-view ws-view">
         {activeView ? activeView.render() : "No workspace view registered."}
       </section>

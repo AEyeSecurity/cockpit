@@ -22,6 +22,7 @@ export interface SidebarContribution extends BaseContribution {
 export interface WorkspaceContribution extends BaseContribution {
   readonly slot: "workspace";
   readonly label: string;
+  readonly hiddenFromTabs?: boolean;
   readonly render: () => ReactNode;
 }
 

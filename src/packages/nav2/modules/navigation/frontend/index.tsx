@@ -765,8 +765,12 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
 
   return (
-    <span className={`connection-footer-status-badge ${state.connected ? "connected" : "disconnected"}`}>
-      <span className="connection-state-label">{state.connected ? "Conectado" : "Desconectado"}</span>
+    <span className={`connection-footer-status-badge ${state.connected ? "connected" : "disconnected"} ${state.connected && state.preset === "real" ? "real-robot" : ""}`}>
+      <span className="connection-state-label">
+        {state.connected
+          ? state.preset === "real" ? "Real Robot" : "Simulation"
+          : "Desconectado"}
+      </span>
     </span>
   );
 }
@@ -794,16 +798,17 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     "status-pill",
     "nav-sidebar-status-pill",
     connState.connected && "ok",
+    connState.connected && connState.preset === "real" && "real-robot",
     connState.connecting && "pending",
     Boolean(connState.lastError) && !connState.connected && !connState.connecting && "bad"
   );
   const connectionStatusText = connState.connected
-    ? "Link established"
+    ? connState.preset === "real" ? "Connected · Real Robot" : "Connected · Simulation"
     : connState.connecting
-      ? "Establishing link..."
+      ? connState.preset === "real" ? "Connecting to Real Robot..." : "Connecting to Simulation..."
       : connState.lastError
         ? "Link error"
-        : "Esperando conexión";
+        : "Disconnected";
   useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
   useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
   useEffect(() => {
@@ -871,8 +876,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             <ButtonFace
               icon={<NavGlyph kind="connect" />}
-              label={connState.connecting ? "CONNECTING" : "CONNECT"}
-              meta="Open backend session"
+              label={connState.connected ? "CONNECTED" : connState.connecting ? "CONNECTING" : "CONNECT"}
+              meta={
+                connState.connected
+                  ? connState.preset === "real" ? "Real Robot session open" : "Simulation session open"
+                  : connState.connecting
+                    ? "Opening backend session"
+                    : "Open backend session"
+              }
             />
           </button>
           <button

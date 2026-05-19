@@ -18,7 +18,7 @@ export interface ConnectionState {
 
 type ConnectionListener = (state: ConnectionState) => void;
 
-const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v2";
+const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v3";
 
 export interface ConnectionPresetDefaults {
   real: { host: string; port: string };
@@ -58,7 +58,7 @@ function parseWsUrl(url: string, fallbackHost: string, fallbackPort: string): { 
 export class ConnectionService {
   private readonly listeners = new Set<ConnectionListener>();
   private presetValues: Record<ConnectionPreset, { host: string; port: string }>;
-  private initialPreset: ConnectionPreset = "real";
+  private initialPreset: ConnectionPreset = "sim";
   private state: ConnectionState;
 
   constructor(
@@ -95,7 +95,9 @@ export class ConnectionService {
       }
     };
     this.presetValues = this.readPresetStorage(mergedDefaults);
-    this.initialPreset = this.readStoredPreset();
+    // Always boot in "sim" — never silently inherit a stored "real" preset that
+    // would connect to the physical robot without the user explicitly choosing it.
+    this.initialPreset = "sim";
     const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
       preset: this.initialPreset,
@@ -366,12 +368,12 @@ export class ConnectionService {
 
   private readStoredPreset(): ConnectionPreset {
     const raw = getStorageAdapter().getItem(CONNECTION_PRESET_STORAGE_KEY);
-    if (!raw) return "real";
+    if (!raw) return "sim";
     try {
       const parsed = JSON.parse(raw) as { preset?: string };
       return parsed.preset === "sim" ? "sim" : "real";
     } catch {
-      return "real";
+      return "sim";
     }
   }
 }

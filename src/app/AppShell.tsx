@@ -165,6 +165,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(workspaceViews[0]?.id ?? "");
   const [activeConsoleId, setActiveConsoleId] = useState<string>(consoleTabs[0]?.id ?? "");
   const [activeModalId, setActiveModalId] = useState<string | null>(null);
+  const [focusedWorkspaceId, setFocusedWorkspaceId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
@@ -186,6 +187,13 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
     return namespaced?.id ?? modalId;
   };
 
+  const resolveWorkspaceId = (workspaceId: string): string => {
+    if (workspaceViews.some((view) => view.id === workspaceId)) return workspaceId;
+    const suffix = `.${workspaceId}`;
+    const namespaced = workspaceViews.find((view) => view.id.endsWith(suffix));
+    return namespaced?.id ?? workspaceId;
+  };
+
   useEffect(() => {
     const disposables = registerShellCommands(runtime, {
       toggleSidebar: () => {
@@ -198,6 +206,21 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       },
       openModal: (modalId: string) => setActiveModalId(resolveModalId(modalId)),
       closeModal: () => setActiveModalId(null),
+      openWorkspace: (workspaceId: string, options?: { focused?: boolean; toggleFocused?: boolean }) => {
+        const resolvedWorkspaceId = resolveWorkspaceId(workspaceId);
+        if (!workspaceViews.some((view) => view.id === resolvedWorkspaceId)) return;
+        if (options?.focused) {
+          if (options.toggleFocused && focusedWorkspaceId === resolvedWorkspaceId) {
+            setFocusedWorkspaceId(null);
+            return;
+          }
+          setFocusedWorkspaceId(resolvedWorkspaceId);
+          return;
+        }
+        setFocusedWorkspaceId(null);
+        setActiveWorkspaceId(resolvedWorkspaceId);
+      },
+      closeFocusedWorkspace: () => setFocusedWorkspaceId(null),
       getActiveModalId: () => activeModalId,
       zoomIn: async () => {
         await zoomController.zoomIn();
@@ -210,7 +233,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       }
     });
     return () => disposables.forEach((d) => d.dispose());
-  }, [runtime, activeModalId, modalDialogs, zoomController, usingVscodeLayout]);
+  }, [runtime, activeModalId, focusedWorkspaceId, modalDialogs, workspaceViews, zoomController, usingVscodeLayout]);
 
   useEffect(() => {
     emitProjection(
@@ -537,9 +560,21 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   }, [activeSidebarId, sidebarPanels]);
 
   useEffect(() => {
-    if (activeWorkspaceId && workspaceViews.some((view) => view.id === activeWorkspaceId)) return;
-    setActiveWorkspaceId(workspaceViews[0]?.id ?? "");
+    if (
+      activeWorkspaceId &&
+      workspaceViews.some((view) => view.id === activeWorkspaceId && view.hiddenFromTabs !== true)
+    ) {
+      return;
+    }
+    const firstVisibleWorkspace = workspaceViews.find((view) => view.hiddenFromTabs !== true) ?? workspaceViews[0];
+    setActiveWorkspaceId(firstVisibleWorkspace?.id ?? "");
   }, [activeWorkspaceId, workspaceViews]);
+
+  useEffect(() => {
+    if (!focusedWorkspaceId) return;
+    if (workspaceViews.some((view) => view.id === focusedWorkspaceId)) return;
+    setFocusedWorkspaceId(null);
+  }, [focusedWorkspaceId, workspaceViews]);
 
   useEffect(() => {
     if (activeConsoleId && consoleTabs.some((tab) => tab.id === activeConsoleId)) return;
@@ -634,6 +669,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       const payload = event.data;
 
       if (payload.activateWorkspaceId && workspaceViews.some((view) => view.id === payload.activateWorkspaceId)) {
+        setFocusedWorkspaceId(null);
         setActiveWorkspaceId(payload.activateWorkspaceId);
       }
 
@@ -708,6 +744,8 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
     ? `${SIDEBAR_RAIL_WIDTH}px minmax(0, 1fr)`
     : `${SIDEBAR_RAIL_WIDTH}px ${sidebarWidth}px ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
   const shellColumns = usingVscodeLayout ? "minmax(0, 1fr)" : shellBodyColumns;
+  const presentedWorkspaceId = focusedWorkspaceId ?? activeWorkspaceId;
+  const workspaceFocused = focusedWorkspaceId !== null;
 
   return (
     <div className="shell">
@@ -729,6 +767,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
               panels={sidebarPanels}
               activePanelId={activeSidebarId}
               onSelectPanel={(id) => {
+                setFocusedWorkspaceId(null);
                 if (id === activeSidebarId) {
                   setSidebarCollapsed((prev) => !prev);
                   return;
@@ -741,20 +780,32 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
               width={sidebarWidth}
               onResizeStart={startSidebarResize}
             />
-            <WorkspacePanel views={workspaceViews} activeViewId={activeWorkspaceId} onSelectView={setActiveWorkspaceId}>
-              <div
-                className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
-                onMouseDown={startConsoleResize}
-                role="separator"
-                aria-orientation="horizontal"
-              />
-              <ConsolePanel
-                tabs={consoleTabs}
-                activeTabId={activeConsoleId}
-                onSelectTab={setActiveConsoleId}
-                collapsed={consoleCollapsed}
-                height={consoleCollapsed ? 36 : consoleHeight}
-              />
+            <WorkspacePanel
+              views={workspaceViews}
+              activeViewId={presentedWorkspaceId}
+              hideTabs={workspaceFocused}
+              onSelectView={(id) => {
+                setFocusedWorkspaceId(null);
+                setActiveWorkspaceId(id);
+              }}
+            >
+              {!workspaceFocused ? (
+                <>
+                  <div
+                    className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
+                    onMouseDown={startConsoleResize}
+                    role="separator"
+                    aria-orientation="horizontal"
+                  />
+                  <ConsolePanel
+                    tabs={consoleTabs}
+                    activeTabId={activeConsoleId}
+                    onSelectTab={setActiveConsoleId}
+                    collapsed={consoleCollapsed}
+                    height={consoleCollapsed ? 36 : consoleHeight}
+                  />
+                </>
+              ) : null}
             </WorkspacePanel>
           </>
         )}

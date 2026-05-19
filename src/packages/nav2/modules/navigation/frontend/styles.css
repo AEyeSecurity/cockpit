@@ -5512,6 +5512,18 @@ pre {
   color: var(--nav-sidebar-error, #8b3d32);
 }
 
+.nav-sidebar .nav-sidebar-status-pill.ok.real-robot {
+  background: #fff7ed;
+  border-color: rgba(194, 120, 23, 0.35);
+  color: #92400e;
+}
+
+.connection-footer-status-badge.connected.real-robot {
+  background: #fff7ed !important;
+  border-color: rgba(194, 120, 23, 0.3) !important;
+  color: #92400e !important;
+}
+
 .nav-sidebar .recording-text {
   min-width: 0;
   overflow: hidden;
