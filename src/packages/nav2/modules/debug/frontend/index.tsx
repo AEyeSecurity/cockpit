@@ -28,6 +28,7 @@ interface MissionEvent {
   type: MissionEventType;
   description: string;
   severity: MissionEventSeverity;
+  raw: string;
 }
 
 interface MissionSession {
@@ -295,14 +296,83 @@ function describeBehaviorTreeLog(data: Record<string, unknown>): string {
   return names.length > 0 ? `Behavior tree failure: ${names.join(", ")}` : "Behavior tree failure";
 }
 
+function navCancelReasonText(reason: string): string {
+  const normalized = reason.toLowerCase();
+  if (normalized.includes("manual")) return "el operador pasó a modo manual";
+  if (normalized.includes("cancel_goal")) return "cancelación pedida por el usuario";
+  if (normalized.includes("set_goal")) return "un nuevo goal reemplazó al anterior";
+  if (normalized.includes("estop")) return "se activó la parada de emergencia";
+  return reason;
+}
+
+function navEventDetailsSuffix(details: Record<string, unknown>, omit: string[]): string {
+  const parts = Object.entries(details)
+    .filter(([key, value]) => !omit.includes(key) && toText(value).length > 0)
+    .map(([key, value]) => `${key}=${toText(value)}`);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
+function describeNavEvent(data: Record<string, unknown>): string {
+  const code = toText(data.code);
+  const message = toText(data.message);
+  const details = isRecord(data.details) ? data.details : {};
+  const reason = toText(details.reason);
+  const error = toText(details.error);
+  const upper = code.toUpperCase();
+
+  if (upper === "GOAL_CANCELLED") {
+    const cause = reason ? navCancelReasonText(reason) : message || "sin motivo informado";
+    return `Goal cancelado: ${cause}${error ? ` — error: ${error}` : ""}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_RESULT_ABORTED") {
+    const cause = error || reason || message || "Nav2 abortó la navegación";
+    return `Goal abortado: ${cause}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_REJECTED") {
+    const cause = error || reason || message || "rechazado por Nav2";
+    return `Goal rechazado: ${cause}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_RESULT_SUCCEEDED") {
+    return `Goal completado con éxito${navEventDetailsSuffix(details, [])}`;
+  }
+  if (upper === "GOAL_REQUESTED" || upper === "GOAL_ACCEPTED") {
+    const base = upper === "GOAL_REQUESTED" ? "Goal solicitado" : "Goal aceptado";
+    return `${base}${navEventDetailsSuffix(details, [])}`;
+  }
+  const headline = code && message && code !== message ? `${code}: ${message}` : code || message || "Navigation event";
+  return `${headline}${navEventDetailsSuffix(details, [])}`;
+}
+
+const DIAGNOSTIC_EXPLANATIONS: Array<{ match: (name: string, message: string) => boolean; text: string }> = [
+  {
+    match: (name, message) => name.includes("collision_monitor") && message.includes("no collision monitor state"),
+    text: "Collision monitor sin datos: hay un goal activo pero el nodo collision_monitor no publica estado (¿no está corriendo o perdió sensores?)"
+  },
+  {
+    match: (_name, message) => message.includes("rtcm stale"),
+    text: "Correcciones RTK (RTCM) viejas: el GPS perdió la fuente de correcciones, la precisión puede degradarse"
+  },
+  {
+    match: (name, _message) => name.includes("watchdog"),
+    text: "Watchdog detuvo el robot: dejó de recibir comandos frescos dentro del tiempo límite"
+  }
+];
+
+function describeDiagnosticRecord(data: Record<string, unknown>): string {
+  const name = toText(data.name, "diagnostic");
+  const message = toText(data.message, "state changed");
+  const lowerName = name.toLowerCase();
+  const lowerMessage = message.toLowerCase();
+  const known = DIAGNOSTIC_EXPLANATIONS.find((entry) => entry.match(lowerName, lowerMessage));
+  if (known) return `${known.text} [${name}: ${message}]`;
+  return `${name}: ${message}`;
+}
+
 function describeMissionRecord(record: MissionJsonRecord): string {
   const topic = recordTopic(record);
   const data = recordData(record);
   if (topic === "/nav_command_server/events") {
-    const code = toText(data.code);
-    const message = toText(data.message);
-    if (code && message && code !== message) return `${code}: ${message}`;
-    return code || message || "Navigation event";
+    return describeNavEvent(data);
   }
   if (topic === "/nav_command_server/telemetry") return describeNavTelemetry(data);
   if (topic === "/controller/drive_telemetry") return describeDriveTelemetry(data);
@@ -321,9 +391,7 @@ function describeMissionRecord(record: MissionJsonRecord): string {
     return parts.join(" | ") || "Controller status changed";
   }
   if (topic === "/diagnostics") {
-    const name = toText(data.name, "diagnostic");
-    const message = toText(data.message, "state changed");
-    return `${name}: ${message}`;
+    return describeDiagnosticRecord(data);
   }
   if (topic === "/rosout") {
     const name = toText(data.name, "rosout");
@@ -382,7 +450,8 @@ function buildRecordedMissionSession(info: MissionSessionFileInfo, records: Miss
         timestamp: timestampFromTimelineOffset(atMs),
         type,
         description: describeMissionRecord(record),
-        severity: missionRecordSeverity(record)
+        severity: missionRecordSeverity(record),
+        raw: JSON.stringify(record)
       };
     })
     .sort((left, right) => left.atMs - right.atMs);
@@ -1085,7 +1154,7 @@ function MissionSessionsWorkspace({ runtime }: { runtime: ModuleContext }): JSX.
                     <td>
                       <span className={`mission-event-type type-${event.type}`}>{event.type}</span>
                     </td>
-                    <td>{event.description}</td>
+                    <td title={event.raw}>{event.description}</td>
                   </tr>
                 ))}
               </tbody>
