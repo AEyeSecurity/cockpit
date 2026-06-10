@@ -53,7 +53,7 @@ describe("services", () => {
 
   it("prioritizes localStorage over config defaults for ConnectionService", () => {
     installStorageMock({
-      "map_tools.connection_presets.v2": JSON.stringify({
+      "map_tools.connection_presets.v3": JSON.stringify({
         preset: "sim",
         presets: {
           real: { host: "ls-real", port: "1111" },

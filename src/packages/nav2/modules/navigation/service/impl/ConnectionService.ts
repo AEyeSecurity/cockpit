@@ -58,7 +58,7 @@ function parseWsUrl(url: string, fallbackHost: string, fallbackPort: string): { 
 export class ConnectionService {
   private readonly listeners = new Set<ConnectionListener>();
   private presetValues: Record<ConnectionPreset, { host: string; port: string }>;
-  private initialPreset: ConnectionPreset = "sim";
+  private initialPreset: ConnectionPreset = "real";
   private state: ConnectionState;
 
   constructor(
@@ -95,9 +95,7 @@ export class ConnectionService {
       }
     };
     this.presetValues = this.readPresetStorage(mergedDefaults);
-    // Always boot in "sim" — never silently inherit a stored "real" preset that
-    // would connect to the physical robot without the user explicitly choosing it.
-    this.initialPreset = "sim";
+    this.initialPreset = this.readStoredPreset();
     const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
       preset: this.initialPreset,
@@ -368,12 +366,12 @@ export class ConnectionService {
 
   private readStoredPreset(): ConnectionPreset {
     const raw = getStorageAdapter().getItem(CONNECTION_PRESET_STORAGE_KEY);
-    if (!raw) return "sim";
+    if (!raw) return "real";
     try {
       const parsed = JSON.parse(raw) as { preset?: string };
       return parsed.preset === "sim" ? "sim" : "real";
     } catch {
-      return "sim";
+      return "real";
     }
   }
 }
