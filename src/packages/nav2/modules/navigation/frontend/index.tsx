@@ -913,7 +913,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb", goalModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Goal mode"}
+            title={navState.controlLocked ? lockReasonText : "Goal mode (tecla G)"}
             disabled={navState.controlLocked}
             onClick={async () => {
               const next = !goalModeSelected;
@@ -930,7 +930,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb", manualModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Manual mode"}
+            title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
             disabled={navState.controlLocked}
             onClick={async () => {
               const next = !navState.manualMode;
@@ -2437,7 +2437,8 @@ function registerCommands(
   ctx.keybindings.register({ key: "q", commandId: NavigationCommands.captureSnapshot, source: "default" });
   ctx.keybindings.register({ key: "i", commandId: NavigationCommands.openInfoModal, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "e", commandId: NavigationCommands.swapWorkspace, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleGoalMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "g", commandId: NavigationCommands.toggleGoalMode, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "m", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "-", commandId: NavigationCommands.toggleCameraZoom, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "w", commandId: NavigationCommands.manualKeyWDown, source: "default", when: "!modalOpen" });
