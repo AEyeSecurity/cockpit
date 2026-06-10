@@ -913,7 +913,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb", goalModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Goal mode (tecla G)"}
+            title={navState.controlLocked ? lockReasonText : "Goal mode"}
             disabled={navState.controlLocked}
             onClick={async () => {
               const next = !goalModeSelected;
@@ -2467,7 +2467,6 @@ function registerCommands(
   ctx.keybindings.register({ key: "i", commandId: NavigationCommands.openInfoModal, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "e", commandId: NavigationCommands.swapWorkspace, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "g", commandId: NavigationCommands.toggleGoalMode, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "m", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "z", commandId: NavigationCommands.saveCurrentPoseWaypoint, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "-", commandId: NavigationCommands.toggleCameraZoom, source: "default", when: "!modalOpen" });
