@@ -254,7 +254,9 @@ function describeNavTelemetry(data: Record<string, unknown>): string {
   if (totalWaypoints > 0) {
     parts.push(`Waypoint ${toFiniteNumber(data.current_waypoint, 0)}/${totalWaypoints}`);
   }
-  parts.push(`GPS ${toBool(data.gps_fix_available) ? "fix" : "lost"}`);
+  if (data.gps_fix_available !== undefined) {
+    parts.push(`GPS ${toBool(data.gps_fix_available) ? "fix" : "lost"}`);
+  }
   if (failureCode) parts.push(`Failure ${failureCode}`);
   if (resultText) parts.push(resultText);
   return parts.join(" | ") || "Navigation telemetry changed";
