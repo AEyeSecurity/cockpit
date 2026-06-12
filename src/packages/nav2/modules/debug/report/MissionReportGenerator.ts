@@ -19,6 +19,7 @@ export interface ReportableSession {
     description: string;
     severity: string;
   }>;
+  records?: Array<Record<string, unknown>>;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -975,6 +976,39 @@ export function generateMissionReport(session: ReportableSession): Blob {
     doc.text(wrLines, ML + 12, y + 2.5);
     y += wrLines.length * 4 + 6;
   });
+
+  // ── RAW OUTPUT ANNEX (verbatim JSONL from the robot) ─────────────────────
+
+  const rawRecords = session.records ?? [];
+  if (rawRecords.length > 0) {
+    addPage();
+    sf(11, "bold");
+    tc(...C.text);
+    txt("Anexo: Salida Cruda (JSONL)", ML, y + 4);
+    y += 9;
+    sf(7);
+    tc(...C.muted);
+    txt(`Registros tal cual fueron grabados por el robot · ${rawRecords.length} líneas · ${session.filename ?? session.id}`, ML, y);
+    y += 6;
+
+    doc.setFont("courier", "normal");
+    doc.setFontSize(5.5);
+    tc(55, 65, 81);
+    const rawLineH = 2.6;
+    for (const record of rawRecords) {
+      const lines = doc.splitTextToSize(JSON.stringify(record), contentW) as string[];
+      if (y + lines.length * rawLineH > MAX_Y) {
+        addPage();
+        doc.setFont("courier", "normal");
+        doc.setFontSize(5.5);
+        tc(55, 65, 81);
+      }
+      doc.text(lines, ML, y);
+      y += lines.length * rawLineH + 0.8;
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+  }
 
   // ── FOOTERS on all pages ─────────────────────────────────────────────────
 

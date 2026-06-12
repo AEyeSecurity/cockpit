@@ -26,5 +26,6 @@ export const NavigationCommands = {
   panCameraLeft:      "nav2.navigation.panCameraLeft",
   panCameraRight:     "nav2.navigation.panCameraRight",
   dismissEscape:      "nav2.navigation.dismissEscape",
-  downloadSnapshot:   "nav2.navigation.downloadSnapshot"
+  downloadSnapshot:   "nav2.navigation.downloadSnapshot",
+  saveCurrentPoseWaypoint: "nav2.navigation.saveCurrentPoseWaypoint"
 } as const;

@@ -27,7 +27,9 @@ interface MissionEvent {
   timestamp: string;
   type: MissionEventType;
   description: string;
+  explanation: string;
   severity: MissionEventSeverity;
+  raw: string;
 }
 
 interface MissionSession {
@@ -184,7 +186,7 @@ function navEventSeverity(data: Record<string, unknown>): MissionEventSeverity {
   return "info";
 }
 
-function missionRecordSeverity(record: MissionJsonRecord): MissionEventSeverity {
+export function missionRecordSeverity(record: MissionJsonRecord): MissionEventSeverity {
   const topic = recordTopic(record);
   const data = recordData(record);
   if (topic === "/rosout") {
@@ -207,6 +209,7 @@ function missionRecordSeverity(record: MissionJsonRecord): MissionEventSeverity 
     const command = isRecord(data.requested_auto_command) ? data.requested_auto_command : {};
     if (toBool(telemetry.estop_active) || toBool(command.estop)) return "error";
     if (toBool(telemetry.failsafe_active)) return "warning";
+    if (toText(data.source) === "auto_timeout") return "warning";
     return "info";
   }
   if (topic === "/controller/status") {
@@ -253,7 +256,9 @@ function describeNavTelemetry(data: Record<string, unknown>): string {
   if (totalWaypoints > 0) {
     parts.push(`Waypoint ${toFiniteNumber(data.current_waypoint, 0)}/${totalWaypoints}`);
   }
-  parts.push(`GPS ${toBool(data.gps_fix_available) ? "fix" : "lost"}`);
+  if (data.gps_fix_available !== undefined) {
+    parts.push(`GPS ${toBool(data.gps_fix_available) ? "fix" : "lost"}`);
+  }
   if (failureCode) parts.push(`Failure ${failureCode}`);
   if (resultText) parts.push(resultText);
   return parts.join(" | ") || "Navigation telemetry changed";
@@ -295,14 +300,244 @@ function describeBehaviorTreeLog(data: Record<string, unknown>): string {
   return names.length > 0 ? `Behavior tree failure: ${names.join(", ")}` : "Behavior tree failure";
 }
 
-function describeMissionRecord(record: MissionJsonRecord): string {
+function navCancelReasonText(reason: string): string {
+  const normalized = reason.toLowerCase();
+  if (normalized.includes("manual")) return "el operador pasó a modo manual";
+  if (normalized.includes("cancel_goal")) return "cancelación pedida por el usuario";
+  if (normalized.includes("set_goal")) return "un nuevo goal reemplazó al anterior";
+  if (normalized.includes("estop")) return "se activó la parada de emergencia";
+  return reason;
+}
+
+function navEventDetailsSuffix(details: Record<string, unknown>, omit: string[]): string {
+  const parts = Object.entries(details)
+    .filter(([key, value]) => !omit.includes(key) && toText(value).length > 0)
+    .map(([key, value]) => `${key}=${toText(value)}`);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
+function describeNavEvent(data: Record<string, unknown>): string {
+  const code = toText(data.code);
+  const message = toText(data.message);
+  const details = isRecord(data.details) ? data.details : {};
+  const reason = toText(details.reason);
+  const error = toText(details.error);
+  const upper = code.toUpperCase();
+
+  if (upper === "GOAL_CANCELLED") {
+    const cause = reason ? navCancelReasonText(reason) : message || "sin motivo informado";
+    return `Goal cancelado: ${cause}${error ? ` — error: ${error}` : ""}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_RESULT_ABORTED") {
+    const cause = error || reason || message || "Nav2 abortó la navegación";
+    return `Goal abortado: ${cause}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_REJECTED") {
+    const cause = error || reason || message || "rechazado por Nav2";
+    return `Goal rechazado: ${cause}${navEventDetailsSuffix(details, ["reason", "error"])}`;
+  }
+  if (upper === "GOAL_RESULT_SUCCEEDED") {
+    return `Goal completado con éxito${navEventDetailsSuffix(details, [])}`;
+  }
+  if (upper === "GOAL_REQUESTED" || upper === "GOAL_ACCEPTED") {
+    const base = upper === "GOAL_REQUESTED" ? "Goal solicitado" : "Goal aceptado";
+    return `${base}${navEventDetailsSuffix(details, [])}`;
+  }
+  const headline = code && message && code !== message ? `${code}: ${message}` : code || message || "Navigation event";
+  return `${headline}${navEventDetailsSuffix(details, [])}`;
+}
+
+const ESTOP_EXPLANATION =
+  "Parada de emergencia (E-STOP) activa: el robot queda frenado y no acepta órdenes de movimiento hasta que alguien libere la parada de emergencia.";
+
+const WATCHDOG_EXPLANATION =
+  "El sistema de seguridad (watchdog) frenó el robot porque dejó de recibir órdenes frescas a tiempo. Suele indicar un corte momentáneo de comunicación.";
+
+const DIAGNOSTIC_EXPLANATIONS: Array<{ match: (name: string, message: string) => boolean; text: string }> = [
+  {
+    match: (name, message) => name.includes("collision_monitor") && message.includes("no collision monitor state"),
+    text: "El vigilante de colisiones no está reportando datos mientras hay una misión activa: el robot navega sin esa protección extra. Verificá que el nodo de colisiones esté corriendo y con sensores."
+  },
+  {
+    match: (name, message) =>
+      name.includes("nav2_command_flow") && (message.includes("cmd_vel_safe missing") || message.includes("command flow broken")),
+    text: "Hay una misión activa pero las órdenes de velocidad no están llegando al vehículo: la cadena de control está cortada y el robot no avanza. Normalmente se restablece sola en pocos segundos; si persiste, reiniciá la navegación."
+  },
+  {
+    match: (_name, message) => message.includes("rtcm stale"),
+    text: "El GPS perdió las correcciones de precisión (RTK): el robot sigue sabiendo dónde está, pero con menos exactitud. Revisá la conexión con la base RTK."
+  },
+  {
+    match: (name, _message) => name.includes("watchdog"),
+    text: WATCHDOG_EXPLANATION
+  }
+];
+
+const ROSOUT_EXPLANATIONS: Array<{ match: (name: string, message: string) => boolean; text: string }> = [
+  {
+    match: (_name, message) => message.includes("steer saturated"),
+    text: "La ruta pide una curva más cerrada de lo que la dirección del vehículo puede girar (tope mecánico de 30°). El robot sigue avanzando pero toma la curva más abierta. Si se repite mucho, los puntos de la ruta forman giros demasiado cerrados para este vehículo."
+  },
+  {
+    match: (_name, message) => message.includes("collision ahead"),
+    text: "El robot detectó un obstáculo en su camino y detuvo la navegación para no chocar. Hay que despejar el camino o enviar una nueva ruta que lo evite."
+  },
+  {
+    match: (_name, message) => message.includes("aborting handle"),
+    text: "El módulo que sigue la ruta abandonó el trayecto en curso. Es la consecuencia del problema inmediatamente anterior (por ejemplo, el obstáculo detectado), no un error nuevo."
+  },
+  {
+    match: (_name, message) => message.includes("no goal checker"),
+    text: "Aviso de configuración interna de Nav2: usará el verificador de llegada por defecto. No afecta la misión."
+  },
+  {
+    match: (name, message) => name.includes("nav_command_server") && message.includes("goal cancel requested"),
+    text: "Se pidió cancelar la misión en curso; el motivo aparece en el evento “Goal cancelado” de esta misma sesión."
+  }
+];
+
+function explainNavEvent(data: Record<string, unknown>): string {
+  const code = toText(data.code).toUpperCase();
+  const details = isRecord(data.details) ? data.details : {};
+  const reason = toText(details.reason).toLowerCase();
+  if (code.includes("ESTOP")) return ESTOP_EXPLANATION;
+  if (code.includes("WATCHDOG")) return WATCHDOG_EXPLANATION;
+  if (code.includes("GPS") && (code.includes("LOST") || code.includes("FAIL"))) {
+    return "Se perdió la señal GPS: el robot deja de navegar porque no conoce su posición con precisión. Esperá a recuperar señal o movelo a una zona despejada.";
+  }
+  if (code === "GOAL_CANCELLED") {
+    if (reason.includes("manual")) {
+      return "No es una falla: el operador tomó el control en modo manual y la misión automática se detuvo por seguridad.";
+    }
+    if (reason.includes("estop")) return ESTOP_EXPLANATION;
+    if (reason.includes("set_goal")) return "Se envió una misión nueva y reemplazó a la que estaba en curso.";
+    return "La misión se detuvo antes de terminar, a pedido del operador o del sistema.";
+  }
+  if (code === "GOAL_RESULT_ABORTED") {
+    return "El sistema de navegación no pudo completar la ruta y abandonó la misión. Causas típicas: un obstáculo bloquea el camino, mala señal GPS o el controlador del vehículo no respondía.";
+  }
+  if (code === "GOAL_REJECTED") {
+    return "El sistema de navegación rechazó la misión sin iniciarla: normalmente Nav2 todavía no está listo o el destino enviado no es válido.";
+  }
+  if (code === "GOAL_RESULT_SUCCEEDED") return "El robot llegó a destino y completó la misión correctamente.";
+  if (code === "GOAL_REQUESTED") return "Se envió una nueva misión al robot.";
+  if (code === "GOAL_ACCEPTED") return "El robot aceptó la misión y comenzó a navegar hacia los puntos indicados.";
+  if (code.includes("FAILED") || code.includes("ERROR")) {
+    return "La operación falló. El detalle técnico está en la descripción de esta línea.";
+  }
+  return "";
+}
+
+function missionRecordComponent(record: MissionJsonRecord): string {
+  const data = recordData(record);
+  return toText(data.name) || toText(data.component) || recordTopic(record) || "el sistema";
+}
+
+export function explainMissionRecord(record: MissionJsonRecord): string {
+  const specific = specificMissionExplanation(record);
+  if (specific) return specific;
+  const severity = missionRecordSeverity(record);
+  if (severity === "error") {
+    return `«${missionRecordComponent(record)}» reportó un error que no está en el catálogo de fallas conocidas. La misión puede verse afectada: revisá el detalle técnico de esta línea o consultá al equipo técnico.`;
+  }
+  if (severity === "warning") {
+    return `«${missionRecordComponent(record)}» emitió un aviso fuera del catálogo conocido. La misión continúa, pero conviene prestar atención si se repite.`;
+  }
+  return "";
+}
+
+function specificMissionExplanation(record: MissionJsonRecord): string {
   const topic = recordTopic(record);
   const data = recordData(record);
   if (topic === "/nav_command_server/events") {
-    const code = toText(data.code);
-    const message = toText(data.message);
-    if (code && message && code !== message) return `${code}: ${message}`;
-    return code || message || "Navigation event";
+    return explainNavEvent(data);
+  }
+  if (topic === "/rosout") {
+    const name = toText(data.name).toLowerCase();
+    const message = toText(data.msg).toLowerCase();
+    return ROSOUT_EXPLANATIONS.find((entry) => entry.match(name, message))?.text ?? "";
+  }
+  if (topic === "/diagnostics") {
+    const name = toText(data.name, "diagnostic");
+    const lowerName = name.toLowerCase();
+    const message = toText(data.message).toLowerCase();
+    const known = DIAGNOSTIC_EXPLANATIONS.find((entry) => entry.match(lowerName, message));
+    if (known) return known.text;
+    if (toFiniteNumber(data.level, 0) === 0) {
+      if (message.includes("fresh")) return `Chequeo de salud OK: «${name}» funciona con normalidad.`;
+      if (message.includes("idle")) return `Chequeo de salud: «${name}» está en reposo, sin misión activa.`;
+      return `Chequeo de salud OK: «${name}» no reporta problemas.`;
+    }
+    return "";
+  }
+  if (topic === "/behavior_tree_log") {
+    return "El plan de navegación falló y la misión se interrumpió: el robot no pudo seguir la ruta planificada (generalmente por un obstáculo o por perder el camino).";
+  }
+  if (topic === "/controller/telemetry") {
+    const telemetry = isRecord(data.telemetry) ? data.telemetry : {};
+    const command = isRecord(data.requested_auto_command) ? data.requested_auto_command : {};
+    if (toBool(telemetry.estop_active) || toBool(command.estop)) return ESTOP_EXPLANATION;
+    if (toBool(telemetry.failsafe_active)) {
+      return "Modo seguro (failsafe) activado: el controlador detectó una anomalía y limita o frena el movimiento por precaución.";
+    }
+    if (toText(data.source) === "auto_timeout") {
+      return "El piloto automático estuvo un instante sin recibir órdenes y aplicó freno preventivo. Si se repite seguido, hay cortes en la comunicación interna.";
+    }
+    return toBool(telemetry.ready)
+      ? "Lectura de rutina del vehículo: está listo, sin parada de emergencia, y reporta su velocidad, dirección y freno actuales."
+      : "Lectura de rutina del vehículo: el controlador todavía no está listo para mover el robot.";
+  }
+  if (topic === "/controller/drive_telemetry") {
+    if (toBool(data.estop)) return ESTOP_EXPLANATION;
+    return toBool(data.drive_enabled)
+      ? "Lectura de rutina de la tracción: el motor está habilitado y responde a las órdenes de movimiento."
+      : "Lectura de rutina de la tracción: el motor está deshabilitado, el vehículo no se moverá aunque reciba órdenes.";
+  }
+  if (topic === "/controller/status") {
+    if (toBool(data.estop_active)) return ESTOP_EXPLANATION;
+    if (toBool(data.failsafe_active)) {
+      return "Modo seguro (failsafe) activado: el controlador detectó una anomalía y limita o frena el movimiento por precaución.";
+    }
+    if (toBool(data.overspeed_active)) {
+      return "El vehículo superó la velocidad máxima permitida y el controlador está frenando para volver al límite seguro.";
+    }
+    return toBool(data.ready)
+      ? "Lectura de estado del controlador: todo en orden, sin alarmas activas."
+      : "Lectura de estado del controlador: todavía no está listo para operar.";
+  }
+  if (topic === "/nav_command_server/telemetry") {
+    const failureCode = toText(data.failure_code);
+    if (failureCode) {
+      return `La navegación reporta una falla activa (código ${failureCode}). El robot no continuará la misión hasta que se resuelva.`;
+    }
+    const parts: string[] = [];
+    parts.push(toBool(data.goal_active) ? "hay una misión en curso" : "no hay misión activa (robot en espera)");
+    if (data.cmd_vel_available !== undefined) {
+      parts.push(
+        toBool(data.cmd_vel_available)
+          ? "las órdenes de velocidad llegan con normalidad"
+          : "no están llegando órdenes de velocidad al vehículo"
+      );
+    }
+    if (data.gps_fix_available !== undefined) {
+      parts.push(toBool(data.gps_fix_available) ? "el GPS tiene señal" : "el GPS está sin señal");
+    }
+    return `Estado general de la navegación: ${parts.join(", ")}.`;
+  }
+  return "";
+}
+
+function describeDiagnosticRecord(data: Record<string, unknown>): string {
+  const name = toText(data.name, "diagnostic");
+  const message = toText(data.message, "state changed");
+  return `${name}: ${message}`;
+}
+
+export function describeMissionRecord(record: MissionJsonRecord): string {
+  const topic = recordTopic(record);
+  const data = recordData(record);
+  if (topic === "/nav_command_server/events") {
+    return describeNavEvent(data);
   }
   if (topic === "/nav_command_server/telemetry") return describeNavTelemetry(data);
   if (topic === "/controller/drive_telemetry") return describeDriveTelemetry(data);
@@ -321,9 +556,7 @@ function describeMissionRecord(record: MissionJsonRecord): string {
     return parts.join(" | ") || "Controller status changed";
   }
   if (topic === "/diagnostics") {
-    const name = toText(data.name, "diagnostic");
-    const message = toText(data.message, "state changed");
-    return `${name}: ${message}`;
+    return describeDiagnosticRecord(data);
   }
   if (topic === "/rosout") {
     const name = toText(data.name, "rosout");
@@ -382,7 +615,9 @@ function buildRecordedMissionSession(info: MissionSessionFileInfo, records: Miss
         timestamp: timestampFromTimelineOffset(atMs),
         type,
         description: describeMissionRecord(record),
-        severity: missionRecordSeverity(record)
+        explanation: explainMissionRecord(record),
+        severity: missionRecordSeverity(record),
+        raw: JSON.stringify(record)
       };
     })
     .sort((left, right) => left.atMs - right.atMs);
@@ -1043,7 +1278,7 @@ function MissionSessionsWorkspace({ runtime }: { runtime: ModuleContext }): JSX.
                   key={`${event.timestamp}-${event.description}`}
                   className={`mission-timeline-marker severity-${event.severity}`}
                   style={{ left: `${pct}%` }}
-                  title={`${event.timestamp} ${event.description}`}
+                  title={`${event.timestamp} ${event.description}${event.explanation ? `\n${event.explanation}` : ""}`}
                 />
               );
             })}
@@ -1085,7 +1320,12 @@ function MissionSessionsWorkspace({ runtime }: { runtime: ModuleContext }): JSX.
                     <td>
                       <span className={`mission-event-type type-${event.type}`}>{event.type}</span>
                     </td>
-                    <td>{event.description}</td>
+                    <td title={event.raw}>
+                      <span className="mission-event-description">{event.description}</span>
+                      {event.explanation ? (
+                        <span className="mission-event-explanation">{event.explanation}</span>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -930,7 +930,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb", manualModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Manual mode"}
+            title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
             disabled={navState.controlLocked}
             onClick={async () => {
               const next = !navState.manualMode;
@@ -2433,12 +2433,42 @@ function registerCommands(
     () => { ctx.eventBus.emit(NAV_EVENTS.snapshotDownloadRequest, {}); }
   );
 
+  ctx.commands.register(
+    { id: NavigationCommands.saveCurrentPoseWaypoint, title: "Save Waypoint At Robot Pose", category: "Navigation" },
+    () => {
+      const pose = getTelemetryService(ctx)?.getSnapshot().robotPose ?? null;
+      if (!pose || !Number.isFinite(Number(pose.lat)) || !Number.isFinite(Number(pose.lon))) {
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: "No hay posición del robot disponible para guardar waypoint",
+          timestamp: Date.now()
+        });
+        return;
+      }
+      try {
+        navigationService.queueWaypoint({ x: Number(pose.lat), y: Number(pose.lon) });
+        ctx.eventBus.emit("console.event", {
+          level: "info",
+          text: `Waypoint guardado en posición actual (${Number(pose.lat).toFixed(7)}, ${Number(pose.lon).toFixed(7)})`,
+          timestamp: Date.now()
+        });
+      } catch (error) {
+        ctx.eventBus.emit("console.event", {
+          level: "error",
+          text: `No se pudo guardar el waypoint: ${String(error)}`,
+          timestamp: Date.now()
+        });
+      }
+    }
+  );
+
   // Keybindings
   ctx.keybindings.register({ key: "q", commandId: NavigationCommands.captureSnapshot, source: "default" });
   ctx.keybindings.register({ key: "i", commandId: NavigationCommands.openInfoModal, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "e", commandId: NavigationCommands.swapWorkspace, source: "default", when: "!modalOpen" });
-  ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleGoalMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "m", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });
+  ctx.keybindings.register({ key: "z", commandId: NavigationCommands.saveCurrentPoseWaypoint, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "-", commandId: NavigationCommands.toggleCameraZoom, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "w", commandId: NavigationCommands.manualKeyWDown, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "a", commandId: NavigationCommands.manualKeyADown, source: "default", when: "!modalOpen" });
