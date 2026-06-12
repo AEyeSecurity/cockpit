@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   describeMissionRecord,
   explainMissionRecord,
+  missionStatusFromRecords,
   missionRecordSeverity
 } from "../packages/nav2/modules/debug/frontend/index";
 import type { MissionJsonRecord } from "../packages/nav2/modules/debug/service/impl/MissionService";
@@ -34,6 +35,17 @@ describe("mission explanation fallback", () => {
     expect(explainMissionRecord(unknownError)).not.toHaveLength(0);
     expect(missionRecordSeverity(unknownWarning)).toBe("warning");
     expect(explainMissionRecord(unknownWarning)).toContain("battery_monitor");
+  });
+
+  it("treats rejected goals as failed mission sessions", () => {
+    const rejected: MissionJsonRecord = {
+      t: 1781120082,
+      topic: "/nav_command_server/events",
+      data: { code: "GOAL_REJECTED", message: "Navigation goal rejected" }
+    };
+    expect(missionRecordSeverity(rejected)).toBe("error");
+    expect(missionStatusFromRecords([rejected])).toBe("aborted");
+    expect(describeMissionRecord(rejected)).toContain("Goal rechazado");
   });
 });
 

@@ -176,6 +176,7 @@ function navEventSeverity(data: Record<string, unknown>): MissionEventSeverity {
     code.includes("ESTOP") ||
     code.includes("CANCELLED") ||
     code.includes("ABORTED") ||
+    code.includes("REJECTED") ||
     code.includes("ERROR")
   ) {
     return "error";
@@ -567,13 +568,13 @@ export function describeMissionRecord(record: MissionJsonRecord): string {
   return topic || "Mission record";
 }
 
-function missionStatusFromRecords(records: MissionJsonRecord[]): MissionSessionStatus {
+export function missionStatusFromRecords(records: MissionJsonRecord[]): MissionSessionStatus {
   let reached = false;
   let manual = false;
   for (const record of records) {
     if (recordTopic(record) !== "/nav_command_server/events") continue;
     const code = toText(recordData(record).code).toUpperCase();
-    if (code.includes("FAILED") || code.includes("CANCELLED") || code.includes("ESTOP") || code.includes("LOST") || code.includes("ABORTED") || code.includes("WATCHDOG_STOP")) {
+    if (code.includes("FAILED") || code.includes("CANCELLED") || code.includes("ESTOP") || code.includes("LOST") || code.includes("ABORTED") || code.includes("REJECTED") || code.includes("WATCHDOG_STOP")) {
       return "aborted";
     }
     if (code.includes("MANUAL")) manual = true;
