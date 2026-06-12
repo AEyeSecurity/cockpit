@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { readConfig, removeConfig, writeConfig } from "../platform/host/configFs";
+import { NavigationCommands } from "../packages/nav2/modules/navigation/commands";
 
 describe("integration", () => {
   it("persists config through fallback storage", async () => {
@@ -31,6 +32,17 @@ describe("integration", () => {
     expect(runtime.contributions.has("nav2.toolbar.processes")).toBe(true);
     expect(runtime.contributions.has("nav2.modal.processes")).toBe(true);
     expect(runtime.commands.has("nav2.processes.openModal")).toBe(true);
+    expect(runtime.commands.has(NavigationCommands.openLiveNavWindow)).toBe(true);
+    expect(
+      runtime.keybindings
+        .list()
+        .some((binding) => binding.key === "q" && binding.commandId === NavigationCommands.openLiveNavWindow)
+    ).toBe(true);
+    expect(
+      runtime.keybindings
+        .list()
+        .some((binding) => binding.key === "q" && binding.commandId === NavigationCommands.captureSnapshot)
+    ).toBe(false);
 
     const debugSidebar = runtime.contributions.get("nav2.sidebar.debug");
     expect(debugSidebar?.slot).toBe("sidebar");

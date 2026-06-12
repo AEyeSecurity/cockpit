@@ -1605,6 +1605,31 @@ function isCameraDisabledPresetError(text: string): boolean {
   return text.toLowerCase().includes("camera disabled in current preset");
 }
 
+function openNavLiveWindow(connectionService: ConnectionService, runtime: ModuleContext): void {
+  if (typeof window === "undefined") return;
+  const state = connectionService.getState();
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", "nav-live");
+  url.searchParams.set("preset", state.preset || "real");
+  url.searchParams.set("host", state.host);
+  url.searchParams.set("port", state.port);
+  url.hash = "";
+  const popup = window.open(
+    url.toString(),
+    "cockpit-nav-live",
+    "popup,width=900,height=900,resizable=yes,scrollbars=no"
+  );
+  if (popup) {
+    popup.focus();
+    return;
+  }
+  runtime.eventBus.emit("console.event", {
+    level: "error",
+    text: "Nav Live window was blocked by the browser.",
+    timestamp: Date.now()
+  });
+}
+
 function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const [navigation, setNavigation] = useState<NavigationState>(service.getState());
@@ -2327,6 +2352,13 @@ function registerCommands(
   );
 
   ctx.commands.register(
+    { id: NavigationCommands.openLiveNavWindow, title: "Open Nav Live Window", category: "Navigation" },
+    () => {
+      openNavLiveWindow(connectionService, ctx);
+    }
+  );
+
+  ctx.commands.register(
     { id: NavigationCommands.openInfoModal, title: "Open Info Modal", category: "Navigation" },
     () => {
       void ctx.commands.execute(ShellCommands.openModal, "modal.info");
@@ -2463,7 +2495,7 @@ function registerCommands(
   );
 
   // Keybindings
-  ctx.keybindings.register({ key: "q", commandId: NavigationCommands.captureSnapshot, source: "default" });
+  ctx.keybindings.register({ key: "q", commandId: NavigationCommands.openLiveNavWindow, source: "default" });
   ctx.keybindings.register({ key: "i", commandId: NavigationCommands.openInfoModal, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "e", commandId: NavigationCommands.swapWorkspace, source: "default", when: "!modalOpen" });
   ctx.keybindings.register({ key: "f", commandId: NavigationCommands.toggleManualMode, source: "default", when: "!modalOpen" });

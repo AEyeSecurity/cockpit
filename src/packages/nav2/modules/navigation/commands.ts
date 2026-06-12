@@ -1,6 +1,7 @@
 export const NavigationCommands = {
   openSnapshotModal:  "nav2.navigation.openSnapshotModal",
   captureSnapshot:    "nav2.navigation.captureSnapshot",
+  openLiveNavWindow:  "nav2.navigation.openLiveNavWindow",
   openInfoModal:      "nav2.navigation.openInfoModal",
   swapWorkspace:      "nav2.navigation.swapWorkspace",
   toggleGoalMode:     "nav2.navigation.toggleGoalMode",
