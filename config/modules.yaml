@@ -1,8 +1,0 @@
-packages:
-  nav2:
-    enabled: true
-    modules:
-      navigation: true
-      telemetry: true
-      map: true
-      debug: true

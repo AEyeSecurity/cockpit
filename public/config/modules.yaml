@@ -1,7 +1,0 @@
-modules:
-  navigation: true
-  telemetry: true
-  map: true
-  debug: true
-  settings: true
-

@@ -1,36 +1,11 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { AppShell } from "./app/AppShell";
-import { VscodeWebviewShell, type CockpitWebviewSlot } from "./app/VscodeWebviewShell";
-import { bootstrapApp } from "./core/bootstrap/bootstrapApp";
-import { isHostBridgeAvailable } from "./platform/host/bridge";
-import { NavLiveWindow } from "./packages/nav2/modules/navigation/frontend/NavLiveWindow";
-import "./app/base.css";
-import "./app/design.css";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import 'leaflet/dist/leaflet.css';
+import './index.css';
+import App from './App';
 
-declare global {
-  interface Window {
-    __COCKPIT_WEBVIEW_SLOT__?: CockpitWebviewSlot;
-  }
-}
-
-async function start(): Promise<void> {
-  const runtime = await bootstrapApp();
-  const params = new URLSearchParams(window.location.search);
-  const isNavLiveWindow = params.get("view") === "nav-live";
-  const slot = window.__COCKPIT_WEBVIEW_SLOT__ ?? "full";
-  const useVscodeFullLayout = slot === "full" && isHostBridgeAvailable();
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      {isNavLiveWindow ? (
-        <NavLiveWindow runtime={runtime} />
-      ) : slot === "full" ? (
-        <AppShell runtime={runtime} layoutMode={useVscodeFullLayout ? "vscode" : "default"} />
-      ) : (
-        <VscodeWebviewShell runtime={runtime} slot={slot} />
-      )}
-    </React.StrictMode>
-  );
-}
-
-void start();
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
