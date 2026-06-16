@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
@@ -2480,17 +2480,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
         : routeMission?.active || routeComplete || goalActive || navigationState?.goalMode
           ? "active"
           : "";
-  const linearMin = navigationState?.manualLinearMin ?? 1;
-  const linearMax = navigationState?.manualLinearMax ?? 4;
-  const steeringAngleMin = navigationState?.manualSteeringAngleMinDeg ?? 1;
-  const steeringAngleMax = navigationState?.manualSteeringAngleMaxDeg ?? 30;
-  const linearSpeed = navigationState?.manualLinearSpeed ?? 1.2;
-  const steeringAngleDeg = navigationState?.manualSteeringAngleDeg ?? 18;
-  const linearFillPct = linearMax > linearMin ? Math.min(100, Math.max(0, ((linearSpeed - linearMin) / (linearMax - linearMin)) * 100)) : 0;
-  const steeringFillPct =
-    steeringAngleMax > steeringAngleMin
-      ? Math.min(100, Math.max(0, ((steeringAngleDeg - steeringAngleMin) / (steeringAngleMax - steeringAngleMin)) * 100))
-      : 0;
   const routeBadgeText =
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
 
@@ -2598,7 +2587,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           : frameReady
         ? ""
         : "camera connecting";
-  const toolStatusText = mainIsMap ? state.toolInfo : "Herramientas disponibles con mapa principal";
   const cameraRisk = cameraRiskFromDetections(cameraDetections);
   const generalPayload = sensorInfoState?.payloads.general as Record<string, unknown> | undefined;
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
@@ -2888,77 +2876,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                     </div>
                     <span className="ms-progress-label">{missionProgressLabel}</span>
                   </div>
-                </div>
-                <div className="map-html-speed-card">
-                  <div className="map-html-speed-head">
-                    <span className="map-html-speed-title">Speed limits</span>
-                    <button
-                      type="button"
-                      className="map-html-inline-action"
-                      disabled={!mapToolsEnabled}
-                      onClick={() => {
-                        void mapService
-                          .setDatumOnBackend()
-                          .then(() => {
-                            runtime.eventBus.emit("console.event", {
-                              level: "info",
-                              text: "Datum updated from robot pose",
-                              timestamp: Date.now()
-                            });
-                          })
-                          .catch((error) => {
-                            runtime.eventBus.emit("console.event", {
-                              level: "error",
-                              text: `Set datum failed: ${String(error)}`,
-                              timestamp: Date.now()
-                            });
-                          });
-                      }}
-                    >
-                      Datum
-                    </button>
-                  </div>
-                  <div className="map-html-range">
-                    <div className="range-label">
-                      Linear speed (m/s) <span className="range-val">{linearSpeed.toFixed(2)}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={linearMin}
-                      max={linearMax}
-                      step={0.01}
-                      value={linearSpeed}
-                      disabled={!navigationService}
-                      style={{ "--range-fill": `${linearFillPct}%` } as CSSProperties}
-                      onChange={(event) => navigationService?.setManualLinearSpeed(Number(event.target.value))}
-                    />
-                    <div className="map-range-scale" aria-hidden="true">
-                      <span>{linearMin.toFixed(1)}</span>
-                      <span>{((linearMin + linearMax) / 2).toFixed(1)}</span>
-                      <span>{linearMax.toFixed(1)}</span>
-                    </div>
-                  </div>
-                  <div className="map-html-range">
-                    <div className="range-label">
-                      Steering angle (deg) <span className="range-val">{steeringAngleDeg.toFixed(1)}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={steeringAngleMin}
-                      max={steeringAngleMax}
-                      step={0.1}
-                      value={steeringAngleDeg}
-                      disabled={!navigationService}
-                      style={{ "--range-fill": `${steeringFillPct}%` } as CSSProperties}
-                      onChange={(event) => navigationService?.setManualSteeringAngleDeg(Number(event.target.value))}
-                    />
-                    <div className="map-range-scale" aria-hidden="true">
-                      <span>{steeringAngleMin.toFixed(1)}</span>
-                      <span>{((steeringAngleMin + steeringAngleMax) / 2).toFixed(1)}</span>
-                      <span>{steeringAngleMax.toFixed(1)}</span>
-                    </div>
-                  </div>
-                  <div className="map-html-tool-status">{toolStatusText}</div>
                 </div>
               </div>
             </div>

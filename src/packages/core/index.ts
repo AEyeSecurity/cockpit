@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import type { CockpitModule, CockpitPackage, ModuleContext } from "../../core/types/module";
+import { ShellCommands } from "../../app/shellCommands";
 import { createMetricsModule } from "./modules/metrics/frontend";
+import { DiagnosticsModal } from "./modules/ui/frontend/DiagnosticsModal";
 import { LogConsoleTab } from "./modules/ui/frontend/LogConsoleTab";
 import { TerminalConsoleTab } from "./modules/ui/frontend/TerminalConsoleTab";
 
@@ -35,6 +37,27 @@ const uiModule: CockpitModule = {
   version: "1.0.0",
   enabledByDefault: true,
   register(ctx: ModuleContext): void {
+    ctx.commands.register(
+      { id: "diagnostics.open", title: "Open Diagnostics", category: "Diagnostics" },
+      () => {
+        void ctx.commands.execute(ShellCommands.openModal, "modal.diagnostics");
+      }
+    );
+
+    ctx.contributions.register({
+      id: "modal.diagnostics",
+      slot: "modal",
+      title: "Diagnostics",
+      render: () => createElement(DiagnosticsModal, { runtime: ctx })
+    });
+
+    ctx.contributions.register({
+      id: "toolbar.diagnostics",
+      slot: "toolbar",
+      label: "Diagnostics",
+      commandId: "diagnostics.open"
+    });
+
     ctx.contributions.register({
       id: "console.log",
       slot: "console",
