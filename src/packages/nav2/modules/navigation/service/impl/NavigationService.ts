@@ -42,6 +42,11 @@ export interface SnapshotData {
   mime: string;
   imageBase64: string;
   stamp: number;
+  width: number;
+  height: number;
+  frameId: string;
+  imageSizeBytes: number;
+  layers: Record<string, boolean>;
 }
 
 export interface CameraStatusData {
@@ -223,6 +228,14 @@ function parseSnapshotStamp(raw: unknown): number {
     }
   }
   return Date.now();
+}
+
+function parseSnapshotLayers(raw: unknown): Record<string, boolean> {
+  const record = asRecord(raw);
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, value === true])
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -633,7 +646,9 @@ export class NavigationService {
       manualKeys: { ...this.state.manualKeys },
       recording: { ...this.state.recording },
       patrolLoop: { ...this.state.patrolLoop },
-      lastSnapshot: this.state.lastSnapshot ? { ...this.state.lastSnapshot } : null
+      lastSnapshot: this.state.lastSnapshot
+        ? { ...this.state.lastSnapshot, layers: { ...this.state.lastSnapshot.layers } }
+        : null
     };
   }
 
@@ -1207,7 +1222,12 @@ export class NavigationService {
     const snapshot: SnapshotData = {
       mime: String(payload.mime ?? "image/png"),
       imageBase64: String(payload.image_b64 ?? payload.imageBase64 ?? ""),
-      stamp: Number(payload.stamp_ms ?? 0) || parseSnapshotStamp(payload.stamp)
+      stamp: Number(payload.stamp_ms ?? 0) || parseSnapshotStamp(payload.stamp),
+      width: Number(payload.width ?? 0) || 0,
+      height: Number(payload.height ?? 0) || 0,
+      frameId: String(payload.frame_id ?? payload.frameId ?? ""),
+      imageSizeBytes: Number(payload.image_size_bytes ?? payload.imageSizeBytes ?? 0) || 0,
+      layers: parseSnapshotLayers(payload.layers)
     };
     this.state = {
       ...this.state,
