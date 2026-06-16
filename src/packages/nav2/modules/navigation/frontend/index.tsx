@@ -1144,7 +1144,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         className="nav-sidebar-compact-section nav-sidebar-file-section"
         defaultCollapsed
       >
-        <div className="ncb-3-grid nav-sidebar-compact-grid">
+        <div className="ncb-grid nav-sidebar-compact-grid">
           <button
             type="button"
             className="ncb sec-btn"
@@ -1174,16 +1174,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             }}
           >
             <ButtonFace icon={<NavGlyph kind="load" />} label="LOAD" meta="Restore saved" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb sec-btn"
-            title="Snapshot"
-            onClick={() => {
-              void runtime.commands.execute(NavigationCommands.openSnapshotModal);
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="snapshot" />} label="SNAPSHOT" meta="Capture state" compact />
           </button>
         </div>
       </NavSidebarCollapsibleSection>
