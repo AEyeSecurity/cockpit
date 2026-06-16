@@ -562,10 +562,19 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
         </svg>
       );
     case "CONTROL MODE":
+    case "MANUAL CONTROL":
       return (
         <svg {...baseProps}>
           <path d="m4 7 5 5-5 5" />
           <path d="M12 17h8" />
+        </svg>
+      );
+    case "AUTOMATIC ROUTE":
+      return (
+        <svg {...baseProps}>
+          <path d="m4 11 16-7-7 16-2-7-7-2Z" />
+          <path d="M5 19h6" />
+          <path d="M8 16v6" />
         </svg>
       );
     case "WAYPOINTS":
@@ -604,6 +613,56 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
     default:
       return <NavGlyph kind="route" />;
   }
+}
+
+function rangeFillPct(value: number, min: number, max: number): number {
+  return max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0;
+}
+
+function ManualRangeControl({
+  label,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  digits,
+  onChange
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  digits: number;
+  onChange: (value: number) => void;
+}): JSX.Element {
+  const midpoint = (min + max) / 2;
+  return (
+    <label className="nav-manual-range">
+      <span className="nav-manual-range-head">
+        <span>{label}</span>
+        <strong>{value.toFixed(digits)}</strong>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        style={{ "--range-fill": `${rangeFillPct(value, min, max)}%` } as CSSProperties}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <span className="nav-manual-range-scale" aria-hidden="true">
+        <span>{min.toFixed(1)}</span>
+        <span>{midpoint.toFixed(1)}</span>
+        <span>{max.toFixed(1)}</span>
+      </span>
+      <span className="nav-manual-range-unit">{unit}</span>
+    </label>
+  );
 }
 
 function NavSidebarCollapsibleSection({
@@ -790,7 +849,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMission = navState.routeMission;
   const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMission.active || routeMission.paused;
-  const goalRunning = missionActive && !routeMissionRunning;
   const patrolling = navState.patrolLoop.active;
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
@@ -907,12 +965,105 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
-      {/* ── 2. CONTROL MODE ───────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="CONTROL MODE" className="nav-sidebar-control-section">
-        <div className="ncb-grid">
+      {/* ── 2. MANUAL CONTROL ─────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="MANUAL CONTROL" className="nav-sidebar-control-section nav-sidebar-manual-section">
+        <button
+          type="button"
+          className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
+          title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
+          disabled={navState.controlLocked}
+          onClick={async () => {
+            const next = !navState.manualMode;
+            try {
+              await navService.setManualMode(next);
+              emitInfo(next ? "Manual mode enabled" : "Manual mode disabled");
+            } catch (error) {
+              emitError(`Manual mode failed: ${String(error)}`);
+            }
+          }}
+        >
+          <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Enabled" : "Disabled"} />
+        </button>
+        <div className="nav-manual-range-stack">
+          <ManualRangeControl
+            label="Linear speed"
+            unit="m/s"
+            value={navState.manualLinearSpeed}
+            min={navState.manualLinearMin}
+            max={navState.manualLinearMax}
+            step={0.01}
+            digits={2}
+            onChange={(value) => navService.setManualLinearSpeed(value)}
+          />
+          <ManualRangeControl
+            label="Steering angle / turn radius"
+            unit="deg"
+            value={navState.manualSteeringAngleDeg}
+            min={navState.manualSteeringAngleMinDeg}
+            max={navState.manualSteeringAngleMaxDeg}
+            step={0.1}
+            digits={1}
+            onChange={(value) => navService.setManualSteeringAngleDeg(value)}
+          />
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── 3. AUTOMATIC ROUTE ─────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection
+        title="AUTOMATIC ROUTE"
+        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
+        className="nav-sidebar-actions-section nav-sidebar-automatic-section nav-sidebar-route-section"
+        defaultCollapsed={false}
+      >
+        <div className="nav-route-subsection nav-route-execution">
+          <div className="nav-route-subhead">
+            <span>Route</span>
+            <small>{routeMissionRunning ? "Running" : "Ready"}</small>
+          </div>
           <button
             type="button"
-            className={joinClassNames("ncb", goalModeSelected && "active")}
+            className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
+            disabled={wps < 2}
+            onClick={async () => {
+              try {
+                const started = await navService.sendRouteMission();
+                emitInfo(`Route mission started (${started.inputCount} wps, ${started.expandedCount} pts)`);
+              } catch (error) {
+                emitError(`Route mission failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={wps < 2 ? "Needs 2+ waypoints" : "Expanded route mission"} />
+          </button>
+          <button
+            type="button"
+            className="ncb-wide cancel-btn"
+            disabled={!missionActive}
+            onClick={async () => {
+              try {
+                if (routeMission.active || routeMission.paused) {
+                  await navService.cancelRouteMission();
+                  emitInfo("Route mission cancelled");
+                } else {
+                  await navService.cancelGoal();
+                  emitInfo("Goal cancelled");
+                }
+              } catch (error) {
+                emitError(`Cancel failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL" meta="Stop active navigation" />
+          </button>
+        </div>
+        <div className="nav-route-subsection nav-route-setup">
+          <div className="nav-route-subhead">
+            <span>Waypoints</span>
+            <small>{wps} waypoint{wps === 1 ? "" : "s"}</small>
+          </div>
+          <button
+            type="button"
+            className={joinClassNames("ncb-wide", goalModeSelected && "active")}
             title={navState.controlLocked ? lockReasonText : "Goal mode"}
             disabled={navState.controlLocked}
             onClick={async () => {
@@ -925,154 +1076,75 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="goal" />} label="GOAL MODE" meta={goalModeSelected ? "Enabled" : "Standby"} compact />
+            <ButtonFace icon={<NavGlyph kind="goal" />} label="GOAL MODE" meta={goalModeSelected ? "Waypoint editing" : "Standby"} />
           </button>
+          <label className="check-row nav-loop-check">
+            <input
+              type="checkbox"
+              checked={navState.loopRoute}
+              onChange={(event) => navService.setLoopRoute(event.target.checked)}
+            />
+            Loop route
+          </label>
+          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={wps === 0}
+              title="Deshacer último waypoint"
+              onClick={() => {
+                navService.removeLastWaypoint();
+                emitInfo("Last waypoint removed");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Last waypoint" compact />
+            </button>
+            <button
+              type="button"
+              className="ncb danger-btn"
+              disabled={wps === 0}
+              title="Limpiar todos los waypoints"
+              onClick={() => {
+                navService.clearWaypoints();
+                emitInfo("Waypoints cleared");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
+            </button>
+            <button
+              type="button"
+              className="ncb danger-btn"
+              disabled={selectedCount === 0}
+              title={`${selectedCount} waypoints seleccionados`}
+              onClick={() => {
+                const removed = navService.removeSelectedWaypoints();
+                if (removed > 0) emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
+            </button>
+          </div>
           <button
             type="button"
-            className={joinClassNames("ncb", manualModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
+            className={joinClassNames("ncb-wide prim-btn", wps > 0 && "active")}
             disabled={navState.controlLocked}
-            onClick={async () => {
-              const next = !navState.manualMode;
-              try {
-                await navService.setManualMode(next);
-                emitInfo(next ? "Manual mode enabled" : "Manual mode disabled");
-              } catch (error) {
-                emitError(`Manual mode failed: ${String(error)}`);
-              }
+            title={navState.controlLocked ? lockReasonText : "Activar colocación de waypoint en el mapa"}
+            onClick={() => {
+              void enableMapWaypointPlacement();
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Enabled" : "Disabled"} compact />
+            <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="ADD WAYPOINT" meta={goalModeSelected ? "Click map to place" : "Place on map"} />
           </button>
         </div>
-        <label className="check-row nav-loop-check">
-          <input
-            type="checkbox"
-            checked={navState.loopRoute}
-            onChange={(event) => navService.setLoopRoute(event.target.checked)}
-          />
-          Loop route
-        </label>
       </NavSidebarCollapsibleSection>
 
-      {/* ── 3. WAYPOINTS ──────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection
-        title="WAYPOINTS"
-        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
-        className="nav-sidebar-compact-section nav-sidebar-waypoints-section"
-      >
-        <div className="ncb-3-grid nav-sidebar-compact-grid">
-          <button
-            type="button"
-            className="ncb sec-btn"
-            disabled={wps === 0}
-            title="Deshacer último waypoint"
-            onClick={() => {
-              navService.removeLastWaypoint();
-              emitInfo("Last waypoint removed");
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Last waypoint" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb danger-btn"
-            disabled={wps === 0}
-            title="Limpiar todos los waypoints"
-            onClick={() => {
-              navService.clearWaypoints();
-              emitInfo("Waypoints cleared");
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb danger-btn"
-            disabled={selectedCount === 0}
-            title={`${selectedCount} waypoints seleccionados`}
-            onClick={() => {
-              const removed = navService.removeSelectedWaypoints();
-              if (removed > 0) emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
-          </button>
-        </div>
-        <button
-          type="button"
-          className={joinClassNames("ncb-wide prim-btn", wps > 0 && "active")}
-          disabled={navState.controlLocked}
-          title={navState.controlLocked ? lockReasonText : "Activar colocación de waypoint en el mapa"}
-          onClick={() => {
-            void enableMapWaypointPlacement();
-          }}
-        >
-          <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="ADD WAYPOINT" meta={goalModeSelected ? "Click map to place" : "Place on map"} />
-        </button>
-      </NavSidebarCollapsibleSection>
-
-      {/* ── 4. DISPATCH ───────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="NAVIGATION ACTIONS" className="nav-sidebar-actions-section" defaultCollapsed={false}>
-        <button
-          type="button"
-          className={joinClassNames("ncb-wide send-btn", goalRunning && "active")}
-          disabled={wps === 0}
-          onClick={async () => {
-            try {
-              const sent = await navService.sendQueuedGoal();
-              emitInfo(`Goal dispatch sent (${sent.sentCount} waypoint${sent.sentCount > 1 ? "s" : ""})`);
-            } catch (error) {
-              emitError(`Goal failed: ${String(error)}`);
-            }
-          }}
-        >
-          <ButtonFace icon={<NavGlyph kind="dispatch" />} label="DISPATCH GOAL" meta={`${wps} waypoints queued`} />
-        </button>
-        <button
-          type="button"
-          className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
-          disabled={wps < 2}
-          onClick={async () => {
-            try {
-              const started = await navService.sendRouteMission();
-              emitInfo(`Route mission started (${started.inputCount} wps, ${started.expandedCount} pts)`);
-            } catch (error) {
-              emitError(`Route mission failed: ${String(error)}`);
-            }
-          }}
-        >
-          <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={wps < 2 ? "Needs 2+ waypoints" : "Expanded route mission"} />
-        </button>
-        <button
-          type="button"
-          className="ncb-wide cancel-btn"
-          disabled={!missionActive}
-          onClick={async () => {
-            try {
-              if (routeMission.active || routeMission.paused) {
-                await navService.cancelRouteMission();
-                emitInfo("Route mission cancelled");
-              } else {
-                await navService.cancelGoal();
-                emitInfo("Goal cancelled");
-              }
-            } catch (error) {
-              emitError(`Cancel failed: ${String(error)}`);
-            }
-          }}
-        >
-          <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL" meta="Stop active navigation" />
-        </button>
-      </NavSidebarCollapsibleSection>
-
-      {/* ── 5. FILE ───────────────────────────────────────────────────── */}
+      {/* ── 4. FILE ───────────────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection
         title="FILE OPERATIONS"
         className="nav-sidebar-compact-section nav-sidebar-file-section"
         defaultCollapsed
       >
-        <div className="ncb-3-grid nav-sidebar-compact-grid">
+        <div className="ncb-grid nav-sidebar-compact-grid">
           <button
             type="button"
             className="ncb sec-btn"
@@ -1102,16 +1174,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             }}
           >
             <ButtonFace icon={<NavGlyph kind="load" />} label="LOAD" meta="Restore saved" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb sec-btn"
-            title="Snapshot"
-            onClick={() => {
-              void runtime.commands.execute(NavigationCommands.openSnapshotModal);
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="snapshot" />} label="SNAPSHOT" meta="Capture state" compact />
           </button>
         </div>
       </NavSidebarCollapsibleSection>
@@ -1228,44 +1290,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       </NavSidebarCollapsibleSection>
 
       <DatumSidebarSection runtime={runtime} />
-
-      {/* Speed limits + Zones (existing sub-components) */}
-    </div>
-  );
-}
-
-function ManualControlSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const service = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
-  const [state, setState] = useState<NavigationState>(service.getState());
-
-  useEffect(() => service.subscribe((next) => setState(next)), [service]);
-
-  return (
-    <div className="stack">
-      <PanelSection title="Speed limits">
-        <label className="range-row">
-          Linear speed (m/s): {state.manualLinearSpeed.toFixed(2)}
-          <input
-            type="range"
-            min={state.manualLinearMin}
-            max={state.manualLinearMax}
-            step={0.01}
-            value={state.manualLinearSpeed}
-            onChange={(event) => service.setManualLinearSpeed(Number(event.target.value))}
-          />
-        </label>
-        <label className="range-row">
-          Steering angle (deg): {state.manualSteeringAngleDeg.toFixed(1)}
-          <input
-            type="range"
-            min={state.manualSteeringAngleMinDeg}
-            max={state.manualSteeringAngleMaxDeg}
-            step={0.1}
-            value={state.manualSteeringAngleDeg}
-            onChange={(event) => service.setManualSteeringAngleDeg(Number(event.target.value))}
-          />
-        </label>
-      </PanelSection>
     </div>
   );
 }

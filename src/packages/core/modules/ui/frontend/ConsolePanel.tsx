@@ -6,7 +6,8 @@ interface ConsolePanelProps {
   activeTabId: string;
   onSelectTab: (tabId: string) => void;
   collapsed: boolean;
-  height: number;
+  height: number | string;
+  className?: string;
 }
 
 function consoleTabIcon(id: string, label: string): JSX.Element {
@@ -48,7 +49,7 @@ function consoleTabIcon(id: string, label: string): JSX.Element {
   );
 }
 
-export function ConsolePanel({ tabs, activeTabId, onSelectTab, collapsed, height }: ConsolePanelProps): JSX.Element {
+export function ConsolePanel({ tabs, activeTabId, onSelectTab, collapsed, height, className = "" }: ConsolePanelProps): JSX.Element {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(() => (
     activeTabId ? new Set([activeTabId]) : new Set()
@@ -76,7 +77,7 @@ export function ConsolePanel({ tabs, activeTabId, onSelectTab, collapsed, height
   }, [activeTabId, tabs]);
 
   return (
-    <section className={`console-host console ${collapsed ? "collapsed" : ""}`} style={{ height }}>
+    <section className={`console-host console ${collapsed ? "collapsed" : ""}${className ? ` ${className}` : ""}`} style={{ height }}>
       <div className="console-tabs con-tabs" aria-label="Console tabs">
         {tabs.map((tab) => (
           <button

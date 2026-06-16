@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ToolbarMenu, Panel, WorkspacePanel, ConsolePanel, Footer } from "../packages/core";
+import { ToolbarMenu, Panel, WorkspacePanel, Footer } from "../packages/core";
 import type { KeybindingContext } from "../core/keybindings/types";
 import { useSlot } from "../core/contributions/useSlot";
 import { GlobalDialogHost } from "./layout/GlobalDialogHost";
@@ -123,6 +123,7 @@ const TELEMETRY_SERVICE_ID = "service.telemetry";
 const SIDEBAR_RAIL_WIDTH = 46;
 const SPLITTER_THICKNESS = 4;
 const SHELL_BODY_GAP = 6;
+const DIAGNOSTICS_MODAL_ID = "modal.diagnostics";
 
 function routeStatusLabel(state: ReturnType<NavigationServiceLike["getState"]> | null): string {
   if (!state) return "No data";
@@ -157,19 +158,15 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   const toolbarMenus = useSlot(runtime.contributions, "toolbar");
   const sidebarPanels = useSlot(runtime.contributions, "sidebar");
   const workspaceViews = useSlot(runtime.contributions, "workspace");
-  const consoleTabs = useSlot(runtime.contributions, "console");
   const modalDialogs = useSlot(runtime.contributions, "modal");
   const footerItems = useSlot(runtime.contributions, "footer");
 
   const [activeSidebarId, setActiveSidebarId] = useState<string>(sidebarPanels[0]?.id ?? "");
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(workspaceViews[0]?.id ?? "");
-  const [activeConsoleId, setActiveConsoleId] = useState<string>(consoleTabs[0]?.id ?? "");
   const [activeModalId, setActiveModalId] = useState<string | null>(null);
   const [focusedWorkspaceId, setFocusedWorkspaceId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [consoleHeight, setConsoleHeight] = useState(360);
   const [zoomController] = useState(() => new UiZoomController());
   const [shellConnectionState, setShellConnectionState] = useState<SidebarConnectionState | null>(null);
   const [shellNavigationState, setShellNavigationState] = useState<ReturnType<NavigationServiceLike["getState"]> | null>(null);
@@ -202,7 +199,8 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       },
       toggleConsole: () => {
         if (usingVscodeLayout) return;
-        setConsoleCollapsed((prev) => !prev);
+        const diagnosticsModalId = resolveModalId(DIAGNOSTICS_MODAL_ID);
+        setActiveModalId((current) => (current === diagnosticsModalId ? null : diagnosticsModalId));
       },
       openModal: (modalId: string) => setActiveModalId(resolveModalId(modalId)),
       closeModal: () => setActiveModalId(null),
@@ -577,11 +575,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   }, [focusedWorkspaceId, workspaceViews]);
 
   useEffect(() => {
-    if (activeConsoleId && consoleTabs.some((tab) => tab.id === activeConsoleId)) return;
-    setActiveConsoleId(consoleTabs[0]?.id ?? "");
-  }, [activeConsoleId, consoleTabs]);
-
-  useEffect(() => {
     let notificationService: SystemNotificationService | null = null;
     try {
       notificationService = runtime.getService<SystemNotificationService>(SYSTEM_NOTIFICATION_SERVICE_ID);
@@ -673,8 +666,8 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
         setActiveWorkspaceId(payload.activateWorkspaceId);
       }
 
-      if (payload.activateConsoleId && consoleTabs.some((tab) => tab.id === payload.activateConsoleId)) {
-        setActiveConsoleId(payload.activateConsoleId);
+      if (payload.activateConsoleId) {
+        setActiveModalId(resolveModalId(DIAGNOSTICS_MODAL_ID));
       }
 
       if (payload.openModalId) {
@@ -690,7 +683,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
     return () => {
       window.removeEventListener("message", onMessage);
     };
-  }, [runtime, workspaceViews, consoleTabs, modalDialogs]);
+  }, [runtime, workspaceViews, modalDialogs]);
 
   const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>): void => {
     if (sidebarCollapsed) return;
@@ -710,27 +703,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
         : Number.POSITIVE_INFINITY;
       const next = Math.max(260, Math.min(maxWidthByViewport, initial + (moveEvent.clientX - startX)));
       setSidebarWidth(next);
-    };
-    const onUp = (): void => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  const startConsoleResize = (event: React.MouseEvent<HTMLDivElement>): void => {
-    if (consoleCollapsed) return;
-    event.preventDefault();
-    const startY = event.clientY;
-    const initial = consoleHeight;
-    const workspaceColumn = event.currentTarget.closest(".workspace-column") as HTMLElement | null;
-    const onMove = (moveEvent: MouseEvent): void => {
-      const maxHeightByWorkspace = workspaceColumn
-        ? Math.max(120, Math.floor(workspaceColumn.getBoundingClientRect().height) - 32 - 4)
-        : Number.POSITIVE_INFINITY;
-      const next = Math.max(120, Math.min(maxHeightByWorkspace, initial - (moveEvent.clientY - startY)));
-      setConsoleHeight(next);
     };
     const onUp = (): void => {
       window.removeEventListener("mousemove", onMove);
@@ -788,25 +760,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
                 setFocusedWorkspaceId(null);
                 setActiveWorkspaceId(id);
               }}
-            >
-              {!workspaceFocused ? (
-                <>
-                  <div
-                    className={`splitter-horizontal ${consoleCollapsed ? "collapsed" : ""}`}
-                    onMouseDown={startConsoleResize}
-                    role="separator"
-                    aria-orientation="horizontal"
-                  />
-                  <ConsolePanel
-                    tabs={consoleTabs}
-                    activeTabId={activeConsoleId}
-                    onSelectTab={setActiveConsoleId}
-                    collapsed={consoleCollapsed}
-                    height={consoleCollapsed ? 36 : consoleHeight}
-                  />
-                </>
-              ) : null}
-            </WorkspacePanel>
+            />
           </>
         )}
       </div>
@@ -814,8 +768,12 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       <GlobalDialogHost runtime={runtime} />
       <Footer
         items={footerItems}
-        consoleCollapsed={usingVscodeLayout ? true : consoleCollapsed}
-        onToggleConsoleCollapse={() => setConsoleCollapsed((prev) => !prev)}
+        consoleCollapsed={true}
+        onToggleConsoleCollapse={() => {
+          if (usingVscodeLayout) return;
+          const diagnosticsModalId = resolveModalId(DIAGNOSTICS_MODAL_ID);
+          setActiveModalId((current) => (current === diagnosticsModalId ? null : diagnosticsModalId));
+        }}
         showConsoleToggle={!usingVscodeLayout}
       />
     </div>

@@ -12,6 +12,7 @@ import { DispatcherRegistry } from "../core/registries/dispatcherRegistry";
 import { ServiceRegistry } from "../core/registries/serviceRegistry";
 import { TransportRegistry } from "../core/registries/transportRegistry";
 import type { AppRuntime } from "../core/types/module";
+import { DiagnosticsModal } from "../packages/core/modules/ui/frontend/DiagnosticsModal";
 import { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
 import { DialogService, DIALOG_SERVICE_ID } from "../packages/core/modules/runtime/service/impl/DialogService";
 import { TransportManager } from "../packages/core/modules/runtime/transport/manager/TransportManager";
@@ -46,6 +47,7 @@ function createRuntime(): AppRuntime {
   const services = new ServiceRegistry();
   const dispatchers = new DispatcherRegistry();
   const transports = new TransportRegistry();
+  let runtime: AppRuntime;
 
   commands.register({ id: "test.shell.openModal", title: "Open Test Modal", category: "Test" }, () =>
     commands.execute(ShellCommands.openModal, "modal.test")
@@ -76,6 +78,12 @@ function createRuntime(): AppRuntime {
     render: () => <div>Modal Body</div>
   });
   contributions.register({
+    id: "modal.diagnostics",
+    slot: "modal",
+    title: "Diagnostics",
+    render: () => <DiagnosticsModal runtime={runtime} />
+  });
+  contributions.register({
     id: "toolbar.test",
     slot: "toolbar",
     label: "Tools",
@@ -93,7 +101,7 @@ function createRuntime(): AppRuntime {
     service: new DialogService()
   });
 
-  return {
+  runtime = {
     packageId: "core",
     env: {
       appName: "Cockpit Test",
@@ -120,6 +128,7 @@ function createRuntime(): AppRuntime {
     setPackageConfig: async () => undefined,
     resetPackageConfig: async () => undefined
   };
+  return runtime;
 }
 
 describe("AppShell", () => {
@@ -145,13 +154,32 @@ describe("AppShell", () => {
 
     expect(screen.getByText("Sidebar One")).toBeInTheDocument();
     expect(screen.getAllByText("Workspace One").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Console One").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Console One")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Tools"));
     fireEvent.click(screen.getByText("Open modal"));
 
     expect(await screen.findByText("Test Modal")).toBeInTheDocument();
     expect(screen.getByText("Modal Body")).toBeInTheDocument();
+  });
+
+  it("opens console contributions in the diagnostics modal instead of the main workspace", async () => {
+    const runtime = createRuntime();
+    render(<AppShell runtime={runtime} />);
+
+    expect(screen.getAllByText("Workspace One").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Console One")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(runtime.commands.has(ShellCommands.toggleConsole)).toBe(true);
+    });
+
+    act(() => {
+      void runtime.commands.execute(ShellCommands.toggleConsole);
+    });
+
+    expect(await screen.findByText("Diagnostics")).toBeInTheDocument();
+    expect(screen.getAllByText("Console One").length).toBeGreaterThan(0);
   });
 
   it("opens modal directly from toolbar button without dropdown", async () => {
