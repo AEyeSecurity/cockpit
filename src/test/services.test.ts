@@ -209,6 +209,48 @@ describe("services", () => {
     expect(service.getState().waypoints[1]).toEqual({ x: 3, y: 4 });
   });
 
+  it("saves, lists, loads and deletes named routes via localStorage", () => {
+    installStorageMock();
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    // Cannot save with empty name or with no waypoints.
+    expect(() => service.saveNamedRoute("ruta")).toThrowError(/waypoints/i);
+    service.queueWaypoint({ x: 1, y: 2, yawDeg: 90 });
+    service.queueWaypoint({ x: 3, y: 4 });
+    expect(() => service.saveNamedRoute("   ")).toThrowError(/vacío/i);
+
+    const saved = service.saveNamedRoute("Ronda noche");
+    expect(saved).toBe(2);
+    expect(service.getState().savedRouteNames).toEqual(["Ronda noche"]);
+    expect(service.listSavedRouteNames()).toEqual(["Ronda noche"]);
+
+    // A second service instance reads the persisted routes on construction.
+    const reopened = new NavigationService(dispatcher as never);
+    expect(reopened.listSavedRouteNames()).toEqual(["Ronda noche"]);
+    reopened.clearWaypoints();
+    expect(reopened.getState().waypoints).toHaveLength(0);
+    const loaded = reopened.loadNamedRoute("Ronda noche");
+    expect(loaded).toBe(2);
+    expect(reopened.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, yawDeg: 90 });
+    expect(reopened.getState().waypoints[1]).toEqual({ x: 3, y: 4 });
+
+    expect(() => reopened.loadNamedRoute("inexistente")).toThrowError(/No existe/i);
+
+    reopened.deleteNamedRoute("Ronda noche");
+    expect(reopened.getState().savedRouteNames).toEqual([]);
+    expect(() => reopened.loadNamedRoute("Ronda noche")).toThrowError(/No existe/i);
+  });
+
   it("supports waypoint selection and selective removal", () => {
     const dispatcher = {
       requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({

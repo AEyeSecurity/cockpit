@@ -7322,3 +7322,72 @@ pre {
   color: #bae6fd;
   background: rgba(14, 116, 144, 0.24);
 }
+
+/* ── Saved routes (named, localStorage) ─── */
+.nav-saved-routes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.nav-saved-routes-add {
+  width: 100%;
+}
+
+.nav-saved-routes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-saved-route-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.nav-saved-route-load {
+  flex: 1 1 auto;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  background: rgba(14, 116, 144, 0.18);
+  color: #bae6fd;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-saved-route-load:hover {
+  background: rgba(14, 116, 144, 0.32);
+  border-color: rgba(125, 211, 252, 0.5);
+}
+
+.nav-saved-route-delete {
+  flex: 0 0 auto;
+  width: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: rgba(127, 29, 29, 0.2);
+  color: #fca5a5;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.nav-saved-route-delete:hover {
+  background: rgba(127, 29, 29, 0.4);
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
+.nav-saved-routes-empty {
+  font-size: 11px;
+  margin: 2px 0 0;
+  opacity: 0.7;
+}

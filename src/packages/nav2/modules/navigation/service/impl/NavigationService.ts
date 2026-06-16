@@ -105,11 +105,13 @@ export interface NavigationState {
   patrolLoop: PatrolLoopState;
   lastStatus: string;
   lastSnapshot: SnapshotData | null;
+  savedRouteNames: string[];
 }
 
 type NavigationListener = (state: NavigationState) => void;
 
 const WAYPOINT_STORAGE_KEY = "cockpit.navigation.waypoints.v1";
+const SAVED_ROUTES_STORAGE_KEY = "cockpit.navigation.routes.v1";
 const MAX_WAYPOINTS = 200;
 const DEFAULT_MANUAL_LINEAR_MIN = 1.0;
 const DEFAULT_MANUAL_LINEAR_MAX = 4.0;
@@ -208,6 +210,35 @@ function parseStoredWaypoints(raw: string): GoalInput[] {
     throw new Error("Invalid waypoint payload");
   }
   return parsed.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS);
+}
+
+function readSavedRoutesMap(): Record<string, GoalInput[]> {
+  const raw = getStorageAdapter().getItem(SAVED_ROUTES_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const routes: Record<string, GoalInput[]> = {};
+    for (const [name, value] of Object.entries(parsed)) {
+      if (!name.trim() || !Array.isArray(value)) continue;
+      try {
+        routes[name] = value.map((entry) => parseGoal(entry as GoalInput)).slice(0, MAX_WAYPOINTS);
+      } catch {
+        // Skip routes with corrupt waypoint payloads instead of failing the whole read.
+      }
+    }
+    return routes;
+  } catch {
+    return {};
+  }
+}
+
+function writeSavedRoutesMap(routes: Record<string, GoalInput[]>): void {
+  getStorageAdapter().setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(routes));
+}
+
+function sortedRouteNames(routes: Record<string, GoalInput[]>): string[] {
+  return Object.keys(routes).sort((a, b) => a.localeCompare(b));
 }
 
 function sanitizeSelection(selection: number[], max: number): number[] {
@@ -544,7 +575,8 @@ export class NavigationService {
       label: ""
     },
     lastStatus: "No active goal",
-    lastSnapshot: null
+    lastSnapshot: null,
+    savedRouteNames: []
   };
 
   constructor(private readonly robotDispatcher: RobotDispatcher, manualDefaults?: Partial<NavigationManualDefaults>) {
@@ -585,7 +617,8 @@ export class NavigationService {
       manualLinearMin: this.manualLinearMin,
       manualLinearMax: this.manualLinearMax,
       manualSteeringAngleMinDeg: this.manualSteeringAngleMinDeg,
-      manualSteeringAngleMaxDeg: this.manualSteeringAngleMaxDeg
+      manualSteeringAngleMaxDeg: this.manualSteeringAngleMaxDeg,
+      savedRouteNames: sortedRouteNames(readSavedRoutesMap())
     };
 
     this.startControlHeartbeat();
@@ -648,7 +681,8 @@ export class NavigationService {
       patrolLoop: { ...this.state.patrolLoop },
       lastSnapshot: this.state.lastSnapshot
         ? { ...this.state.lastSnapshot, layers: { ...this.state.lastSnapshot.layers } }
-        : null
+        : null,
+      savedRouteNames: [...this.state.savedRouteNames]
     };
   }
 
@@ -854,6 +888,60 @@ export class NavigationService {
     };
     this.emit();
     return loaded.length;
+  }
+
+  listSavedRouteNames(): string[] {
+    return [...this.state.savedRouteNames];
+  }
+
+  saveNamedRoute(name: string): number {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error("El nombre de la ruta no puede estar vacío");
+    }
+    if (this.state.waypoints.length === 0) {
+      throw new Error("No hay waypoints para guardar");
+    }
+    const routes = readSavedRoutesMap();
+    routes[trimmed] = this.state.waypoints.map((waypoint) => ({ ...waypoint }));
+    writeSavedRoutesMap(routes);
+    this.state = {
+      ...this.state,
+      savedRouteNames: sortedRouteNames(routes),
+      lastStatus: `Ruta "${trimmed}" guardada (${routes[trimmed].length} waypoints)`
+    };
+    this.emit();
+    return routes[trimmed].length;
+  }
+
+  loadNamedRoute(name: string): number {
+    const routes = readSavedRoutesMap();
+    const loaded = routes[name];
+    if (!loaded) {
+      throw new Error(`No existe la ruta "${name}"`);
+    }
+    this.state = {
+      ...this.state,
+      waypoints: loaded.map((waypoint) => ({ ...waypoint })),
+      selectedWaypointIndexes: [],
+      savedRouteNames: sortedRouteNames(routes),
+      lastStatus: `Ruta "${name}" cargada (${loaded.length} waypoints)`
+    };
+    this.emit();
+    return loaded.length;
+  }
+
+  deleteNamedRoute(name: string): void {
+    const routes = readSavedRoutesMap();
+    if (!(name in routes)) return;
+    delete routes[name];
+    writeSavedRoutesMap(routes);
+    this.state = {
+      ...this.state,
+      savedRouteNames: sortedRouteNames(routes),
+      lastStatus: `Ruta "${name}" eliminada`
+    };
+    this.emit();
   }
 
   async loadWaypointsFile(): Promise<number> {

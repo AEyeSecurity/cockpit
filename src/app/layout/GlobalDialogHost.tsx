@@ -52,7 +52,14 @@ export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Elemen
     dialogService.accept();
   };
   const isConnectionLostDialog = activeDialog.kind === "alert" && activeDialog.title === "Conexión perdida";
-  const cardClassName = `global-dialog-card${isConnectionLostDialog ? " global-dialog-card-connection-lost" : ""}`;
+  const isDangerConfirm = activeDialog.kind === "confirm" && activeDialog.danger;
+  const isPromptDialog = activeDialog.kind === "prompt";
+  const cardClassName = [
+    "global-dialog-card",
+    isConnectionLostDialog ? "global-dialog-card-connection-lost" : "",
+    isDangerConfirm ? "global-dialog-card-danger" : "",
+    isPromptDialog ? "global-dialog-card-prompt" : ""
+  ].filter(Boolean).join(" ");
 
   return (
     <div className="global-dialog-overlay" role="dialog" aria-modal="true" onClick={() => dialogService.dismiss()}>
@@ -71,6 +78,15 @@ export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Elemen
           </button>
         </div>
         <div className="global-dialog-body">
+          {isDangerConfirm ? (
+            <span className="global-dialog-danger-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+                <path d="M12 8v5" />
+                <path d="M12 17h.01" />
+                <path d="M10.2 4.7 2.9 17.3A2 2 0 0 0 4.6 20h14.8a2 2 0 0 0 1.7-2.7L13.8 4.7a2 2 0 0 0-3.6 0Z" />
+              </svg>
+            </span>
+          ) : null}
           <p className="global-dialog-message">{activeDialog.message}</p>
           {activeDialog.kind === "prompt" ? (
             <input
@@ -91,7 +107,7 @@ export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Elemen
         </div>
         <footer className="global-dialog-actions">
           {activeDialog.kind !== "alert" ? (
-            <button type="button" onClick={() => dialogService.dismiss()}>
+            <button type="button" className="global-dialog-cancel-btn" onClick={() => dialogService.dismiss()}>
               {activeDialog.cancelLabel}
             </button>
           ) : null}

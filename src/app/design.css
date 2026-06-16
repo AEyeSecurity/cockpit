@@ -8053,3 +8053,287 @@ button:disabled,
   gap: 3px;
   margin-left: 4px;
 }
+
+/* Destructive confirmations: clearer route/delete dialog. */
+#root .global-dialog-card-danger {
+  width: min(460px, calc(100vw - 32px)) !important;
+  max-width: min(460px, calc(100vw - 32px)) !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(225, 29, 72, 0.28) !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-header-shell {
+  min-height: 54px !important;
+  grid-template-columns: minmax(0, 1fr) 48px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #eef2f7 !important;
+  border-radius: 18px 18px 0 0 !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-header {
+  min-height: 54px !important;
+  justify-content: flex-start !important;
+  padding: 0 20px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-header strong {
+  justify-content: flex-start !important;
+  color: #111827 !important;
+  font-size: 16px !important;
+  font-weight: 780 !important;
+  letter-spacing: 0 !important;
+  text-align: left !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-close-btn {
+  width: 48px !important;
+  min-width: 48px !important;
+  border-left: 1px solid #eef2f7 !important;
+  border-radius: 0 18px 0 0 !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+  font-size: 18px !important;
+  box-shadow: none !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-close-btn:hover:not(:disabled) {
+  background: #fff1f2 !important;
+  color: #e11d48 !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-body {
+  min-height: 150px !important;
+  display: grid !important;
+  grid-template-columns: 48px minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-items: stretch !important;
+  gap: 14px !important;
+  padding: 24px 22px !important;
+  border: 0 !important;
+  background: #ffffff !important;
+  text-align: left !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-danger-icon {
+  width: 48px !important;
+  height: 48px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid rgba(225, 29, 72, 0.24) !important;
+  border-radius: 14px !important;
+  background: #fff1f2 !important;
+  color: #e11d48 !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-danger-icon svg {
+  width: 24px !important;
+  height: 24px !important;
+  stroke: currentColor !important;
+  stroke-width: 1.9 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-message {
+  max-width: none !important;
+  margin: 0 !important;
+  color: #475569 !important;
+  font-size: 14px !important;
+  font-weight: 560 !important;
+  line-height: 1.55 !important;
+  white-space: pre-wrap !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-actions {
+  min-height: 72px !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  padding: 14px 18px !important;
+  border-top: 1px solid #eef2f7 !important;
+  background: #f8fafc !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-actions button {
+  min-height: 42px !important;
+  padding: 0 18px !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 760 !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-cancel-btn {
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-cancel-btn:hover:not(:disabled) {
+  border-color: #94a3b8 !important;
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-actions .danger-btn {
+  border: 1px solid #e11d48 !important;
+  background: #e11d48 !important;
+  color: #ffffff !important;
+}
+
+#root .global-dialog-card-danger .global-dialog-actions .danger-btn:hover:not(:disabled) {
+  border-color: #be123c !important;
+  background: #be123c !important;
+  color: #ffffff !important;
+}
+
+/* Prompt dialogs (e.g. "Guardar ruta"): clean light input dialog. */
+#root .global-dialog-card-prompt {
+  width: min(440px, calc(100vw - 32px)) !important;
+  max-width: min(440px, calc(100vw - 32px)) !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(37, 99, 235, 0.22) !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-header-shell {
+  min-height: 54px !important;
+  grid-template-columns: minmax(0, 1fr) 48px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #eef2f7 !important;
+  border-radius: 18px 18px 0 0 !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-header {
+  min-height: 54px !important;
+  justify-content: flex-start !important;
+  padding: 0 20px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-header strong {
+  justify-content: flex-start !important;
+  color: #111827 !important;
+  font-size: 16px !important;
+  font-weight: 780 !important;
+  letter-spacing: 0 !important;
+  text-align: left !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-close-btn {
+  width: 48px !important;
+  min-width: 48px !important;
+  border-left: 1px solid #eef2f7 !important;
+  border-radius: 0 18px 0 0 !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+  font-size: 18px !important;
+  box-shadow: none !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-close-btn:hover:not(:disabled) {
+  background: #eff6ff !important;
+  color: #2563eb !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 22px !important;
+  border: 0 !important;
+  background: #ffffff !important;
+  text-align: left !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-message {
+  max-width: none !important;
+  margin: 0 !important;
+  color: #475569 !important;
+  font-size: 14px !important;
+  font-weight: 560 !important;
+  line-height: 1.5 !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-input {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 11px 13px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-input::placeholder {
+  color: #94a3b8 !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-input:focus {
+  outline: none !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-actions {
+  min-height: 72px !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  padding: 14px 18px !important;
+  border-top: 1px solid #eef2f7 !important;
+  background: #f8fafc !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-actions button {
+  min-height: 42px !important;
+  padding: 0 18px !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 760 !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-cancel-btn {
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-cancel-btn:hover:not(:disabled) {
+  border-color: #94a3b8 !important;
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-actions button:not(.global-dialog-cancel-btn) {
+  border: 1px solid #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+#root .global-dialog-card-prompt .global-dialog-actions button:not(.global-dialog-cancel-btn):hover:not(:disabled) {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+}

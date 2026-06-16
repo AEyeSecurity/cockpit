@@ -778,6 +778,7 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const navService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const connService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
+  const dialogService = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const telemetryService = getTelemetryService(runtime);
   const [navState, setNavState] = useState<NavigationState>(navService.getState());
   const [connState, setConnState] = useState(connService.getState());
@@ -965,8 +966,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className="ncb sec-btn"
-            disabled={wps === 0}
-            title="Deshacer último waypoint"
+            disabled={wps === 0 || navState.controlLocked}
+            title={navState.controlLocked ? lockReasonText : "Deshacer último waypoint"}
             onClick={() => {
               navService.removeLastWaypoint();
               emitInfo("Last waypoint removed");
@@ -977,8 +978,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className="ncb danger-btn"
-            disabled={wps === 0}
-            title="Limpiar todos los waypoints"
+            disabled={wps === 0 || navState.controlLocked}
+            title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
             onClick={() => {
               navService.clearWaypoints();
               emitInfo("Waypoints cleared");
@@ -989,8 +990,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className="ncb danger-btn"
-            disabled={selectedCount === 0}
-            title={`${selectedCount} waypoints seleccionados`}
+            disabled={selectedCount === 0 || navState.controlLocked}
+            title={navState.controlLocked ? lockReasonText : `${selectedCount} waypoints seleccionados`}
             onClick={() => {
               const removed = navService.removeSelectedWaypoints();
               if (removed > 0) emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
@@ -1001,7 +1002,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
         <button
           type="button"
-          className={joinClassNames("ncb-wide prim-btn", wps > 0 && "active")}
+          className={joinClassNames("ncb-wide prim-btn", wps > 0 && !navState.controlLocked && "active")}
           disabled={navState.controlLocked}
           title={navState.controlLocked ? lockReasonText : "Activar colocación de waypoint en el mapa"}
           onClick={() => {
@@ -1017,7 +1018,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         <button
           type="button"
           className={joinClassNames("ncb-wide send-btn", goalRunning && "active")}
-          disabled={wps === 0}
+          disabled={wps === 0 || navState.controlLocked}
           onClick={async () => {
             try {
               const sent = await navService.sendQueuedGoal();
@@ -1032,7 +1033,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         <button
           type="button"
           className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
-          disabled={wps < 2}
+          disabled={wps < 2 || navState.controlLocked}
           onClick={async () => {
             try {
               const started = await navService.sendRouteMission();
@@ -1068,41 +1069,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 
       {/* ── 5. FILE ───────────────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection
-        title="FILE OPERATIONS"
+        title="GESTIÓN DE RUTAS"
         className="nav-sidebar-compact-section nav-sidebar-file-section"
         defaultCollapsed
       >
         <div className="ncb-3-grid nav-sidebar-compact-grid">
-          <button
-            type="button"
-            className="ncb sec-btn"
-            title="Guardar ruta"
-            onClick={async () => {
-              try {
-                const count = await navService.saveWaypointsFile();
-                emitInfo(`Saved ${count} waypoints`);
-              } catch (error) {
-                emitError(`Save waypoints failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="save" />} label="SAVE" meta="Persist waypoints" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb sec-btn"
-            title="Cargar ruta"
-            onClick={async () => {
-              try {
-                const count = await navService.loadWaypointsFile();
-                emitInfo(`Loaded ${count} waypoints`);
-              } catch (error) {
-                emitError(`Load waypoints failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="load" />} label="LOAD" meta="Restore saved" compact />
-          </button>
           <button
             type="button"
             className="ncb sec-btn"
@@ -1113,6 +1084,89 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             <ButtonFace icon={<NavGlyph kind="snapshot" />} label="SNAPSHOT" meta="Capture state" compact />
           </button>
+          <button
+            type="button"
+            className="ncb danger-btn"
+            disabled={wps === 0 || navState.controlLocked}
+            title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
+            onClick={() => {
+              navService.clearWaypoints();
+              emitInfo("Waypoints cleared");
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
+          </button>
+        </div>
+
+        <div className="nav-saved-routes">
+          <button
+            type="button"
+            className="ncb sec-btn nav-saved-routes-add"
+            title="Guardar la ruta actual con un nombre (se guarda en el cockpit, funciona sin conexión)"
+            disabled={wps === 0}
+            onClick={async () => {
+              const name = await dialogService.prompt({
+                title: "Guardar ruta",
+                message: "Nombre para esta ruta:",
+                confirmLabel: "Guardar",
+                placeholder: "ej: Ronda noche"
+              });
+              if (name === null) return;
+              try {
+                const count = navService.saveNamedRoute(name);
+                emitInfo(`Ruta "${name.trim()}" guardada (${count} waypoints)`);
+              } catch (error) {
+                emitError(`Guardar ruta falló: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="save" />} label="GUARDAR RUTA" meta="Con nombre · local" compact />
+          </button>
+
+          {navState.savedRouteNames.length > 0 ? (
+            <ul className="nav-saved-routes-list">
+              {navState.savedRouteNames.map((routeName) => (
+                <li key={routeName} className="nav-saved-route-item">
+                  <button
+                    type="button"
+                    className="nav-saved-route-load"
+                    title={`Cargar "${routeName}"`}
+                    onClick={() => {
+                      try {
+                        const count = navService.loadNamedRoute(routeName);
+                        emitInfo(`Ruta "${routeName}" cargada (${count} waypoints)`);
+                      } catch (error) {
+                        emitError(`Cargar ruta falló: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    {routeName}
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-saved-route-delete"
+                    aria-label={`Eliminar "${routeName}"`}
+                    title={`Eliminar "${routeName}"`}
+                    onClick={async () => {
+                      const ok = await dialogService.confirm({
+                        title: "Eliminar ruta",
+                        message: `¿Eliminar la ruta "${routeName}"?`,
+                        confirmLabel: "Eliminar",
+                        danger: true
+                      });
+                      if (!ok) return;
+                      navService.deleteNamedRoute(routeName);
+                      emitInfo(`Ruta "${routeName}" eliminada`);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="nav-saved-routes-empty muted">No hay rutas guardadas todavía.</p>
+          )}
         </div>
       </NavSidebarCollapsibleSection>
 
