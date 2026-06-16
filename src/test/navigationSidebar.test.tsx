@@ -24,6 +24,7 @@ describe("navigation sidebar", () => {
     expect(screen.queryByText("CONTROL MODE")).not.toBeInTheDocument();
     expect(screen.queryByText("NAVIGATION ACTIONS")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();
+    expect(screen.queryByText("PATROL")).not.toBeInTheDocument();
 
     const routeHeading = screen.getByText("Route");
     const waypointsHeading = screen.getByText("Waypoints");

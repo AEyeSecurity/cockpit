@@ -29,8 +29,49 @@ export interface TelemetrySnapshot {
   recentEvents: TelemetryEvent[];
   alerts: TelemetryEvent[];
   rtkSourceState: Record<string, unknown> | null;
+  rtkSources: RtkSourceOption[];
   datum: Record<string, unknown> | null;
   gpsStatus: Record<string, unknown> | null;
+}
+
+export interface RtkSourceOption {
+  id: string;
+  label: string;
+  host?: string;
+  port?: number;
+  mountpoint?: string;
+}
+
+export interface RtkSourceDraft {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  mountpoint: string;
+  username: string;
+  password: string;
+  activate: boolean;
+}
+
+function normalizeRtkSources(raw: unknown): RtkSourceOption[] {
+  if (!Array.isArray(raw)) return [];
+  const sources: RtkSourceOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const id = String(record.id ?? record.source_id ?? "").trim();
+    if (!id) continue;
+    const label = String(record.label ?? record.name ?? id).trim() || id;
+    const port = Number(record.port);
+    sources.push({
+      id,
+      label,
+      host: String(record.host ?? "").trim() || undefined,
+      port: Number.isFinite(port) ? port : undefined,
+      mountpoint: String(record.mountpoint ?? "").trim() || undefined
+    });
+  }
+  return sources;
 }
 
 function normalizeEventLevel(raw: unknown): string {
@@ -203,6 +244,7 @@ export class TelemetryService {
     recentEvents: [],
     alerts: [],
     rtkSourceState: null,
+    rtkSources: [],
     datum: null,
     gpsStatus: null
   };
@@ -235,6 +277,9 @@ export class TelemetryService {
       }
       if (message.rtk_source_state && typeof message.rtk_source_state === "object") {
         this.snapshot = { ...this.snapshot, rtkSourceState: message.rtk_source_state as Record<string, unknown> };
+      }
+      if (Array.isArray(message.rtk_sources)) {
+        this.snapshot = { ...this.snapshot, rtkSources: normalizeRtkSources(message.rtk_sources) };
       }
       if (message.datum && typeof message.datum === "object") {
         this.snapshot = { ...this.snapshot, datum: message.datum as Record<string, unknown> };
@@ -297,6 +342,20 @@ export class TelemetryService {
     return this.robotDispatcher.subscribeRobotStatus(callback);
   }
 
+  async selectRtkSource(sourceId: string): Promise<void> {
+    const response = await this.robotDispatcher.requestSelectRtkSource(sourceId);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "No se pudo cambiar la fuente RTK");
+    }
+  }
+
+  async upsertRtkSource(source: RtkSourceDraft): Promise<void> {
+    const response = await this.robotDispatcher.requestUpsertRtkSource(source);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "No se pudo guardar la antena RTK");
+    }
+  }
+
   getSnapshot(): TelemetrySnapshot {
     return {
       robotStatus: { ...this.snapshot.robotStatus },
@@ -314,6 +373,7 @@ export class TelemetryService {
       recentEvents: [...this.snapshot.recentEvents],
       alerts: [...this.snapshot.alerts],
       rtkSourceState: this.snapshot.rtkSourceState ? { ...this.snapshot.rtkSourceState } : null,
+      rtkSources: this.snapshot.rtkSources.map((source) => ({ ...source })),
       datum: this.snapshot.datum ? { ...this.snapshot.datum } : null,
       gpsStatus: this.snapshot.gpsStatus ? { ...this.snapshot.gpsStatus } : null
     };

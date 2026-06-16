@@ -99,6 +99,14 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_control_lock", { locked } as never, { timeoutMs: 5000 });
   }
 
+  async requestSelectRtkSource(sourceId: string): Promise<Nav2IncomingMessage> {
+    return this.request("select_rtk_source", { id: sourceId } as never, { timeoutMs: 5000 });
+  }
+
+  async requestUpsertRtkSource(source: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("upsert_rtk_source", { source } as never, { timeoutMs: 5000 });
+  }
+
   async requestControlHeartbeat(): Promise<Nav2IncomingMessage> {
     return this.request("control_heartbeat", {}, { timeoutMs: 3000 });
   }

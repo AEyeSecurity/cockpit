@@ -370,6 +370,7 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
           recentEvents: [],
           alerts: [],
           rtkSourceState: null,
+          rtkSources: [],
           datum: null,
           gpsStatus: null
         }

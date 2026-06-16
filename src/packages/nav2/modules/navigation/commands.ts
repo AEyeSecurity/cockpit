@@ -3,6 +3,7 @@ export const NavigationCommands = {
   captureSnapshot:    "nav2.navigation.captureSnapshot",
   openLiveNavWindow:  "nav2.navigation.openLiveNavWindow",
   openInfoModal:      "nav2.navigation.openInfoModal",
+  openRtkModal:       "nav2.navigation.openRtkModal",
   swapWorkspace:      "nav2.navigation.swapWorkspace",
   toggleGoalMode:     "nav2.navigation.toggleGoalMode",
   toggleManualMode:   "nav2.navigation.toggleManualMode",

@@ -8305,11 +8305,11 @@ button:disabled,
 }
 
 #root .global-dialog-card-prompt .global-dialog-actions button {
-  min-height: 42px !important;
-  padding: 0 18px !important;
+  min-height: 38px !important;
+  padding: 0 16px !important;
   border-radius: 12px !important;
-  font-size: 14px !important;
-  font-weight: 760 !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
   letter-spacing: 0 !important;
   box-shadow: none !important;
 }
@@ -8327,15 +8327,16 @@ button:disabled,
 }
 
 #root .global-dialog-card-prompt .global-dialog-actions button:not(.global-dialog-cancel-btn) {
+  min-width: 92px !important;
   border: 1px solid #2563eb !important;
-  background: #2563eb !important;
-  color: #ffffff !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 #root .global-dialog-card-prompt .global-dialog-actions button:not(.global-dialog-cancel-btn):hover:not(:disabled) {
   border-color: #1d4ed8 !important;
-  background: #1d4ed8 !important;
-  color: #ffffff !important;
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
 }
 
 /* Diagnostics modal: secondary console tools without taking map space. */

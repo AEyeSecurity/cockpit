@@ -8,7 +8,7 @@ import { ConnectionService, type ConnectionState } from "../service/impl/Connect
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
 import { MapService, type DatumProfilesState, type MapWorkspaceState } from "../../map/service/impl/MapService";
 import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInfoService";
-import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
+import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
@@ -111,6 +111,8 @@ function buildConnectionPresetDefaults(ctx: ModuleContext, config: Nav2RuntimeCo
 interface TelemetryServiceLike {
   getSnapshot: () => TelemetrySnapshot;
   subscribeTelemetry: (callback: (snapshot: TelemetrySnapshot) => void) => () => void;
+  selectRtkSource: (sourceId: string) => Promise<void>;
+  upsertRtkSource: (source: RtkSourceDraft) => Promise<void>;
 }
 
 function getTelemetryService(runtime: ModuleContext): TelemetryServiceLike | null {
@@ -278,21 +280,6 @@ function buildNavigationStatus(
   };
 }
 
-function formatRecordingSummary(state: NavigationState): string {
-  const bits = [`Recorder: ${state.recording.active ? "recording" : "idle"}`, `count=${state.recording.count}`];
-  if (!state.recording.active && state.recording.lastMessage) {
-    bits.push(state.recording.lastMessage);
-  }
-  return bits.join(" · ");
-}
-
-function formatPatrolSummary(state: NavigationState): string {
-  const currentDisplay = state.patrolLoop.currentWaypoint >= 0 ? state.patrolLoop.currentWaypoint + 1 : "-";
-  const totalDisplay = state.patrolLoop.totalWaypoints > 0 ? state.patrolLoop.totalWaypoints : 0;
-  const labelSuffix = state.patrolLoop.label ? ` · ${state.patrolLoop.label}` : "";
-  return `Patrol: ${state.patrolLoop.active ? "active" : "idle"} · wp=${currentDisplay}/${totalDisplay}${labelSuffix}`;
-}
-
 function getMapService(runtime: ModuleContext): MapService | null {
   try {
     return runtime.services.getService<MapService>(MAP_SERVICE_ID);
@@ -344,11 +331,9 @@ type NavGlyphKind =
   | "save"
   | "load"
   | "snapshot"
-  | "recordStart"
-  | "recordStop"
-  | "recordClear"
-  | "patrolStart"
-  | "patrolStop";
+  | "gpsFix"
+  | "pin"
+  | "refresh";
 
 function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
   const baseProps = {
@@ -480,37 +465,30 @@ function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
           <path d="M8 7 9.5 5.5h5L16 7" />
         </svg>
       );
-    case "recordStart":
+    case "gpsFix":
       return (
         <svg {...baseProps}>
-          <circle cx="12" cy="12" r="5.2" />
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v3" />
+          <path d="M12 19v3" />
+          <path d="M2 12h3" />
+          <path d="M19 12h3" />
         </svg>
       );
-    case "recordStop":
+    case "pin":
       return (
         <svg {...baseProps}>
-          <rect x="7" y="7" width="10" height="10" rx="1.5" />
+          <path d="M12 21s6-5.3 6-10a6 6 0 1 0-12 0c0 4.7 6 10 6 10z" />
+          <circle cx="12" cy="11" r="2.2" />
         </svg>
       );
-    case "recordClear":
+    case "refresh":
       return (
         <svg {...baseProps}>
-          <path d="M5 16 11 8l4 4-6 8H5z" />
-          <path d="M13 6 18 11" />
-        </svg>
-      );
-    case "patrolStart":
-      return (
-        <svg {...baseProps}>
-          <path d="m9 7 7 5-7 5z" />
-          <path d="M5 6v12" opacity="0.45" />
-        </svg>
-      );
-    case "patrolStop":
-      return (
-        <svg {...baseProps}>
-          <path d="M8 7v10" />
-          <path d="M16 7v10" />
+          <path d="M20 11a8 8 0 0 0-14-4.5L4 9" />
+          <path d="M4 5v4h4" />
+          <path d="M4 13a8 8 0 0 0 14 4.5L20 15" />
+          <path d="M20 19v-4h-4" />
         </svg>
       );
   }
@@ -602,12 +580,6 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
         <svg {...baseProps}>
           <rect x="4" y="7" width="11" height="10" rx="2" />
           <path d="m15 10 5-2.5v9L15 14" />
-        </svg>
-      );
-    case "PATROL":
-      return (
-        <svg {...baseProps}>
-          <path d="M12 3.5 19 6v5.5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6Z" />
         </svg>
       );
     default:
@@ -850,7 +822,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMission = navState.routeMission;
   const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMission.active || routeMission.paused;
-  const patrolling = navState.patrolLoop.active;
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(
@@ -1145,20 +1116,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         className="nav-sidebar-compact-section nav-sidebar-file-section"
         defaultCollapsed
       >
-        <div className="ncb-grid nav-sidebar-compact-grid">
+        <div className="nav-routes-tools">
           <button
             type="button"
-            className="ncb sec-btn"
-            title="Snapshot"
-            onClick={() => {
-              void runtime.commands.execute(NavigationCommands.openSnapshotModal);
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="snapshot" />} label="SNAPSHOT" meta="Capture state" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb danger-btn"
+            className="ncb-wide danger-btn"
             disabled={wps === 0 || navState.controlLocked}
             title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
             onClick={() => {
@@ -1166,7 +1127,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               emitInfo("Waypoints cleared");
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
+            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" />
           </button>
         </div>
 
@@ -1239,117 +1200,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           ) : (
             <p className="nav-saved-routes-empty muted">No hay rutas guardadas todavía.</p>
           )}
-        </div>
-      </NavSidebarCollapsibleSection>
-
-      {/* ── 6. RECORDING ──────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="RECORDING" className="nav-sidebar-recording-section">
-        <div className={joinClassNames("recording-indicator", navState.recording.active && "active")}>
-          <span className="recording-dot" aria-hidden="true" />
-          <span className="recording-text">{formatRecordingSummary(navState)}</span>
-        </div>
-        <div className="ncb-3-grid">
-          <button
-            type="button"
-            className={joinClassNames("ncb sec-btn", navState.recording.active && "active")}
-            disabled={!connState.connected || navState.recording.active}
-            title={
-              !connState.connected
-                ? "Conectá WebSocket antes de grabar"
-                : navState.recording.active
-                  ? "Grabación en curso"
-                  : "Iniciar grabación"
-            }
-            onClick={async () => {
-              try {
-                await navService.startRecording();
-                emitInfo("Waypoint recording started");
-              } catch (error) {
-                emitError(`Start recording failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="recordStart" />} label="START" meta="Sample" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb danger-btn"
-            disabled={!connState.connected || !navState.recording.active}
-            title={!connState.connected ? "Conectá WebSocket para detener" : "Detener y guardar"}
-            onClick={async () => {
-              try {
-                await navService.stopRecording();
-                emitInfo("Waypoint recording stopped");
-              } catch (error) {
-                emitError(`Stop recording failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="recordStop" />} label="STOP" meta="Save" compact />
-          </button>
-          <button
-            type="button"
-            className="ncb sec-btn"
-            disabled={!connState.connected || navState.recording.active}
-            title={
-              !connState.connected
-                ? "Conectá WebSocket para limpiar"
-                : navState.recording.active
-                  ? "Detené la grabación antes de limpiar"
-                  : "Limpiar sesión grabada"
-            }
-            onClick={async () => {
-              try {
-                await navService.clearRecording();
-                emitInfo("Waypoint recording cleared");
-              } catch (error) {
-                emitError(`Clear recording failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="recordClear" />} label="CLEAR" meta="Reset" compact />
-          </button>
-        </div>
-      </NavSidebarCollapsibleSection>
-
-      {/* ── 7. PATROL ─────────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="PATROL" className="nav-sidebar-patrol-section">
-        <div className={`status-pill nav-route-status ${patrolling ? "ok" : ""}`.trim()}>
-          {formatPatrolSummary(navState)}
-        </div>
-        <div className="ncb-grid">
-          <button
-            type="button"
-            className={joinClassNames("ncb send-btn", patrolling && "active")}
-            disabled={wps === 0 || patrolling}
-            title="Iniciar patrulla"
-            onClick={async () => {
-              try {
-                await navService.startPatrol();
-                emitInfo("Loop patrol started");
-              } catch (error) {
-                emitError(`Start patrol failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="patrolStart" />} label="START" meta="Loop route" />
-          </button>
-          <button
-            type="button"
-            className="ncb cancel-btn"
-            disabled={!patrolling}
-            title="Detener patrulla"
-            onClick={async () => {
-              try {
-                await navService.stopPatrol();
-                emitInfo("Loop patrol stopped");
-              } catch (error) {
-                emitError(`Stop patrol failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="patrolStop" />} label="STOP" meta="Hold patrol" />
-          </button>
         </div>
       </NavSidebarCollapsibleSection>
 
@@ -1511,17 +1361,17 @@ function DatumSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
       </div>
       <div className="datum-sidebar-actions">
         <button type="button" className="ncb sec-btn" onClick={captureGpsDatum}>
-          <ButtonFace icon="GPS" label="CAPTURE" meta="Use current fix" compact />
+          <ButtonFace icon={<NavGlyph kind="gpsFix" />} label="CAPTURE" meta="Use current fix" compact />
         </button>
         <button type="button" className="ncb send-btn" onClick={saveManualDatum}>
-          <ButtonFace icon="LAT" label="SAVE" meta="Manual datum" compact />
+          <ButtonFace icon={<NavGlyph kind="pin" />} label="SAVE" meta="Manual datum" compact />
         </button>
         <button
           type="button"
           className="ncb sec-btn"
           onClick={() => void refreshDatums().catch((error) => emit("warn", `Refresh datums failed: ${String(error)}`))}
         >
-          <ButtonFace icon="↻" label="REFRESH" meta="Backend list" compact />
+          <ButtonFace icon={<NavGlyph kind="refresh" />} label="REFRESH" meta="Backend list" compact />
         </button>
       </div>
       <div className="datum-sidebar-list">
@@ -1582,7 +1432,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            <ButtonFace icon="↻" label="Refresh" meta="Fetch latest zones" compact />
+            <ButtonFace icon={<NavGlyph kind="refresh" />} label="Refresh" meta="Fetch latest zones" compact />
           </button>
           <button
             type="button"
@@ -1604,7 +1454,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               });
             }}
           >
-            <ButtonFace icon="✕" label="Clear" meta="Remove all zones" compact />
+            <ButtonFace icon={<NavGlyph kind="clear" />} label="Clear" meta="Remove all zones" compact />
           </button>
           <button
             type="button"
@@ -1627,7 +1477,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            <ButtonFace icon="⬆" label="Save" meta="Push and persist" compact />
+            <ButtonFace icon={<NavGlyph kind="save" />} label="Save" meta="Push and persist" compact />
           </button>
           <button
             type="button"
@@ -1650,7 +1500,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
               }
             }}
           >
-            <ButtonFace icon="⬇" label="Load" meta="Restore saved zones" compact />
+            <ButtonFace icon={<NavGlyph kind="load" />} label="Load" meta="Restore saved zones" compact />
           </button>
         </div>
         <label className="check-row">
@@ -1672,7 +1522,7 @@ function ZonesSidebarSection({ runtime }: { runtime: ModuleContext }): JSX.Eleme
                   </div>
                 </div>
                 <button type="button" className="danger-btn" onClick={() => mapService.removeZone(zone.id)}>
-                  <ButtonFace icon="−" label="Remove" meta="Delete zone" compact />
+                  <ButtonFace icon={<NavGlyph kind="remove" />} label="Remove" meta="Delete zone" compact />
                 </button>
               </li>
             ))}
@@ -1790,33 +1640,95 @@ function SnapshotModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     };
   }, [runtime.eventBus, service]);
 
+  const hasSnapshot = Boolean(snapshot?.imageBase64);
+
   return (
-    <div className="stack">
-      <div className="row">
+    <div className="snapshot-modal">
+      <div className="snapshot-toolbar">
         <button
           type="button"
+          className="snapshot-btn snapshot-btn-primary"
           disabled={loading}
           onClick={() => {
             void captureSnapshot();
           }}
         >
-          {loading ? "Loading..." : "Capture snapshot"}
+          {loading ? (
+            "Loading..."
+          ) : (
+            <>
+              <SnapshotGlyph kind="capture" />
+              {hasSnapshot ? "Recapturar" : "Capturar vista"}
+            </>
+          )}
         </button>
-        <button type="button" disabled={!snapshot} onClick={download}>
-          Download
+        <button
+          type="button"
+          className="snapshot-btn snapshot-btn-secondary"
+          disabled={!snapshot}
+          onClick={download}
+        >
+          <SnapshotGlyph kind="download" />
+          Descargar
         </button>
       </div>
-      {snapshot?.imageBase64 ? (
-        <img
-          className="snapshot-image"
-          src={`data:${snapshot.mime};base64,${snapshot.imageBase64}`}
-          alt="Navigation snapshot"
-        />
-      ) : (
-        <div className="modal-preview">Snapshot preview area</div>
-      )}
-      <p className="muted">Esc: close · Shift+Esc: download + close</p>
+
+      <div className={`snapshot-stage${hasSnapshot ? " has-image" : ""}`}>
+        {snapshot?.imageBase64 ? (
+          <>
+            <img
+              className="snapshot-image"
+              src={`data:${snapshot.mime};base64,${snapshot.imageBase64}`}
+              alt="Navigation snapshot"
+            />
+            <div className="snapshot-caption">
+              <span>{snapshot.width}×{snapshot.height} px</span>
+              <span className="snapshot-caption-dot" aria-hidden="true">·</span>
+              <span>{formatSnapshotSize(snapshot.imageSizeBytes)}</span>
+              <span className="snapshot-caption-dot" aria-hidden="true">·</span>
+              <span>{new Date(snapshot.stamp).toLocaleTimeString()}</span>
+            </div>
+          </>
+        ) : (
+          <div className="snapshot-empty">
+            <SnapshotGlyph kind="capture" />
+            <p className="snapshot-empty-title">Sin captura todavía</p>
+            <p className="snapshot-empty-subtitle">
+              Presioná <strong>Capturar vista</strong> para guardar el estado actual de la ruta.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <p className="snapshot-hint">
+        <kbd>Esc</kbd> cerrar
+        <span className="snapshot-hint-dot" aria-hidden="true">·</span>
+        <kbd>Shift</kbd>+<kbd>Esc</kbd> descargar y cerrar
+      </p>
     </div>
+  );
+}
+
+function formatSnapshotSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function SnapshotGlyph({ kind }: { kind: "capture" | "download" }): JSX.Element {
+  if (kind === "download") {
+    return (
+      <svg className="snapshot-glyph" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="snapshot-glyph" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h1.7l.9-1.6A1 1 0 0 1 9 5h6a1 1 0 0 1 .9.4L16.8 7h1.7A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <circle cx="12" cy="12.5" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
   );
 }
 
@@ -2297,6 +2209,232 @@ function registerServices(
   return { navigationService, connectionService };
 }
 
+function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const telemetryService = getTelemetryService(runtime);
+  const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(
+    telemetryService ? telemetryService.getSnapshot() : null
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [savingSource, setSavingSource] = useState(false);
+  const [sourceDraft, setSourceDraft] = useState<RtkSourceDraft>({
+    id: "",
+    label: "",
+    host: "",
+    port: 2101,
+    mountpoint: "",
+    username: "",
+    password: "",
+    activate: true
+  });
+
+  useEffect(() => {
+    if (!telemetryService) return;
+    return telemetryService.subscribeTelemetry((next) => setSnapshot(next));
+  }, [telemetryService]);
+
+  const rtkState = (snapshot?.rtkSourceState ?? null) as Record<string, unknown> | null;
+  const sources = snapshot?.rtkSources ?? [];
+  const activeId = String(rtkState?.active_source_id ?? "").trim();
+  const activeLabel = String(rtkState?.active_source_label ?? activeId).trim();
+  const connected = rtkState?.connected === true;
+  const statusText = connected
+    ? "Correcciones conectadas"
+    : activeId
+      ? "Base seleccionada · esperando correcciones"
+      : "Sin fuente activa";
+
+  const emit = (level: string, text: string): void => {
+    runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
+  };
+
+  const selectSource = async (sourceId: string): Promise<void> => {
+    if (!telemetryService || sourceId === activeId || busyId !== null) return;
+    setBusyId(sourceId);
+    try {
+      await telemetryService.selectRtkSource(sourceId);
+      emit("info", `Cambiando a fuente RTK "${sourceId}"`);
+    } catch (error) {
+      emit("error", `No se pudo cambiar la fuente RTK: ${String(error)}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const updateDraft = (key: keyof RtkSourceDraft, value: string | boolean | number): void => {
+    setSourceDraft((current) => ({ ...current, [key]: value }));
+  };
+  const draftId = sourceDraft.id.trim();
+  const draftHost = sourceDraft.host.trim();
+  const draftMountpoint = sourceDraft.mountpoint.trim();
+  const canSaveSource = Boolean(draftId && draftHost && draftMountpoint && Number.isFinite(sourceDraft.port) && sourceDraft.port > 0);
+  const saveSource = async (): Promise<void> => {
+    if (!telemetryService || !canSaveSource || savingSource) return;
+    setSavingSource(true);
+    try {
+      await telemetryService.upsertRtkSource({
+        ...sourceDraft,
+        id: draftId,
+        label: sourceDraft.label.trim() || draftId,
+        host: draftHost,
+        port: Math.trunc(Number(sourceDraft.port)),
+        mountpoint: draftMountpoint,
+        username: sourceDraft.username.trim(),
+        password: sourceDraft.password.trim()
+      });
+      emit("info", `Antena RTK "${sourceDraft.label.trim() || draftId}" guardada`);
+      setSourceDraft({
+        id: "",
+        label: "",
+        host: "",
+        port: 2101,
+        mountpoint: "",
+        username: "",
+        password: "",
+        activate: true
+      });
+      setShowAddForm(false);
+    } catch (error) {
+      emit("error", `No se pudo guardar la antena RTK: ${String(error)}`);
+    } finally {
+      setSavingSource(false);
+    }
+  };
+
+  return (
+    <div className="rtk-modal">
+      <div className="rtk-modal-status">
+        <span className={joinClassNames("rtk-status-dot", connected && "connected")} aria-hidden="true" />
+        <div className="rtk-modal-status-copy">
+          <strong>Fuente activa: {activeLabel || "—"}</strong>
+          <span>{statusText}</span>
+          {activeId ? <code>{activeId}</code> : null}
+        </div>
+      </div>
+      {sources.length > 0 ? (
+        <ul className="rtk-source-list">
+          {sources.map((source) => {
+            const isActive = source.id === activeId;
+            const isBusy = busyId === source.id;
+            return (
+              <li key={source.id}>
+                <button
+                  type="button"
+                  className={joinClassNames("rtk-source-btn", isActive && "active")}
+                  disabled={isActive || busyId !== null}
+                  title={isActive ? "Antena activa" : `Cambiar a ${source.label}`}
+                  onClick={() => void selectSource(source.id)}
+                >
+                  <span className="rtk-source-label">{source.label}</span>
+                  <span className="rtk-source-tag">
+                    {isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="rtk-empty muted">No hay antenas configuradas (revisá rtk_sources.yaml).</p>
+      )}
+      <button
+        type="button"
+        className="rtk-add-toggle"
+        onClick={() => setShowAddForm((current) => !current)}
+      >
+        {showAddForm ? "Cerrar formulario" : "Agregar antena"}
+      </button>
+      {showAddForm ? (
+        <form
+          className="rtk-add-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveSource();
+          }}
+        >
+          <div className="rtk-form-grid">
+            <label>
+              ID
+              <input
+                value={sourceDraft.id}
+                onChange={(event) => updateDraft("id", event.target.value)}
+                placeholder="ej: base_sur"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Nombre
+              <input
+                value={sourceDraft.label}
+                onChange={(event) => updateDraft("label", event.target.value)}
+                placeholder="Base Sur"
+                autoComplete="off"
+              />
+            </label>
+            <label className="rtk-form-wide">
+              Host
+              <input
+                value={sourceDraft.host}
+                onChange={(event) => updateDraft("host", event.target.value)}
+                placeholder="rtk2go.com"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Puerto
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={sourceDraft.port}
+                onChange={(event) => updateDraft("port", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Mountpoint
+              <input
+                value={sourceDraft.mountpoint}
+                onChange={(event) => updateDraft("mountpoint", event.target.value)}
+                placeholder="CASISA"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Usuario
+              <input
+                value={sourceDraft.username}
+                onChange={(event) => updateDraft("username", event.target.value)}
+                placeholder="opcional"
+                autoComplete="username"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={sourceDraft.password}
+                onChange={(event) => updateDraft("password", event.target.value)}
+                placeholder="opcional"
+                autoComplete="new-password"
+              />
+            </label>
+          </div>
+          <label className="rtk-activate-row">
+            <input
+              type="checkbox"
+              checked={sourceDraft.activate}
+              onChange={(event) => updateDraft("activate", event.target.checked)}
+            />
+            Activarla al guardar
+          </label>
+          <button type="submit" className="rtk-save-btn" disabled={!canSaveSource || savingSource}>
+            {savingSource ? "Guardando..." : "Guardar antena"}
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 function registerSidebarPanels(ctx: ModuleContext): void {
   ctx.contributions.register({
     id: "sidebar.navigation",
@@ -2321,6 +2459,21 @@ function registerModals(ctx: ModuleContext): void {
     title: "Info",
     render: () => <InfoModal runtime={ctx} />,
     renderFooter: () => <InfoModalFooter runtime={ctx} />
+  });
+  ctx.contributions.register({
+    id: "modal.rtk",
+    slot: "modal",
+    title: "RTK · Antena",
+    render: () => <RtkSourceModal runtime={ctx} />
+  });
+}
+
+function registerToolbar(ctx: ModuleContext): void {
+  ctx.contributions.register({
+    id: "toolbar.rtk",
+    slot: "toolbar",
+    label: "RTK",
+    commandId: NavigationCommands.openRtkModal
   });
 }
 
@@ -2450,6 +2603,13 @@ function registerCommands(
     { id: NavigationCommands.openInfoModal, title: "Open Info Modal", category: "Navigation" },
     () => {
       void ctx.commands.execute(ShellCommands.openModal, "modal.info");
+    }
+  );
+
+  ctx.commands.register(
+    { id: NavigationCommands.openRtkModal, title: "Open RTK Modal", category: "Navigation" },
+    () => {
+      void ctx.commands.execute(ShellCommands.openModal, "modal.rtk");
     }
   );
 
@@ -2619,6 +2779,7 @@ export function createNavigationModule(): CockpitModule {
       registerCommands(ctx, navigationService, connectionService);
       registerSidebarPanels(ctx);
       registerModals(ctx);
+      registerToolbar(ctx);
       registerFooterItems(ctx);
     }
   };
