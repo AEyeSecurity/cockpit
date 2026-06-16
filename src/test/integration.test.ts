@@ -24,6 +24,9 @@ describe("integration", () => {
   it("registers global metrics footer in core and nav2 connection status badge footer", async () => {
     const runtime = await bootstrapApp();
     expect(runtime.contributions.has("core.footer.metrics")).toBe(true);
+    expect(runtime.contributions.has("core.modal.diagnostics")).toBe(true);
+    expect(runtime.contributions.has("core.toolbar.diagnostics")).toBe(true);
+    expect(runtime.commands.has("core.diagnostics.open")).toBe(true);
     expect(runtime.contributions.has("nav2.footer.connection")).toBe(false);
     expect(runtime.contributions.has("nav2.footer.connection-status")).toBe(true);
     expect(runtime.contributions.has("nav2.toolbar.navigation")).toBe(false);
