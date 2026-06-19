@@ -4,6 +4,8 @@
     "ws_real_port": 8766,
     "ws_sim_host": "localhost",
     "ws_sim_port": 8766,
+    "rtk_default_source_id": "casisa",
+    "rtk_default_source_label": "CASISA",
     "camera_probe_timeout_ms": 3000,
     "camera_load_timeout_ms": 7000,
     "map_default_center_lat": -31.4201,
@@ -43,6 +45,18 @@
         "label": "WS Sim Port",
         "type": "number",
         "placeholder": "8766"
+      },
+      {
+        "key": "rtk_default_source_id",
+        "label": "RTK Default Source ID",
+        "type": "string",
+        "placeholder": "casisa"
+      },
+      {
+        "key": "rtk_default_source_label",
+        "label": "RTK Default Source Name",
+        "type": "string",
+        "placeholder": "CASISA"
       },
       {
         "key": "camera_probe_timeout_ms",

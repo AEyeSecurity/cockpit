@@ -323,10 +323,16 @@ export class TelemetryService {
 
     this.robotDispatcher.subscribeRtkSourceState((message) => {
       const state = message.rtk_source_state;
+      let changed = false;
       if (state && typeof state === "object") {
         this.snapshot = { ...this.snapshot, rtkSourceState: state as Record<string, unknown> };
-        this.emit();
+        changed = true;
       }
+      if (Array.isArray(message.rtk_sources)) {
+        this.snapshot = { ...this.snapshot, rtkSources: normalizeRtkSources(message.rtk_sources) };
+        changed = true;
+      }
+      if (changed) this.emit();
     });
 
     eventBus.on<{ level: string; text: string; timestamp: number }>("console.event", (event) => {
