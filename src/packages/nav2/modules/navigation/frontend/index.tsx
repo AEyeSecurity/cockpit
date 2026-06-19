@@ -2812,6 +2812,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [savingSource, setSavingSource] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [sourceDraft, setSourceDraft] = useState<RtkSourceDraft>({
     id: "",
     label: "",
@@ -2880,6 +2881,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     }
   };
   const updateDraft = (key: keyof RtkSourceDraft, value: string | boolean | number): void => {
+    if (saveFeedback) setSaveFeedback(null);
     setSourceDraft((current) => ({ ...current, [key]: value }));
   };
   const draftId = sourceDraft.id.trim();
@@ -2888,6 +2890,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const canSaveSource = Boolean(draftId && draftHost && draftMountpoint && Number.isFinite(sourceDraft.port) && sourceDraft.port > 0);
   const saveSource = async (): Promise<void> => {
     if (!telemetryService || !canSaveSource || savingSource) return;
+    setSaveFeedback(null);
     setSavingSource(true);
     try {
       await telemetryService.upsertRtkSource({
@@ -2900,7 +2903,9 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         username: sourceDraft.username.trim(),
         password: sourceDraft.password.trim()
       });
-      emit("info", `Antena RTK "${sourceDraft.label.trim() || draftId}" guardada`);
+      const savedLabel = sourceDraft.label.trim() || draftId;
+      emit("info", `Antena RTK "${savedLabel}" guardada`);
+      setSaveFeedback({ kind: "success", text: `Antena "${savedLabel}" guardada correctamente.` });
       setSourceDraft({
         id: "",
         label: "",
@@ -2911,9 +2916,11 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         password: "",
         activate: true
       });
-      setShowAddForm(false);
     } catch (error) {
-      emit("error", `No se pudo guardar la antena RTK: ${String(error)}`);
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `No se pudo guardar la antena RTK: ${detail}`;
+      setSaveFeedback({ kind: "error", text: message });
+      emit("error", message);
     } finally {
       setSavingSource(false);
     }
@@ -2964,13 +2971,19 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       <button
         type="button"
         className="rtk-add-toggle"
-        onClick={() => setShowAddForm((current) => !current)}
+        onClick={() => {
+          setSaveFeedback(null);
+          setShowAddForm((current) => !current);
+        }}
       >
         {showAddForm ? "Cerrar formulario" : "Agregar antena"}
       </button>
       {showAddForm ? (
         <form
           className="rtk-add-form"
+          autoComplete="off"
+          data-form-type="other"
+          data-lpignore="true"
           onSubmit={(event) => {
             event.preventDefault();
             void saveSource();
@@ -2978,68 +2991,90 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         >
           <div className="rtk-form-grid">
             <label>
-              ID
+              Identificador RTK
               <input
+                name="rtk-source-id"
                 value={sourceDraft.id}
                 onChange={(event) => updateDraft("id", event.target.value)}
                 placeholder="ej: base_sur"
                 autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label>
               Nombre
               <input
+                name="rtk-source-label"
                 value={sourceDraft.label}
                 onChange={(event) => updateDraft("label", event.target.value)}
                 placeholder="Base Sur"
                 autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label className="rtk-form-wide">
               Host
               <input
+                name="rtk-caster-host"
                 value={sourceDraft.host}
                 onChange={(event) => updateDraft("host", event.target.value)}
                 placeholder="rtk2go.com"
                 autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label>
               Puerto
               <input
+                name="rtk-caster-port"
                 type="number"
                 min={1}
                 max={65535}
                 value={sourceDraft.port}
                 onChange={(event) => updateDraft("port", Number(event.target.value))}
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label>
               Mountpoint
               <input
+                name="rtk-mountpoint"
                 value={sourceDraft.mountpoint}
                 onChange={(event) => updateDraft("mountpoint", event.target.value)}
                 placeholder="CASISA"
                 autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label>
               Usuario
               <input
+                name="rtk-ntrip-user"
                 value={sourceDraft.username}
                 onChange={(event) => updateDraft("username", event.target.value)}
                 placeholder="opcional"
-                autoComplete="username"
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
             <label>
               Password
               <input
+                name="rtk-ntrip-secret"
                 type="password"
                 value={sourceDraft.password}
                 onChange={(event) => updateDraft("password", event.target.value)}
                 placeholder="opcional"
-                autoComplete="new-password"
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
               />
             </label>
           </div>
@@ -3051,6 +3086,14 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
             />
             Activarla al guardar
           </label>
+          {saveFeedback ? (
+            <div
+              className={joinClassNames("rtk-save-feedback", saveFeedback.kind)}
+              role={saveFeedback.kind === "error" ? "alert" : "status"}
+            >
+              {saveFeedback.text}
+            </div>
+          ) : null}
           <button type="submit" className="rtk-save-btn" disabled={!canSaveSource || savingSource}>
             {savingSource ? "Guardando..." : "Guardar antena"}
           </button>

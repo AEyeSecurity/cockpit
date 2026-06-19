@@ -7733,6 +7733,27 @@ pre {
   accent-color: #2563eb;
 }
 
+.rtk-save-feedback {
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.rtk-save-feedback.error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.rtk-save-feedback.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
 .rtk-save-btn {
   min-height: 40px;
   border: 1px solid #2563eb;
