@@ -21,6 +21,7 @@ describe("navigation sidebar", () => {
     expect(screen.getByText("START ROUTE")).toBeInTheDocument();
     expect(screen.getByText("CANCEL")).toBeInTheDocument();
     expect(screen.getByText("ADD WAYPOINT")).toBeInTheDocument();
+    expect(screen.getByText("ACTION WAYPOINT")).toBeInTheDocument();
     expect(screen.queryByText("CONTROL MODE")).not.toBeInTheDocument();
     expect(screen.queryByText("NAVIGATION ACTIONS")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();

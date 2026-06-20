@@ -337,7 +337,7 @@ describe("services", () => {
     };
     const service = new NavigationService(dispatcher as never);
     await service.unlockControls();
-    service.queueWaypoint({ x: 3, y: 4 });
+    service.queueWaypoint({ x: 3, y: 4, actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }] });
     service.queueWaypoint({ x: 5, y: 6, yawDeg: 45 });
 
     await service.sendQueuedGoal();
@@ -381,12 +381,26 @@ describe("services", () => {
     await service.unlockControls();
     service.queueWaypoint({ x: 3, y: 4, yawDeg: 0 });
     service.queueWaypoint({ x: 5, y: 6, yawDeg: 5 });
+    service.toggleWaypointSelection(1);
+    service.setBrakeHoldActionForSelected(true, 5, 100);
 
     const started = await service.sendRouteMission();
 
     expect(started.inputCount).toBe(2);
     expect(started.expandedCount).toBe(5);
-    expect(dispatcher.requestRouteMission).toHaveBeenCalledTimes(1);
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waypoints: [
+          { lat: 3, lon: 4, yaw_deg: 0 },
+          {
+            lat: 5,
+            lon: 6,
+            yaw_deg: 5,
+            actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+          }
+        ]
+      })
+    );
   });
 
   it("saves and loads file waypoints without yaw for auto mode", async () => {
@@ -401,7 +415,15 @@ describe("services", () => {
       requestLoadWaypointsFile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true,
-        waypoints: [{ lat: 1, lon: 2 }, { lat: 3, lon: 4, yaw_deg: 30 }]
+        waypoints: [
+          { lat: 1, lon: 2 },
+          {
+            lat: 3,
+            lon: 4,
+            yaw_deg: 30,
+            actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+          }
+        ]
       }),
       requestCancelGoal: vi.fn(),
       requestCancelRouteMission: vi.fn(),
@@ -414,16 +436,34 @@ describe("services", () => {
     };
     const service = new NavigationService(dispatcher as never);
     service.queueWaypoint({ x: 1, y: 2 });
-    service.queueWaypoint({ x: 3, y: 4, yawDeg: 30 });
+    service.queueWaypoint({
+      x: 3,
+      y: 4,
+      yawDeg: 30,
+      actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+    });
 
     await service.saveWaypointsFile();
     await service.loadWaypointsFile();
 
     expect(dispatcher.requestSaveWaypointsFile).toHaveBeenCalledWith([
       { lat: 1, lon: 2 },
-      { lat: 3, lon: 4, yaw_deg: 30 }
+      {
+        lat: 3,
+        lon: 4,
+        yaw_deg: 30,
+        actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+      }
     ]);
-    expect(service.getState().waypoints).toEqual([{ x: 1, y: 2 }, { x: 3, y: 4, yawDeg: 30 }]);
+    expect(service.getState().waypoints).toEqual([
+      { x: 1, y: 2 },
+      {
+        x: 3,
+        y: 4,
+        yawDeg: 30,
+        actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+      }
+    ]);
   });
 
   it("applies route mission state from backend messages", () => {
@@ -461,7 +501,18 @@ describe("services", () => {
         blocked_retry_attempt: 1,
         blocked_retry_max_attempts: 3,
         blocked_wait_remaining_s: 8.5,
-        mission_waypoints: [{ lat: 1, lon: 2, yaw_deg: 3 }],
+        action_active: true,
+        action_waypoint_index: 2,
+        action_type: "brake_hold",
+        action_remaining_s: 4.2,
+        mission_waypoints: [
+          {
+            lat: 1,
+            lon: 2,
+            yaw_deg: 3,
+            actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+          }
+        ],
         active_chunk_waypoints: [{ lat: 4, lon: 5, yaw_deg: 6 }]
       }
     });
@@ -476,12 +527,17 @@ describe("services", () => {
       blockedReasonText: "no valid path found",
       blockedRetryAttempt: 1,
       blockedRetryMaxAttempts: 3,
-      blockedWaitRemainingS: 8.5
+      blockedWaitRemainingS: 8.5,
+      actionActive: true,
+      actionWaypointIndex: 2,
+      actionType: "brake_hold",
+      actionRemainingS: 4.2
     });
     expect(service.getState().routeMission.missionWaypoints[0]).toMatchObject({
       x: 1,
       y: 2,
-      yawDeg: 3
+      yawDeg: 3,
+      actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
     });
   });
 

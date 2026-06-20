@@ -7865,6 +7865,94 @@ pre {
   white-space: nowrap;
 }
 
+.nav-sidebar .nav-route-programming-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nav-sidebar .nav-route-programming-row .ncb-wide.active,
+.nav-sidebar .nav-route-programming-row .ncb-wide.programmed {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(254, 243, 199, 0.9));
+  color: #92400e;
+}
+
+.nav-sidebar .nav-route-action-menu {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.nav-sidebar .nav-route-action-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.nav-sidebar .nav-route-action-option:hover {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(255, 251, 235, 0.9);
+}
+
+.nav-sidebar .nav-route-action-option.active {
+  border-color: rgba(245, 158, 11, 0.58);
+  color: #92400e;
+}
+
+.nav-sidebar .nav-route-action-option.danger {
+  color: #991b1b;
+}
+
+.nav-sidebar .nav-route-action-option span,
+.nav-sidebar .nav-route-action-option small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-sidebar .nav-route-action-option span {
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.nav-sidebar .nav-route-action-option small {
+  color: inherit;
+  font-size: 10px;
+  opacity: 0.72;
+}
+
+.nav-sidebar .nav-route-action-status {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 251, 235, 0.8);
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .nav-sidebar .nav-route-subhead small {
   flex: 0 0 auto;
   color: #64748b;

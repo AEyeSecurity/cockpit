@@ -36,3 +36,29 @@ npm run build       # Build web
 npm run tauri:build # Build desktop
 npm run test        # Tests
 ```
+
+## Navegación: Action Waypoints
+
+El módulo Nav2 permite programar acciones sobre waypoints de ruta. Desde la barra
+de ruta, seleccionar uno o más waypoints y usar `ACTION WAYPOINT`.
+
+Acción disponible hoy:
+
+- `Brake`: agrega `brake_hold` al waypoint seleccionado.
+- La UI pide `duration_s` para definir cuántos segundos frena antes de continuar.
+- `brake_pct` se envía como `100`.
+
+Formato enviado al bridge WebSocket de SALUS:
+
+```json
+{
+  "lat": -31.0,
+  "lon": -64.0,
+  "actions": [
+    {"type": "brake_hold", "duration_s": 5, "brake_pct": 100}
+  ]
+}
+```
+
+El backend ROS conserva estas acciones al guardar/cargar rutas y las ejecuta en
+`route_executor` durante misiones `set_route_ll`.

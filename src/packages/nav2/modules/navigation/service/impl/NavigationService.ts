@@ -5,6 +5,14 @@ export interface GoalInput {
   x: number;
   y: number;
   yawDeg?: number;
+  actions?: WaypointAction[];
+}
+
+export interface WaypointAction {
+  type: "brake_hold";
+  duration_s: number;
+  brake_pct?: number;
+  label?: string;
 }
 
 export interface RouteMissionWaypoint extends GoalInput {}
@@ -28,6 +36,10 @@ export interface RouteMissionStateData {
   blockedRetryAttempt: number;
   blockedRetryMaxAttempts: number;
   blockedWaitRemainingS: number;
+  actionActive: boolean;
+  actionWaypointIndex: number;
+  actionType: string;
+  actionRemainingS: number;
   missionWaypoints: RouteMissionWaypoint[];
   activeChunkWaypoints: RouteMissionWaypoint[];
 }
@@ -193,6 +205,7 @@ function getStorageAdapter(): {
 function parseGoal(input: GoalInput): GoalInput {
   const yawRaw = input.yawDeg;
   const hasYaw = yawRaw !== undefined && yawRaw !== null;
+  const actions = parseWaypointActions(input.actions);
   const parsed = {
     x: Number(input.x),
     y: Number(input.y),
@@ -201,7 +214,34 @@ function parseGoal(input: GoalInput): GoalInput {
   if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y) || (hasYaw && !Number.isFinite(parsed.yawDeg))) {
     throw new Error("Invalid goal input");
   }
-  return hasYaw ? { x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg } : { x: parsed.x, y: parsed.y };
+  const base = hasYaw ? { x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg } : { x: parsed.x, y: parsed.y };
+  return actions.length > 0 ? { ...base, actions } : base;
+}
+
+function parseWaypointActions(raw: unknown): WaypointAction[] {
+  if (!Array.isArray(raw)) return [];
+  const actions: WaypointAction[] = [];
+  raw.forEach((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    const record = entry as Record<string, unknown>;
+    if (record.type !== "brake_hold") return;
+    const durationS = Number(record.duration_s ?? record.durationS);
+    if (!Number.isFinite(durationS) || durationS <= 0 || durationS > 600) return;
+    const brakePctRaw = Number(record.brake_pct ?? record.brakePct ?? 100);
+    const brakePct = Number.isFinite(brakePctRaw) ? Math.min(100, Math.max(0, Math.round(brakePctRaw))) : 100;
+    const label = typeof record.label === "string" ? record.label.trim().slice(0, 80) : "";
+    actions.push({
+      type: "brake_hold",
+      duration_s: durationS,
+      brake_pct: brakePct,
+      ...(label ? { label } : {})
+    });
+  });
+  return actions;
+}
+
+function cloneGoal(input: GoalInput): GoalInput {
+  return parseGoal(input);
 }
 
 function parseStoredWaypoints(raw: string): GoalInput[] {
@@ -322,6 +362,10 @@ function createDefaultRouteMission(): RouteMissionStateData {
     blockedRetryAttempt: 0,
     blockedRetryMaxAttempts: 0,
     blockedWaitRemainingS: 0,
+    actionActive: false,
+    actionWaypointIndex: 0,
+    actionType: "",
+    actionRemainingS: 0,
     missionWaypoints: [],
     activeChunkWaypoints: []
   };
@@ -339,7 +383,11 @@ function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
   return {
     x: lat,
     y: lon,
-    yawDeg
+    yawDeg,
+    ...(() => {
+      const actions = parseWaypointActions(value.actions);
+      return actions.length > 0 ? { actions } : {};
+    })()
   };
 }
 
@@ -347,16 +395,25 @@ function hasExplicitYaw(input: GoalInput): input is GoalInput & { yawDeg: number
   return input.yawDeg !== undefined && input.yawDeg !== null && Number.isFinite(Number(input.yawDeg));
 }
 
-function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
+function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[] } {
   const parsed = parseGoal(input);
-  const waypoint: { lat: number; lon: number; yaw_deg?: number } = {
+  const waypoint: { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[] } = {
     lat: parsed.x,
     lon: parsed.y
   };
   if (hasExplicitYaw(parsed)) {
     waypoint.yaw_deg = Number(parsed.yawDeg);
   }
+  if (parsed.actions && parsed.actions.length > 0) {
+    waypoint.actions = parsed.actions.map((action) => ({ ...action }));
+  }
   return waypoint;
+}
+
+function goalToWireNavGoal(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
+  const waypoint = goalToWireWaypoint(input);
+  const { actions: _actions, ...withoutActions } = waypoint;
+  return withoutActions;
 }
 
 function parseRouteMissionState(message: Record<string, unknown>): RouteMissionStateData | null {
@@ -394,6 +451,10 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     blockedRetryMaxAttempts:
       Number(candidate.blocked_retry_max_attempts ?? candidate.blockedRetryMaxAttempts ?? 0) || 0,
     blockedWaitRemainingS: Number(candidate.blocked_wait_remaining_s ?? candidate.blockedWaitRemainingS ?? 0) || 0,
+    actionActive: candidate.action_active === true || candidate.actionActive === true,
+    actionWaypointIndex: Number(candidate.action_waypoint_index ?? candidate.actionWaypointIndex ?? 0) || 0,
+    actionType: String(candidate.action_type ?? candidate.actionType ?? ""),
+    actionRemainingS: Number(candidate.action_remaining_s ?? candidate.actionRemainingS ?? 0) || 0,
     missionWaypoints,
     activeChunkWaypoints
   };
@@ -668,11 +729,11 @@ export class NavigationService {
   getState(): NavigationState {
     return {
       ...this.state,
-      waypoints: this.state.waypoints.map((waypoint) => ({ ...waypoint })),
+      waypoints: this.state.waypoints.map((waypoint) => cloneGoal(waypoint)),
       routeMission: {
         ...this.state.routeMission,
-        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => ({ ...waypoint })),
-        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => ({ ...waypoint }))
+        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => cloneGoal(waypoint))
       },
       selectedWaypointIndexes: [...this.state.selectedWaypointIndexes],
       manualCommand: { ...this.state.manualCommand },
@@ -762,7 +823,8 @@ export class NavigationService {
     const next = parseGoal({
       x,
       y,
-      ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {})
+      ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {}),
+      ...(current.actions && current.actions.length > 0 ? { actions: current.actions } : {})
     });
     const waypoints = this.state.waypoints.map((entry, entryIndex) => (entryIndex === index ? next : entry));
     this.state = {
@@ -841,6 +903,43 @@ export class NavigationService {
     return removed;
   }
 
+  setBrakeHoldActionForSelected(enabled: boolean, durationS = 5, brakePct = 100): number {
+    const selection = new Set(this.state.selectedWaypointIndexes);
+    if (selection.size === 0) {
+      throw new Error("No waypoint selected");
+    }
+    const duration = Math.min(600, Math.max(0.1, Number(durationS) || 5));
+    const brake = Math.min(100, Math.max(0, Math.round(Number(brakePct) || 100)));
+    const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
+      if (!selection.has(index)) return waypoint;
+      const current = cloneGoal(waypoint);
+      const otherActions = (current.actions ?? []).filter((action) => action.type !== "brake_hold");
+      if (!enabled) {
+        return otherActions.length > 0 ? { ...current, actions: otherActions } : { x: current.x, y: current.y, ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {}) };
+      }
+      return {
+        ...current,
+        actions: [
+          ...otherActions,
+          {
+            type: "brake_hold" as const,
+            duration_s: duration,
+            brake_pct: brake
+          }
+        ]
+      };
+    });
+    this.state = {
+      ...this.state,
+      waypoints: nextWaypoints,
+      lastStatus: enabled
+        ? `Brake hold set on ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
+        : `Brake hold removed from ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
+    };
+    this.emit();
+    return selection.size;
+  }
+
   saveWaypoints(): number {
     getStorageAdapter().setItem(WAYPOINT_STORAGE_KEY, JSON.stringify(this.state.waypoints));
     this.state = {
@@ -903,7 +1002,7 @@ export class NavigationService {
       throw new Error("No hay waypoints para guardar");
     }
     const routes = readSavedRoutesMap();
-    routes[trimmed] = this.state.waypoints.map((waypoint) => ({ ...waypoint }));
+    routes[trimmed] = this.state.waypoints.map((waypoint) => cloneGoal(waypoint));
     writeSavedRoutesMap(routes);
     this.state = {
       ...this.state,
@@ -922,7 +1021,7 @@ export class NavigationService {
     }
     this.state = {
       ...this.state,
-      waypoints: loaded.map((waypoint) => ({ ...waypoint })),
+      waypoints: loaded.map((waypoint) => cloneGoal(waypoint)),
       selectedWaypointIndexes: [],
       savedRouteNames: sortedRouteNames(routes),
       lastStatus: `Ruta "${name}" cargada (${loaded.length} waypoints)`
@@ -968,6 +1067,10 @@ export class NavigationService {
         };
         if (hasYaw) {
           waypoint.yawDeg = yawDeg;
+        }
+        const actions = parseWaypointActions(value.actions);
+        if (actions.length > 0) {
+          waypoint.actions = actions;
         }
         return waypoint;
       })
@@ -1136,7 +1239,7 @@ export class NavigationService {
       throw new Error("No waypoint queued");
     }
 
-    const waypoints = queued.map((entry) => goalToWireWaypoint(entry));
+    const waypoints = queued.map((entry) => goalToWireNavGoal(entry));
     const response = await this.robotDispatcher.requestGoal({
       waypoints,
       loop: this.state.loopRoute
@@ -1219,7 +1322,7 @@ export class NavigationService {
     const validated = parseGoal(input);
     const payload = {
       waypoints: [
-        goalToWireWaypoint(validated)
+        goalToWireNavGoal(validated)
       ],
       loop: this.state.loopRoute
     } as never;

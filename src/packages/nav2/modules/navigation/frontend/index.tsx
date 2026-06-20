@@ -818,8 +818,21 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const wps = navState.waypoints.length;
   const selectedCount = navState.selectedWaypointIndexes.length;
+  const selectedWaypoints = navState.selectedWaypointIndexes
+    .map((index) => navState.waypoints[index])
+    .filter((entry): entry is NavigationState["waypoints"][number] => Boolean(entry));
+  const selectedBrakeHoldEnabled =
+    selectedWaypoints.length > 0 &&
+    selectedWaypoints.every((waypoint) => (waypoint.actions ?? []).some((action) => action.type === "brake_hold"));
+  const selectedHasAnyAction = selectedWaypoints.some((waypoint) => (waypoint.actions ?? []).length > 0);
+  const selectedBrakeHoldDuration =
+    selectedWaypoints
+      .flatMap((waypoint) => waypoint.actions ?? [])
+      .find((action) => action.type === "brake_hold")?.duration_s ?? 5;
+  const programmedWaypointCount = navState.waypoints.filter((waypoint) => (waypoint.actions ?? []).length > 0).length;
   const lockReasonText = formatControlLockReason(navState.controlLockReason);
   const routeMission = navState.routeMission;
   const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
@@ -843,6 +856,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         : "Disconnected";
   useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
   useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
+  useEffect(() => {
+    if (selectedCount === 0 || navState.controlLocked) {
+      setActionMenuOpen(false);
+    }
+  }, [selectedCount, navState.controlLocked]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
@@ -1097,6 +1115,90 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             >
               <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
             </button>
+          </div>
+          <div className="nav-route-programming-row">
+            <button
+              type="button"
+              className={joinClassNames("ncb-wide sec-btn", actionMenuOpen && "active", selectedHasAnyAction && "programmed")}
+              disabled={selectedCount === 0 || navState.controlLocked}
+              title={
+                navState.controlLocked
+                  ? lockReasonText
+                  : selectedCount === 0
+                    ? "Seleccioná uno o más waypoints"
+                    : "Abrir acciones programables para los waypoints seleccionados"
+              }
+              onClick={() => {
+                setActionMenuOpen((current) => !current);
+              }}
+            >
+              <ButtonFace
+                icon={<NavGlyph kind="goal" />}
+                label="ACTION WAYPOINT"
+                meta={
+                  selectedCount === 0
+                    ? `${programmedWaypointCount} programmed`
+                    : `${selectedCount} selected · ${programmedWaypointCount} programmed`
+                }
+              />
+            </button>
+            {actionMenuOpen ? (
+              <div className="nav-route-action-menu">
+                <button
+                  type="button"
+                  className={joinClassNames("nav-route-action-option", selectedBrakeHoldEnabled && "active")}
+                  onClick={async () => {
+                    const durationRaw = await dialogService.prompt({
+                      title: "Brake action",
+                      message: "Seconds to keep brake before continuing:",
+                      defaultValue: String(Math.max(0.1, selectedBrakeHoldDuration)),
+                      placeholder: "5",
+                      confirmLabel: "Apply",
+                      cancelLabel: "Cancel"
+                    });
+                    if (durationRaw === null) return;
+                    const duration = Number(durationRaw);
+                    if (!Number.isFinite(duration) || duration <= 0 || duration > 600) {
+                      emitError("Brake action duration must be between 0 and 600 seconds");
+                      return;
+                    }
+                    try {
+                      const changed = navService.setBrakeHoldActionForSelected(true, duration, 100);
+                      setActionMenuOpen(false);
+                      emitInfo(`Brake action ${duration}s set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
+                    } catch (error) {
+                      emitError(`Waypoint action failed: ${String(error)}`);
+                    }
+                  }}
+                >
+                  <span>Brake</span>
+                  <small>{selectedBrakeHoldEnabled ? `${selectedBrakeHoldDuration}s` : "Hold before continue"}</small>
+                </button>
+                {selectedHasAnyAction ? (
+                  <button
+                    type="button"
+                    className="nav-route-action-option danger"
+                    onClick={() => {
+                      try {
+                        const changed = navService.setBrakeHoldActionForSelected(false);
+                        setActionMenuOpen(false);
+                        emitInfo(`Action removed from ${changed} waypoint${changed > 1 ? "s" : ""}`);
+                      } catch (error) {
+                        emitError(`Waypoint action failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Remove action</span>
+                    <small>Selected waypoints</small>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {routeMission.actionActive ? (
+              <div className="nav-route-action-status">
+                {routeMission.actionType || "action"} · {Math.ceil(Math.max(0, routeMission.actionRemainingS))}s
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
