@@ -410,10 +410,10 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true): L.DivIcon {
+function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true, action = false): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}`;
+  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}`;
   return L.divIcon({
     className: "",
     html:
@@ -1405,6 +1405,7 @@ function LeafletMapCanvas({
         lon: Number(waypoint.y),
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
         manual: waypointHasManualYaw(waypoint),
+        action: (waypoint.actions ?? []).length > 0,
         selected: selectedWaypointIndexes.includes(index)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
@@ -1424,7 +1425,7 @@ function LeafletMapCanvas({
         : displayPoints
             .map(
               (entry) =>
-                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}`
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
@@ -1433,10 +1434,10 @@ function LeafletMapCanvas({
     if (displayPoints.length === 0) return;
     displayPoints.forEach((entry) => {
       const marker = L.marker([entry.lat, entry.lon], {
-        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual),
+        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual, entry.action),
         interactive: true,
         draggable: true
-      }).bindTooltip(`#${entry.index + 1}`, { direction: "top" });
+      }).bindTooltip(`${entry.action ? "Action " : ""}#${entry.index + 1}`, { direction: "top" });
       marker.on("dragstart", () => {
         const map = mapRef.current;
         if (map?.dragging.enabled()) {
@@ -1813,7 +1814,7 @@ function CockpitMapCanvas({
     state.toolMode
   ]);
 
-  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean }> = waypoints
+  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean; action: boolean }> = waypoints
     .flatMap((waypoint, index) => {
       const lat = Number(waypoint.x);
       const lon = Number(waypoint.y);
@@ -1823,7 +1824,8 @@ function CockpitMapCanvas({
         lat,
         lon,
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
-        manual: waypointHasManualYaw(waypoint)
+        manual: waypointHasManualYaw(waypoint),
+        action: (waypoint.actions ?? []).length > 0
       }];
     });
   const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
@@ -2063,14 +2065,14 @@ function CockpitMapCanvas({
           <button
             key={`waypoint-${waypoint.index}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`}
             type="button"
-            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}`}
+            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}`}
             data-index={waypoint.index + 1}
             style={{
               left: projected.x,
               top: projected.y,
               transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
             }}
-            title={`WP ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+            title={`${waypoint.action ? "Action WP" : "WP"} ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
               waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
             }`}
             disabled={!interactive}
