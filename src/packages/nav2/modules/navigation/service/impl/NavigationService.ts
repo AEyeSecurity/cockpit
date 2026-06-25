@@ -20,6 +20,8 @@ export interface WaypointAction {
 
 export interface RouteMissionWaypoint extends GoalInput {}
 
+export type ReturnHomePhase = "idle" | "requested" | "waiting_exit" | "active" | "completed" | "unavailable";
+
 export interface RouteMissionStateData {
   active: boolean;
   paused: boolean;
@@ -27,6 +29,8 @@ export interface RouteMissionStateData {
   lowBatteryActive: boolean;
   returnHomeRequested: boolean;
   returnHomeActive: boolean;
+  returnHomeExitWaypointIndex: number;
+  returnHomePhase: ReturnHomePhase;
   homeAvailable: boolean;
   homeWaypoint: RouteMissionWaypoint | null;
   status: string;
@@ -360,6 +364,8 @@ function createDefaultRouteMission(): RouteMissionStateData {
     lowBatteryActive: false,
     returnHomeRequested: false,
     returnHomeActive: false,
+    returnHomeExitWaypointIndex: -1,
+    returnHomePhase: "idle",
     homeAvailable: false,
     homeWaypoint: null,
     status: "idle",
@@ -436,6 +442,40 @@ function goalToWireNavGoal(input: GoalInput): { lat: number; lon: number; yaw_de
   return withoutActions;
 }
 
+function normalizeReturnHomePhase(raw: unknown): ReturnHomePhase | null {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (
+    text === "idle" ||
+    text === "requested" ||
+    text === "waiting_exit" ||
+    text === "active" ||
+    text === "completed" ||
+    text === "unavailable"
+  ) {
+    return text;
+  }
+  return null;
+}
+
+function inferReturnHomePhase(
+  candidate: Record<string, unknown>,
+  status: string,
+  returnHomeRequested: boolean,
+  returnHomeActive: boolean
+): ReturnHomePhase {
+  const explicit = normalizeReturnHomePhase(candidate.return_home_phase ?? candidate.returnHomePhase);
+  if (explicit) return explicit;
+  const normalizedStatus = status.trim().toLowerCase();
+  if (returnHomeActive) return "active";
+  if (returnHomeRequested) {
+    if (normalizedStatus.includes("waiting for exit waypoint")) return "waiting_exit";
+    return "requested";
+  }
+  if (normalizedStatus.includes("return home completed")) return "completed";
+  if (normalizedStatus.includes("return home unavailable")) return "unavailable";
+  return "idle";
+}
+
 function parseRouteMissionState(message: Record<string, unknown>): RouteMissionStateData | null {
   const candidate = messageCandidates(message)
     .map((entry) => asRecord(entry.route_mission))
@@ -450,14 +490,32 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
         .map((entry) => parseRouteWaypoint(entry))
         .filter((entry): entry is RouteMissionWaypoint => entry !== null)
     : [];
+  const status = String(candidate.status ?? "idle");
+  const returnHomeRequested =
+    candidate.return_home_requested === true || candidate.returnHomeRequested === true;
+  const returnHomeActive =
+    candidate.return_home_active === true || candidate.returnHomeActive === true;
+  const returnHomeExitWaypointIndexRaw = Number(
+    candidate.return_home_exit_waypoint_index ?? candidate.returnHomeExitWaypointIndex ?? -1
+  );
+  const returnHomeExitWaypointIndex = Number.isFinite(returnHomeExitWaypointIndexRaw)
+    ? Math.trunc(returnHomeExitWaypointIndexRaw)
+    : -1;
 
   return {
     active: candidate.active === true,
     paused: candidate.paused === true,
     loop: candidate.loop === true,
     lowBatteryActive: candidate.low_battery_active === true || candidate.lowBatteryActive === true,
-    returnHomeRequested: candidate.return_home_requested === true || candidate.returnHomeRequested === true,
-    returnHomeActive: candidate.return_home_active === true || candidate.returnHomeActive === true,
+    returnHomeRequested,
+    returnHomeActive,
+    returnHomeExitWaypointIndex,
+    returnHomePhase: inferReturnHomePhase(
+      candidate,
+      status,
+      returnHomeRequested,
+      returnHomeActive
+    ),
     homeAvailable: candidate.home_available === true || candidate.homeAvailable === true,
     homeWaypoint: parseRouteWaypoint(candidate.home_waypoint ?? {
       lat: candidate.home_lat,
@@ -465,7 +523,7 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
       yaw_deg: candidate.home_yaw_deg,
       role: candidate.home_available === true || candidate.homeAvailable === true ? "home" : undefined
     }),
-    status: String(candidate.status ?? "idle"),
+    status,
     inputWaypointCount: Number(candidate.input_waypoint_count ?? 0) || 0,
     expandedWaypointCount: Number(candidate.expanded_waypoint_count ?? 0) || 0,
     currentStartIndex: Number(candidate.current_start_index ?? 0) || 0,

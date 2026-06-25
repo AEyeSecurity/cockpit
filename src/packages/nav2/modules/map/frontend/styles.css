@@ -6954,3 +6954,162 @@ input[type="range"]::-moz-range-track {
   background: #f2f2f2 !important;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22) !important;
 }
+
+.map-html-overlay-cards-inline .map-battery-card,
+.map-html-overlay-cards-inline .map-assist-alert {
+  width: 100% !important;
+  position: relative !important;
+  inset: auto !important;
+  pointer-events: auto;
+  border-radius: 15px !important;
+  border: 1px solid rgba(92, 101, 113, 0.48) !important;
+  background:
+    radial-gradient(circle at 12% 28%, rgba(255, 255, 255, 0.05), transparent 24%),
+    linear-gradient(180deg, rgba(30, 30, 30, 0.96), rgba(7, 7, 7, 0.98)) !important;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(14px) saturate(0.95) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(0.95) !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-card {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-html-overlay-cards-inline .map-battery-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.map-html-overlay-cards-inline .map-battery-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.map-html-overlay-cards-inline .map-battery-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.map-html-overlay-cards-inline .map-battery-title {
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+}
+
+.map-html-overlay-cards-inline .map-battery-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.map-html-overlay-cards-inline .map-battery-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-html-overlay-cards-inline .map-battery-value {
+  color: #ffffff !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-value,
+.map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-pill {
+  color: #86efac !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-value,
+.map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-pill {
+  color: #fbbf24 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-value,
+.map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-pill {
+  color: #f87171 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-card.tone-off .map-battery-value,
+.map-html-overlay-cards-inline .map-battery-card.tone-off .map-battery-pill {
+  color: rgba(255, 255, 255, 0.58) !important;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 11px 12px !important;
+  border-color: rgba(220, 83, 83, 0.48) !important;
+  background:
+    radial-gradient(circle at 10% 18%, rgba(255, 102, 102, 0.12), transparent 22%),
+    linear-gradient(180deg, rgba(49, 18, 18, 0.97), rgba(17, 6, 6, 0.99)) !important;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: radial-gradient(circle at 42% 38%, #fecaca 0 24%, #ef4444 52%, #b91c1c 100%) !important;
+  box-shadow:
+    0 0 0 4px rgba(239, 68, 68, 0.14),
+    0 0 12px rgba(248, 113, 113, 0.52) !important;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert-copy {
+  min-width: 0;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert-title {
+  color: #fca5a5 !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase;
+}
+
+.map-html-overlay-cards-inline .map-assist-alert-detail {
+  margin-top: 4px;
+  color: rgba(255, 230, 230, 0.84) !important;
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+}

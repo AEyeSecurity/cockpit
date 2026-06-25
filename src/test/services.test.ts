@@ -519,6 +519,8 @@ describe("services", () => {
         low_battery_active: true,
         return_home_requested: true,
         return_home_active: false,
+        return_home_exit_waypoint_index: 2,
+        return_home_phase: "waiting_exit",
         home_available: true,
         home_waypoint: { lat: 9, lon: 10, yaw_deg: 180, role: "home" },
         status: "route active (1->4)",
@@ -552,6 +554,8 @@ describe("services", () => {
       loop: true,
       lowBatteryActive: true,
       returnHomeRequested: true,
+      returnHomeExitWaypointIndex: 2,
+      returnHomePhase: "waiting_exit",
       homeAvailable: true,
       expandedWaypointCount: 7,
       activeChunkSize: 4,
@@ -577,6 +581,47 @@ describe("services", () => {
       y: 10,
       yawDeg: 180,
       role: "home"
+    });
+  });
+
+  it("infers return-home phase from legacy route status payloads", () => {
+    let onState: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      subscribeState: vi.fn<(cb: (message: Record<string, unknown>) => void) => () => void>((cb) => {
+        onState = cb;
+        return () => undefined;
+      }),
+      subscribeNavTelemetry: vi.fn(() => () => undefined),
+      subscribeAck: vi.fn(() => () => undefined),
+      subscribeRobotStatus: vi.fn(() => () => undefined),
+      subscribeRobotPose: vi.fn(() => () => undefined),
+      subscribeNavEvent: vi.fn(() => () => undefined),
+      subscribeRecordingCount: vi.fn(() => () => undefined),
+      subscribePatrolStatus: vi.fn(() => () => undefined)
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    onState?.({
+      op: "state",
+      route_mission: {
+        active: false,
+        paused: false,
+        loop: true,
+        low_battery_active: true,
+        return_home_requested: false,
+        return_home_active: false,
+        status: "return home completed",
+        home_available: true
+      }
+    });
+
+    expect(service.getState().routeMission).toMatchObject({
+      lowBatteryActive: true,
+      loop: true,
+      returnHomeRequested: false,
+      returnHomeActive: false,
+      returnHomePhase: "completed",
+      returnHomeExitWaypointIndex: -1
     });
   });
 

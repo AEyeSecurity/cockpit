@@ -104,6 +104,45 @@ function isNavigationGoalSucceeded(snapshot: TelemetrySnapshot | null): boolean 
   return Number(snapshot.navResultStatus) === NAV_GOAL_STATUS_SUCCEEDED || resultText === "succeeded" || resultText.includes("succeeded");
 }
 
+function normalizeRouteMissionStatus(status: string): string {
+  return String(status ?? "").replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
+}
+
+function formatBatteryPct(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "n/a";
+  return `${value.toFixed(1)}%`;
+}
+
+function batteryTone(
+  batteryPct: number | null,
+  connected: boolean,
+  lowBatteryActive: boolean
+): "ok" | "warn" | "critical" | "off" {
+  if (!connected || batteryPct === null || !Number.isFinite(batteryPct)) return "off";
+  if (lowBatteryActive || batteryPct <= 15) return "critical";
+  if (batteryPct <= 25) return "warn";
+  return "ok";
+}
+
+function batteryLabel(
+  tone: "ok" | "warn" | "critical" | "off",
+  connected: boolean
+): string {
+  if (!connected || tone === "off") return "Telemetry unavailable";
+  if (tone === "critical") return "Critical";
+  if (tone === "warn") return "Low";
+  return "Normal";
+}
+
+function isReturnHomeAssistRequired(
+  routeMission: NavigationState["routeMission"] | null
+): boolean {
+  if (!routeMission) return false;
+  if (!routeMission.loop || !routeMission.lowBatteryActive) return false;
+  if (routeMission.returnHomePhase === "completed") return true;
+  return normalizeRouteMissionStatus(routeMission.status).includes("return home completed");
+}
+
 function parseCameraProbeTimeout(config: Nav2MapConfig, runtime: ModuleContext): number {
   const fallback = Math.max(500, Number(runtime.env.cameraProbeTimeoutMs ?? 3000));
   const parsed = Number(config.camera_probe_timeout_ms);
@@ -2452,8 +2491,10 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const blockedRetryText = blockedRetryMax > 0 ? `retry ${Math.min(blockedRetryAttempt + 1, blockedRetryMax)}/${blockedRetryMax}` : "";
   const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
   const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
+  const returnHomePhase = routeMission?.returnHomePhase ?? "idle";
   const missionTitle =
     routeMission?.returnHomeActive ? "Returning HOME" :
+    returnHomePhase === "completed" ? "HOME reached" :
     routeMission?.returnHomeRequested ? "Return HOME queued" :
     blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
     blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
@@ -2468,8 +2509,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const missionDetail =
     routeMission?.returnHomeActive
       ? routeMission?.lowBatteryActive ? "Low battery latched" : "Return-home mission"
-      : routeMission?.returnHomeRequested
-        ? routeMission?.homeAvailable ? "Completing current segment before HOME" : "HOME unavailable"
+      : returnHomePhase === "completed"
+        ? routeMission?.lowBatteryActive ? "Waiting for final driver parking assist" : "Return-home mission complete"
+        : routeMission?.returnHomeRequested
+          ? routeMission?.homeAvailable
+            ? returnHomePhase === "waiting_exit"
+              ? `Waiting for exit waypoint${routeMission.returnHomeExitWaypointIndex >= 0 ? ` #${routeMission.returnHomeExitWaypointIndex + 1}` : ""}`
+              : "Completing current segment before HOME"
+            : "HOME unavailable"
         : blockedState ? blockedDetail :
     routePointCount > 0
       ? `${missionCompletedCount}/${missionProgressTotal} goals completed`
@@ -2492,6 +2539,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           : "";
   const routeBadgeText =
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
+  const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
+  const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
+  const batteryConnected = telemetrySnapshot?.robotStatus.connected === true;
+  const batteryStatusTone = batteryTone(batteryPct, batteryConnected, routeMission?.lowBatteryActive === true);
+  const batteryStatusLabel = batteryLabel(batteryStatusTone, batteryConnected);
+  const showAssistAlert = isReturnHomeAssistRequired(routeMission);
 
   const clearCameraLoadTimer = (): void => {
     if (!cameraLoadTimerRef.current) return;
@@ -2865,6 +2918,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 </section>
               ) : null}
               <div className="map-html-overlay-cards map-html-overlay-cards-inline">
+                {showAssistAlert ? (
+                  <div className="map-assist-alert" role="alert" aria-live="assertive">
+                    <div className="map-assist-alert-head">
+                      <span className="map-assist-alert-dot" aria-hidden="true" />
+                      <div className="map-assist-alert-copy">
+                        <div className="map-assist-alert-title">Low battery assistance required</div>
+                        <div className="map-assist-alert-detail">
+                          Robot reached HOME after low-battery return. Driver assistance is required for final parking alignment.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <div className={`mission-status ${missionToneClass}`.trim()}>
                   <div className="ms-main">
                     <span className="ms-dot" aria-hidden="true" />
@@ -2885,6 +2951,23 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                       <div className="ms-bar-fill" style={{ width: `${displayMissionProgressPct}%` }} />
                     </div>
                     <span className="ms-progress-label">{missionProgressLabel}</span>
+                  </div>
+                </div>
+                <div className={`map-battery-card tone-${batteryStatusTone}`.trim()}>
+                  <div className="map-battery-head">
+                    <div className="map-battery-title-wrap">
+                      <span className="map-battery-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="7" width="16" height="10" rx="2" />
+                          <path d="M21 10v4" />
+                        </svg>
+                      </span>
+                      <span className="map-battery-title">Battery</span>
+                    </div>
+                    <span className={`map-battery-pill tone-${batteryStatusTone}`.trim()}>{batteryStatusLabel}</span>
+                  </div>
+                  <div className="map-battery-main">
+                    <span className="map-battery-value">{formatBatteryPct(batteryPct)}</span>
                   </div>
                 </div>
               </div>
