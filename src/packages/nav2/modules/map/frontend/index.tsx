@@ -410,16 +410,16 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true, action = false): L.DivIcon {
+function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true, action = false, home = false): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}`;
+  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}${home ? " home" : ""}`;
   return L.divIcon({
     className: "",
     html:
       `<div class="${cls}" style="transform: rotate(${cssRotationDeg}deg);">` +
-      '<div class="wp-arrow"></div>' +
-      `<div class="wp-index">${Number(index) + 1}</div>` +
+      `<div class="wp-arrow">${home ? '<span class="wp-home-glyph">H</span>' : ""}</div>` +
+      `<div class="wp-index">${home ? "H" : Number(index) + 1}</div>` +
       "</div>",
     iconSize: [30, 30],
     iconAnchor: [15, 15]
@@ -1406,6 +1406,7 @@ function LeafletMapCanvas({
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
         manual: waypointHasManualYaw(waypoint),
         action: (waypoint.actions ?? []).length > 0,
+        home: waypoint.role === "home",
         selected: selectedWaypointIndexes.includes(index)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
@@ -1425,7 +1426,7 @@ function LeafletMapCanvas({
         : displayPoints
             .map(
               (entry) =>
-                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}`
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
@@ -1434,10 +1435,10 @@ function LeafletMapCanvas({
     if (displayPoints.length === 0) return;
     displayPoints.forEach((entry) => {
       const marker = L.marker([entry.lat, entry.lon], {
-        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual, entry.action),
+        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual, entry.action, entry.home),
         interactive: true,
         draggable: true
-      }).bindTooltip(`${entry.action ? "Action " : ""}#${entry.index + 1}`, { direction: "top" });
+      }).bindTooltip(`${entry.home ? "HOME" : entry.action ? "Action" : "WP"} ${entry.home ? "" : `#${entry.index + 1}`}`.trim(), { direction: "top" });
       marker.on("dragstart", () => {
         const map = mapRef.current;
         if (map?.dragging.enabled()) {
@@ -1814,7 +1815,7 @@ function CockpitMapCanvas({
     state.toolMode
   ]);
 
-  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean; action: boolean }> = waypoints
+  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean; action: boolean; home: boolean }> = waypoints
     .flatMap((waypoint, index) => {
       const lat = Number(waypoint.x);
       const lon = Number(waypoint.y);
@@ -1825,7 +1826,8 @@ function CockpitMapCanvas({
         lon,
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
         manual: waypointHasManualYaw(waypoint),
-        action: (waypoint.actions ?? []).length > 0
+        action: (waypoint.actions ?? []).length > 0,
+        home: waypoint.role === "home"
       }];
     });
   const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
@@ -2065,14 +2067,14 @@ function CockpitMapCanvas({
           <button
             key={`waypoint-${waypoint.index}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`}
             type="button"
-            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}`}
+            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}${waypoint.home ? " home" : ""}`}
             data-index={waypoint.index + 1}
             style={{
               left: projected.x,
               top: projected.y,
               transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
             }}
-            title={`${waypoint.action ? "Action WP" : "WP"} ${waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+            title={`${waypoint.home ? "HOME" : waypoint.action ? "Action WP" : "WP"} ${waypoint.home ? "" : waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
               waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
             }`}
             disabled={!interactive}
@@ -2451,6 +2453,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
   const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
   const missionTitle =
+    routeMission?.returnHomeActive ? "Returning HOME" :
+    routeMission?.returnHomeRequested ? "Return HOME queued" :
     blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
     blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
     blockedState === "BLOCKED_WAITING" ? "Route blocked" :
@@ -2462,7 +2466,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     navigationState?.goalMode ? "Goal mode" :
     "Ready";
   const missionDetail =
-    blockedState ? blockedDetail :
+    routeMission?.returnHomeActive
+      ? routeMission?.lowBatteryActive ? "Low battery latched" : "Return-home mission"
+      : routeMission?.returnHomeRequested
+        ? routeMission?.homeAvailable ? "Completing current segment before HOME" : "HOME unavailable"
+        : blockedState ? blockedDetail :
     routePointCount > 0
       ? `${missionCompletedCount}/${missionProgressTotal} goals completed`
       : goalActive

@@ -50,7 +50,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestSaveWaypointsFile(
-    waypoints: Array<{ lat: number; lon: number; yaw_deg?: number; actions?: unknown[] }>
+    waypoints: Array<{ lat: number; lon: number; yaw_deg?: number; actions?: unknown[]; role?: "normal" | "home" }>
   ): Promise<Nav2IncomingMessage> {
     return this.request("save_waypoints_file", { waypoints } as never, { timeoutMs: 7000 });
   }

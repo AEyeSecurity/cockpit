@@ -6,7 +6,10 @@ export interface GoalInput {
   y: number;
   yawDeg?: number;
   actions?: WaypointAction[];
+  role?: WaypointRole;
 }
+
+export type WaypointRole = "normal" | "home";
 
 export interface WaypointAction {
   type: "brake_hold";
@@ -21,6 +24,11 @@ export interface RouteMissionStateData {
   active: boolean;
   paused: boolean;
   loop: boolean;
+  lowBatteryActive: boolean;
+  returnHomeRequested: boolean;
+  returnHomeActive: boolean;
+  homeAvailable: boolean;
+  homeWaypoint: RouteMissionWaypoint | null;
   status: string;
   inputWaypointCount: number;
   expandedWaypointCount: number;
@@ -205,6 +213,7 @@ function getStorageAdapter(): {
 function parseGoal(input: GoalInput): GoalInput {
   const yawRaw = input.yawDeg;
   const hasYaw = yawRaw !== undefined && yawRaw !== null;
+  const role: WaypointRole = input.role === "home" ? "home" : "normal";
   const actions = parseWaypointActions(input.actions);
   const parsed = {
     x: Number(input.x),
@@ -215,7 +224,8 @@ function parseGoal(input: GoalInput): GoalInput {
     throw new Error("Invalid goal input");
   }
   const base = hasYaw ? { x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg } : { x: parsed.x, y: parsed.y };
-  return actions.length > 0 ? { ...base, actions } : base;
+  const withRole: GoalInput = role === "home" ? { ...base, role: "home" } : base;
+  return actions.length > 0 && role !== "home" ? { ...withRole, actions } : withRole;
 }
 
 function parseWaypointActions(raw: unknown): WaypointAction[] {
@@ -347,6 +357,11 @@ function createDefaultRouteMission(): RouteMissionStateData {
     active: false,
     paused: false,
     loop: false,
+    lowBatteryActive: false,
+    returnHomeRequested: false,
+    returnHomeActive: false,
+    homeAvailable: false,
+    homeWaypoint: null,
     status: "idle",
     inputWaypointCount: 0,
     expandedWaypointCount: 0,
@@ -384,6 +399,7 @@ function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
     x: lat,
     y: lon,
     yawDeg,
+    ...(value.role === "home" ? { role: "home" as const } : {}),
     ...(() => {
       const actions = parseWaypointActions(value.actions);
       return actions.length > 0 ? { actions } : {};
@@ -395,14 +411,18 @@ function hasExplicitYaw(input: GoalInput): input is GoalInput & { yawDeg: number
   return input.yawDeg !== undefined && input.yawDeg !== null && Number.isFinite(Number(input.yawDeg));
 }
 
-function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[] } {
+function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[]; role?: WaypointRole } {
   const parsed = parseGoal(input);
-  const waypoint: { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[] } = {
+  const waypoint: { lat: number; lon: number; yaw_deg?: number; actions?: WaypointAction[]; role?: WaypointRole } = {
     lat: parsed.x,
     lon: parsed.y
   };
   if (hasExplicitYaw(parsed)) {
     waypoint.yaw_deg = Number(parsed.yawDeg);
+  }
+  if (parsed.role === "home") {
+    waypoint.role = "home";
+    return waypoint;
   }
   if (parsed.actions && parsed.actions.length > 0) {
     waypoint.actions = parsed.actions.map((action) => ({ ...action }));
@@ -412,7 +432,7 @@ function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_d
 
 function goalToWireNavGoal(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
   const waypoint = goalToWireWaypoint(input);
-  const { actions: _actions, ...withoutActions } = waypoint;
+  const { actions: _actions, role: _role, ...withoutActions } = waypoint;
   return withoutActions;
 }
 
@@ -435,6 +455,16 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     active: candidate.active === true,
     paused: candidate.paused === true,
     loop: candidate.loop === true,
+    lowBatteryActive: candidate.low_battery_active === true || candidate.lowBatteryActive === true,
+    returnHomeRequested: candidate.return_home_requested === true || candidate.returnHomeRequested === true,
+    returnHomeActive: candidate.return_home_active === true || candidate.returnHomeActive === true,
+    homeAvailable: candidate.home_available === true || candidate.homeAvailable === true,
+    homeWaypoint: parseRouteWaypoint(candidate.home_waypoint ?? {
+      lat: candidate.home_lat,
+      lon: candidate.home_lon,
+      yaw_deg: candidate.home_yaw_deg,
+      role: candidate.home_available === true || candidate.homeAvailable === true ? "home" : undefined
+    }),
     status: String(candidate.status ?? "idle"),
     inputWaypointCount: Number(candidate.input_waypoint_count ?? 0) || 0,
     expandedWaypointCount: Number(candidate.expanded_waypoint_count ?? 0) || 0,
@@ -824,6 +854,7 @@ export class NavigationService {
       x,
       y,
       ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {}),
+      ...(current.role === "home" ? { role: "home" as const } : {}),
       ...(current.actions && current.actions.length > 0 ? { actions: current.actions } : {})
     });
     const waypoints = this.state.waypoints.map((entry, entryIndex) => (entryIndex === index ? next : entry));
@@ -903,6 +934,54 @@ export class NavigationService {
     return removed;
   }
 
+  setHomeForSelected(): number {
+    const selection = new Set(this.state.selectedWaypointIndexes);
+    if (selection.size !== 1) {
+      throw new Error("Select exactly one waypoint to mark HOME");
+    }
+    const homeIndex = [...selection][0];
+    const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
+      const current = cloneGoal(waypoint);
+      if (index === homeIndex) {
+        const { actions: _actions, ...base } = current;
+        return { ...base, role: "home" as const };
+      }
+      if (current.role === "home") {
+        const { role: _role, ...base } = current;
+        return base;
+      }
+      return current;
+    });
+    this.state = {
+      ...this.state,
+      waypoints: nextWaypoints,
+      lastStatus: `Waypoint ${homeIndex + 1} marked as HOME`
+    };
+    this.emit();
+    return homeIndex;
+  }
+
+  clearHomeForSelected(): number {
+    const selection = new Set(this.state.selectedWaypointIndexes);
+    if (selection.size === 0) {
+      throw new Error("No waypoint selected");
+    }
+    let changed = 0;
+    const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
+      if (!selection.has(index) || waypoint.role !== "home") return waypoint;
+      changed += 1;
+      const { role: _role, ...base } = cloneGoal(waypoint);
+      return base;
+    });
+    this.state = {
+      ...this.state,
+      waypoints: nextWaypoints,
+      lastStatus: changed > 0 ? "HOME removed from selected waypoint" : this.state.lastStatus
+    };
+    this.emit();
+    return changed;
+  }
+
   setBrakeHoldActionForSelected(enabled: boolean, durationS = 5, brakePct = 100): number {
     const selection = new Set(this.state.selectedWaypointIndexes);
     if (selection.size === 0) {
@@ -913,9 +992,18 @@ export class NavigationService {
     const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
       if (!selection.has(index)) return waypoint;
       const current = cloneGoal(waypoint);
+      if (current.role === "home") {
+        throw new Error("HOME waypoint cannot have route actions");
+      }
       const otherActions = (current.actions ?? []).filter((action) => action.type !== "brake_hold");
       if (!enabled) {
-        return otherActions.length > 0 ? { ...current, actions: otherActions } : { x: current.x, y: current.y, ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {}) };
+        return otherActions.length > 0
+          ? { ...current, actions: otherActions }
+          : {
+              x: current.x,
+              y: current.y,
+              ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {})
+            };
       }
       return {
         ...current,
@@ -1065,11 +1153,14 @@ export class NavigationService {
           x: lat,
           y: lon
         };
+        if (value.role === "home") {
+          waypoint.role = "home";
+        }
         if (hasYaw) {
           waypoint.yawDeg = yawDeg;
         }
         const actions = parseWaypointActions(value.actions);
-        if (actions.length > 0) {
+        if (actions.length > 0 && waypoint.role !== "home") {
           waypoint.actions = actions;
         }
         return waypoint;

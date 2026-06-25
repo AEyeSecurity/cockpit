@@ -325,6 +325,19 @@
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.8);
 }
 
+.wp.home::before {
+  border-bottom-color: #f59e0b;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.85));
+}
+
+.wp.home[data-index]::after {
+  content: "H";
+  color: #92400e;
+  background: rgba(254, 243, 199, 0.98);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.8);
+}
+
 .wp.current::before {
   filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.9));
 }
@@ -364,6 +377,7 @@
   border-right: 7px solid transparent;
   border-bottom: 15px solid #2563eb;
   filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.7));
+  position: relative;
 }
 
 .wp-icon .wp-index {
@@ -423,6 +437,28 @@
   background: rgba(254, 226, 226, 0.98);
   border-color: #dc2626;
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.8);
+}
+
+.wp-icon.home .wp-arrow {
+  border-bottom-color: #f59e0b;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.85));
+}
+
+.wp-icon.home .wp-index {
+  color: #92400e;
+  background: rgba(254, 243, 199, 0.98);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.8);
+}
+
+.wp-home-glyph {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  color: #111827;
 }
 
 .map-goal-heading {

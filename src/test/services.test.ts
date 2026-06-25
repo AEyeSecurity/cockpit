@@ -403,6 +403,31 @@ describe("services", () => {
     );
   });
 
+  it("marks a single waypoint as HOME and strips route actions", () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+    service.queueWaypoint({ x: 1, y: 1, actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }] });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.toggleWaypointSelection(0);
+
+    const homeIndex = service.setHomeForSelected();
+
+    expect(homeIndex).toBe(0);
+    expect(service.getState().waypoints[0]).toMatchObject({ x: 1, y: 1, role: "home" });
+    expect(service.getState().waypoints[0].actions).toBeUndefined();
+  });
+
   it("saves and loads file waypoints without yaw for auto mode", async () => {
     const dispatcher = {
       requestGoal: vi.fn(),
@@ -416,7 +441,7 @@ describe("services", () => {
         op: "ack",
         ok: true,
         waypoints: [
-          { lat: 1, lon: 2 },
+          { lat: 1, lon: 2, role: "home" },
           {
             lat: 3,
             lon: 4,
@@ -435,7 +460,7 @@ describe("services", () => {
       requestCameraStatus: vi.fn()
     };
     const service = new NavigationService(dispatcher as never);
-    service.queueWaypoint({ x: 1, y: 2 });
+    service.queueWaypoint({ x: 1, y: 2, role: "home" });
     service.queueWaypoint({
       x: 3,
       y: 4,
@@ -447,7 +472,7 @@ describe("services", () => {
     await service.loadWaypointsFile();
 
     expect(dispatcher.requestSaveWaypointsFile).toHaveBeenCalledWith([
-      { lat: 1, lon: 2 },
+      { lat: 1, lon: 2, role: "home" },
       {
         lat: 3,
         lon: 4,
@@ -456,7 +481,7 @@ describe("services", () => {
       }
     ]);
     expect(service.getState().waypoints).toEqual([
-      { x: 1, y: 2 },
+      { x: 1, y: 2, role: "home" },
       {
         x: 3,
         y: 4,
@@ -491,6 +516,11 @@ describe("services", () => {
         active: true,
         paused: false,
         loop: true,
+        low_battery_active: true,
+        return_home_requested: true,
+        return_home_active: false,
+        home_available: true,
+        home_waypoint: { lat: 9, lon: 10, yaw_deg: 180, role: "home" },
         status: "route active (1->4)",
         input_waypoint_count: 3,
         expanded_waypoint_count: 7,
@@ -520,6 +550,9 @@ describe("services", () => {
     expect(service.getState().routeMission).toMatchObject({
       active: true,
       loop: true,
+      lowBatteryActive: true,
+      returnHomeRequested: true,
+      homeAvailable: true,
       expandedWaypointCount: 7,
       activeChunkSize: 4,
       blockedState: "BLOCKED_WAITING",
@@ -538,6 +571,12 @@ describe("services", () => {
       y: 2,
       yawDeg: 3,
       actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+    });
+    expect(service.getState().routeMission.homeWaypoint).toMatchObject({
+      x: 9,
+      y: 10,
+      yawDeg: 180,
+      role: "home"
     });
   });
 
