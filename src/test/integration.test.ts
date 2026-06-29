@@ -69,11 +69,15 @@ describe("integration", () => {
     const base = runtime1.getPackageConfig<Record<string, unknown>>("nav2");
     expect(base.ws_real_host).toBe("100.111.4.7");
     expect(base.map_default_zoom).toBe(16);
+    expect(base.camera_transport).toBe("webrtc");
+    expect(base.camera_webrtc_url).toBe("http://100.66.15.45:8889/cam3/whep");
+    expect(base.camera_mjpeg_url).toBe("http://localhost:8089/stream.mjpg");
 
     await runtime1.setPackageConfig("nav2", {
       ...base,
       ws_real_host: "10.0.0.1",
-      map_default_zoom: 15
+      map_default_zoom: 15,
+      camera_transport: "mjpeg"
     });
 
     const rawOverride = await readConfig("packages/nav2.json");
@@ -81,12 +85,14 @@ describe("integration", () => {
     const parsedOverride = JSON.parse(rawOverride ?? "{}") as Record<string, unknown>;
     expect(parsedOverride.ws_real_host).toBe("10.0.0.1");
     expect(parsedOverride.map_default_zoom).toBe(15);
+    expect(parsedOverride.camera_transport).toBe("mjpeg");
     expect(Object.prototype.hasOwnProperty.call(parsedOverride, "ws_sim_host")).toBe(false);
 
     const runtime2 = await bootstrapApp();
     const overridden = runtime2.getPackageConfig<Record<string, unknown>>("nav2");
     expect(overridden.ws_real_host).toBe("10.0.0.1");
     expect(overridden.map_default_zoom).toBe(15);
+    expect(overridden.camera_transport).toBe("mjpeg");
 
     await runtime2.resetPackageConfig("nav2");
     const runtime3 = await bootstrapApp();
