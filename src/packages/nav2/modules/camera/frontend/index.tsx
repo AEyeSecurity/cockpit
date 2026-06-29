@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
+import { CORE_EVENTS } from "../../../../../core/events/topics";
 import { CameraDispatcher } from "../dispatcher/impl/CameraDispatcher";
 import {
   CameraVisionService,
@@ -8,7 +9,13 @@ import {
   type Detection
 } from "../service/impl/CameraVisionService";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
-import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
+import {
+  NavigationService,
+  type CameraPtzStateData,
+  type NavigationState
+} from "../../navigation/service/impl/NavigationService";
+import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
+import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.camera";
@@ -148,14 +155,15 @@ function RailFeedRow({
   );
 }
 
-const VISION_STREAM_URL = "http://localhost:8089/stream.mjpg";
-const SNAP_STALE_MS = 1800;
-const STREAM_RECONNECT_STALE_MS = 3000;
 const VISION_DATA_URL = "http://localhost:8088/data";
 const VISION_DATA_POLL_INTERVAL_MS = 100;
 const MIN_DETECTION_CONFIDENCE = 0.35;
 const OVERLAY_MIN_CONFIDENCE = 0.50;
 const ALERT_HOLD_MS = 500;
+const PTZ_PAN_STEP_DEG = 15;
+const PTZ_TILT_STEP_DEG = 10;
+const PTZ_ZOOM_STEP = 0.5;
+const PTZ_STATE_POLL_INTERVAL_MS = 2000;
 
 type DetectionZone = "left" | "center" | "right";
 type RiskLevel = "normal" | "low" | "medium" | "high";
@@ -251,6 +259,17 @@ function riskLabel(risk: RiskLevel): string {
   if (risk === "medium") return "Riesgo medio";
   if (risk === "low") return "Riesgo bajo";
   return "Normal";
+}
+
+function formatPresetLabel(preset: string): string {
+  const normalized = preset.trim().toLowerCase();
+  if (!normalized) return "Manual";
+  if (normalized === "home") return "Home";
+  if (normalized === "front") return "Front";
+  if (normalized === "left") return "Left";
+  if (normalized === "right") return "Right";
+  if (normalized === "rear") return "Rear";
+  return preset;
 }
 
 function detectionDisplayLabel(label: string): string {
@@ -386,21 +405,37 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     connectionService = null;
   }
   const [state, setState] = useState<CameraVisionState>(service.getState());
+  const [cameraConfig, setCameraConfig] = useState(() => readCameraStreamConfig(runtime));
+  const [videoRequested, setVideoRequested] = useState(false);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(navigationService?.getState() ?? null);
   const [connectionState, setConnectionState] = useState<ConnectionState | null>(connectionService?.getState() ?? null);
-  const [snapSrc, setSnapSrc] = useState<string>("");
-  const [snapLastFrameMs, setSnapLastFrameMs] = useState<number>(0);
+  const [streamStatus, setStreamStatus] = useState<CameraStreamStatus>({
+    connected: false,
+    connecting: false,
+    error: "",
+    lastFrameMs: 0,
+    transport: cameraConfig.transport
+  });
   const lastCameraStampRef = useRef<number>(0);
   const fpsWindowRef = useRef<{ startedMs: number; frames: number }>({ startedMs: Date.now(), frames: 0 });
   const [cameraFps, setCameraFps] = useState<number>(0);
   const [visionDetections, setVisionDetections] = useState<Detection[]>([]);
   const [visionLastDetectionMs, setVisionLastDetectionMs] = useState<number>(0);
   const [alertState, setAlertState] = useState<CameraAlertState>(NORMAL_ALERT_STATE);
+  const [ptzState, setPtzState] = useState<CameraPtzStateData | null>(null);
+  const [ptzError, setPtzError] = useState<string>("");
+  const [ptzBusy, setPtzBusy] = useState<boolean>(false);
   const [ptzExpanded, setPtzExpanded] = useState<boolean>(true);
   const [feedExpanded, setFeedExpanded] = useState<boolean>(true);
   const [detectionsExpanded, setDetectionsExpanded] = useState<boolean>(true);
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
+  useEffect(() => {
+    return runtime.eventBus.on<{ packageId?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
+      if (payload?.packageId !== "nav2") return;
+      setCameraConfig(readCameraStreamConfig(runtime));
+    });
+  }, [runtime]);
   useEffect(() => {
     if (!navigationService) return;
     return navigationService.subscribe((next) => setNavigationState(next));
@@ -409,27 +444,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     if (!connectionService) return;
     return connectionService.subscribe((next) => setConnectionState(next));
   }, [connectionService]);
-
-  useEffect(() => {
-    setSnapSrc(`${VISION_STREAM_URL}?_=${Date.now()}`);
-    return () => setSnapSrc("");
-  }, []);
-
-  useEffect(() => {
-    if (snapSrc) return;
-    const timer = setTimeout(() => {
-      setSnapSrc(`${VISION_STREAM_URL}?_=${Date.now()}`);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [snapSrc]);
-
-  // Force stream reconnect when no new frame arrives for STREAM_RECONNECT_STALE_MS.
-  // onError covers hard failures; this covers MJPEG streams that silently stop sending.
-  useEffect(() => {
-    if (!snapSrc || snapLastFrameMs === 0) return;
-    const id = setTimeout(() => setSnapSrc(""), STREAM_RECONNECT_STALE_MS);
-    return () => clearTimeout(id);
-  }, [snapSrc, snapLastFrameMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -446,11 +460,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
         const cameraStamp = Number(camera.stamp ?? 0);
         const cameraAgeSec = Number(camera.age_sec ?? Number.NaN);
         const now = Date.now();
-        if (Number.isFinite(cameraAgeSec) && cameraAgeSec >= 0) {
-          setSnapLastFrameMs(now - cameraAgeSec * 1000);
-        } else if (camera.available === true) {
-          setSnapLastFrameMs(now);
-        }
         if (Number.isFinite(cameraStamp) && cameraStamp > 0 && cameraStamp !== lastCameraStampRef.current) {
           lastCameraStampRef.current = cameraStamp;
           const windowState = fpsWindowRef.current;
@@ -499,12 +508,10 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const detectionsActive = liveAlertState.risk !== "normal" || detectionCount > 0 || state.detectionsActive;
   const lastDetectionMs = visionLastDetectionMs || state.lastDetectionMs;
   const detCountText = `${detectionCount} obj${detectionCount !== 1 ? "s" : ""}`;
-  const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
-  const streamOnline = navigationState?.cameraStreamConnected === true;
-  const snapshotOnline = snapSrc.length > 0 && nowMs - snapLastFrameMs <= SNAP_STALE_MS;
-  const feedOnline = state.connected || snapshotOnline;
+  const cameraEnabled = connectionState?.preset !== "sim" && isCameraFeedConfigured(cameraConfig);
+  const feedOnline = state.connected || streamStatus.connected;
   const presetLabel = connectionState?.preset === "sim" ? "SIM" : connectionState?.preset === "real" ? "REAL" : "N/A";
-  const lastFrameTimestamp = state.lastFrameMs || snapLastFrameMs;
+  const lastFrameTimestamp = state.lastFrameMs || streamStatus.lastFrameMs;
   const frameAgeMs = lastFrameTimestamp > 0 ? Math.max(0, nowMs - lastFrameTimestamp) : null;
   const lastFrameLabel = formatTimestamp(lastFrameTimestamp);
   const lastFrameAgeLabel = formatElapsedSeconds(frameAgeMs);
@@ -533,12 +540,67 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const overviewConfidenceLabel = overviewMainDetection ? `${(overviewMainDetection.confidence * 100).toFixed(0)}%` : "—";
   const zoneText = overviewMainDetection ? zoneLabel(overviewMainDetection.zone) : "—";
   const overviewJsonAgeLabel = jsonAgeLabel;
-  const ptzDisabled = !navigationService || !cameraEnabled;
-  const fpsLabel = cameraFps > 0 ? `${cameraFps} FPS` : "LIVE";
+  const navBackendConnected = connectionState?.connected === true;
+  const ptzDisabled = !navigationService || !cameraEnabled || !navBackendConnected;
+  const ptzCommandDisabled = ptzDisabled || ptzBusy;
+  const ptzStatusLabel = ptzState?.ok
+    ? formatPresetLabel(ptzState.activePreset)
+    : ptzError
+      ? "Sin enlace"
+      : "Esperando";
+  const ptzPoseLabel = ptzState
+    ? `Pan ${ptzState.panDeg.toFixed(0)}° · Tilt ${ptzState.tiltDeg.toFixed(0)}°`
+    : "Sin telemetria PTZ";
+  const ptzZoomLabel = ptzState ? `${ptzState.zoomLevel.toFixed(1)}x` : "--";
+  const fpsLabel = cameraFps > 0 ? `${cameraFps} FPS` : streamStatus.transport === "webrtc" ? "WEBRTC" : "LIVE";
+  const showVideo = cameraEnabled && videoRequested;
 
-  const pan = async (angleDeg: number): Promise<void> => {
+  useEffect(() => {
+    if (!navigationService || !cameraEnabled || !navBackendConnected) {
+      setPtzState(null);
+      if (!cameraEnabled) {
+        setPtzError("Camera disabled in current preset");
+      } else if (!navBackendConnected) {
+        const host = connectionState?.host?.trim() || "host";
+        const port = connectionState?.port?.trim() || "port";
+        setPtzError(`Nav2 disconnected. Connect to ws://${host}:${port} first.`);
+      } else {
+        setPtzError("");
+      }
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const refresh = async (): Promise<void> => {
+      try {
+        const next = await navigationService.readCameraPtzState();
+        if (cancelled) return;
+        setPtzState(next);
+        setPtzError(next.ok ? "" : next.error || "PTZ unavailable");
+      } catch (error) {
+        if (!cancelled) setPtzError(String(error));
+      } finally {
+        if (!cancelled) {
+          timer = setTimeout(() => void refresh(), PTZ_STATE_POLL_INTERVAL_MS);
+        }
+      }
+    };
+
+    void refresh();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [cameraEnabled, connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
+
+  const runPtzAction = async (
+    action: () => Promise<CameraPtzStateData>,
+    successText?: string
+  ): Promise<void> => {
     if (!navigationService) return;
-    if (!connectionService?.isCameraEnabled()) {
+    if (!cameraEnabled) {
       runtime.eventBus.emit("console.event", {
         level: "warn",
         text: "Camera disabled in current preset",
@@ -546,27 +608,95 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       });
       return;
     }
-    try {
-      await navigationService.panCamera(angleDeg);
-    } catch (error) {
+    if (!navBackendConnected) {
+      const host = connectionState?.host?.trim() || "host";
+      const port = connectionState?.port?.trim() || "port";
+      const text = `Nav2 disconnected. Connect to ws://${host}:${port} first.`;
+      setPtzError(text);
       runtime.eventBus.emit("console.event", {
-        level: "error",
-        text: `Camera pan failed: ${String(error)}`,
+        level: "warn",
+        text,
         timestamp: Date.now()
       });
+      return;
     }
+    setPtzBusy(true);
+    try {
+      const next = await action();
+      setPtzState(next);
+      setPtzError(next.ok ? "" : next.error || "");
+      if (successText) {
+        runtime.eventBus.emit("console.event", {
+          level: "info",
+          text: successText,
+          timestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      setPtzError(String(error));
+      runtime.eventBus.emit("console.event", {
+        level: "error",
+        text: `Camera PTZ failed: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    } finally {
+      setPtzBusy(false);
+    }
+  };
+
+  const movePtz = async (input: {
+    relative: boolean;
+    panDeg?: number;
+    tiltDeg?: number;
+    zoomLevel?: number;
+  }): Promise<void> => {
+    await runPtzAction(() => navigationService!.moveCameraPtz(input));
+  };
+
+  const goPreset = async (preset: string): Promise<void> => {
+    await runPtzAction(
+      () => navigationService!.goCameraPreset(preset),
+      `Camera preset ${formatPresetLabel(preset)}`
+    );
   };
 
   const toggleZoom = async (): Promise<void> => {
     if (!navigationService) return;
+    if (!cameraEnabled) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: "Camera disabled in current preset",
+        timestamp: Date.now()
+      });
+      return;
+    }
+    if (!navBackendConnected) {
+      const host = connectionState?.host?.trim() || "host";
+      const port = connectionState?.port?.trim() || "port";
+      const text = `Nav2 disconnected. Connect to ws://${host}:${port} first.`;
+      setPtzError(text);
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text,
+        timestamp: Date.now()
+      });
+      return;
+    }
+    setPtzBusy(true);
     try {
       await navigationService.toggleCameraZoom();
+      const next = await navigationService.readCameraPtzState();
+      setPtzState(next);
+      setPtzError(next.ok ? "" : next.error || "");
     } catch (error) {
+      setPtzError(String(error));
       runtime.eventBus.emit("console.event", {
         level: "error",
         text: `Camera zoom failed: ${String(error)}`,
         timestamp: Date.now()
       });
+    } finally {
+      setPtzBusy(false);
     }
   };
 
@@ -575,24 +705,45 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       <div className="cv-body cv-html-body">
         <section className="cv-main cv-html-main">
           <div className="cv-viewport-shell cv-html-stage">
-            <div className={`cv-viewport cv-html-viewport cv-alert-${alertState.risk}${!snapSrc ? " cv-viewport--no-signal" : ""}`}>
-              {snapSrc ? (
-                <img
-                  src={snapSrc}
+            <div className={`cv-viewport cv-html-viewport cv-alert-${alertState.risk}${!feedOnline ? " cv-viewport--no-signal" : ""}`}>
+              {showVideo ? (
+                <CameraStreamSurface
+                  isActive={showVideo}
+                  config={cameraConfig}
                   className="cv-frame"
                   alt="Camera stream"
-                  draggable={false}
-                  onLoad={() => setSnapLastFrameMs(Date.now())}
-                  onError={() => setSnapSrc("")}
+                  onStatusChange={setStreamStatus}
                 />
-              ) : (
+              ) : null}
+              {!feedOnline ? (
                 <div className="cv-no-signal">
                   <div className="cv-no-signal-shell">
-                    <div className="cv-no-signal-text">Awaiting camera snapshot</div>
+                    <div className="cv-no-signal-text">
+                      {!cameraEnabled
+                        ? "Camera unavailable"
+                        : !videoRequested
+                          ? "Video paused to save mobile data"
+                          : cameraEnabled
+                        ? streamStatus.connecting
+                          ? "Connecting camera stream"
+                          : streamStatus.error
+                            ? `Camera ${streamStatus.error}`
+                            : "Awaiting camera stream"
+                        : "Camera unavailable"}
+                    </div>
+                    {cameraEnabled ? (
+                      <button
+                        type="button"
+                        className="cv-camera-request-btn"
+                        onClick={() => setVideoRequested((current) => !current)}
+                      >
+                        {videoRequested ? "Stop video" : "Start video"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
-              )}
-              {snapSrc && overviewDetections.some(d => d.confidence >= OVERLAY_MIN_CONFIDENCE) ? (
+              ) : null}
+              {feedOnline && overviewDetections.some(d => d.confidence >= OVERLAY_MIN_CONFIDENCE) ? (
                 <div className="cv-overlay" aria-hidden="true">
                   {overviewDetections.filter(d => d.confidence >= OVERLAY_MIN_CONFIDENCE).map((det, index) => {
                     const left = `${Math.max(0, Math.min(1, det.bbox.x)) * 100}%`;
@@ -784,17 +935,46 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                 </span>
               </button>
               <div className="cv-ptz-panel cv-ptz-panel-compact cv-rail-collapsible-body">
+                <div className="cv-ptz-readout cv-ptz-readout-camera">
+                  <div className="cv-ptz-stat">
+                    <span className="cv-ptz-stat-label">Preset</span>
+                    <strong className="cv-ptz-stat-value">{ptzStatusLabel}</strong>
+                  </div>
+                  <div className="cv-ptz-stat">
+                    <span className="cv-ptz-stat-label">Posicion</span>
+                    <strong className="cv-ptz-stat-value">{ptzPoseLabel}</strong>
+                  </div>
+                  <div className="cv-ptz-stat">
+                    <span className="cv-ptz-stat-label">Zoom</span>
+                    <strong className="cv-ptz-stat-value">{ptzZoomLabel}</strong>
+                  </div>
+                </div>
+                {ptzError ? (
+                  <div className="cv-ptz-inline-note" role="status">
+                    {ptzError}
+                  </div>
+                ) : null}
                 <div className="cv-ptz-widget">
-                  {/* Left wing — NW · SW only */}
                   <div className="cv-ptz-wing cv-ptz-wing-left">
                     <div className="cv-ptz-dial-btn cv-ptz-dial-btn-nw">
-                      <PtzButton icon={<PtzDirectionIcon rotation={-45} />} label="NW" title="Pan northwest" disabled={ptzDisabled} onClick={() => void pan(135)} />
+                      <PtzButton
+                        icon={<PtzDirectionIcon rotation={-45} />}
+                        label="NW"
+                        title="Pan left and tilt up"
+                        disabled={ptzCommandDisabled}
+                        onClick={() => void movePtz({ relative: true, panDeg: PTZ_PAN_STEP_DEG, tiltDeg: PTZ_TILT_STEP_DEG })}
+                      />
                     </div>
                     <div className="cv-ptz-dial-btn cv-ptz-dial-btn-sw">
-                      <PtzButton icon={<PtzDirectionIcon rotation={-135} />} label="SW" title="Pan southwest" disabled={ptzDisabled} onClick={() => void pan(-135)} />
+                      <PtzButton
+                        icon={<PtzDirectionIcon rotation={-135} />}
+                        label="SW"
+                        title="Pan left and tilt down"
+                        disabled={ptzCommandDisabled}
+                        onClick={() => void movePtz({ relative: true, panDeg: PTZ_PAN_STEP_DEG, tiltDeg: -PTZ_TILT_STEP_DEG })}
+                      />
                     </div>
                   </div>
-                  {/* Core — dial only; N/E/S/W sit on the ring */}
                   <div className="cv-ptz-core">
                     <div className="cv-ptz-dial">
                       <div className="cv-ptz-dial-ring" aria-hidden="true">
@@ -804,32 +984,112 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                         <span className="cv-ptz-dial-tick cv-ptz-dial-tick-w" />
                       </div>
                       <div className="cv-ptz-dial-center">
-                        <PtzButton icon={<PtzZoomIcon />} label="Zoom" title="Toggle camera zoom" className="cv-ptz-btn-center" disabled={!navigationService} onClick={() => void toggleZoom()} />
+                        <PtzButton
+                          icon={<PtzZoomIcon />}
+                          label="Home"
+                          title="Go to home preset"
+                          className="cv-ptz-btn-center"
+                          disabled={ptzCommandDisabled}
+                          onClick={() => void goPreset("home")}
+                        />
                       </div>
-                      {/* Cardinal buttons — center aligned with the outer ring edge */}
                       <div className="cv-ptz-cardinal cv-ptz-cardinal-n">
-                        <PtzButton icon={<PtzDirectionIcon rotation={0} />} label="N" title="Pan north" disabled={ptzDisabled} onClick={() => void pan(90)} />
+                        <PtzButton
+                          icon={<PtzDirectionIcon rotation={0} />}
+                          label="UP"
+                          title="Tilt up"
+                          disabled={ptzCommandDisabled}
+                          onClick={() => void movePtz({ relative: true, tiltDeg: PTZ_TILT_STEP_DEG })}
+                        />
                       </div>
                       <div className="cv-ptz-cardinal cv-ptz-cardinal-e">
-                        <PtzButton icon={<PtzDirectionIcon rotation={90} />} label="E" title="Pan east" disabled={ptzDisabled} onClick={() => void pan(0)} />
+                        <PtzButton
+                          icon={<PtzDirectionIcon rotation={90} />}
+                          label="R"
+                          title="Pan right"
+                          disabled={ptzCommandDisabled}
+                          onClick={() => void movePtz({ relative: true, panDeg: -PTZ_PAN_STEP_DEG })}
+                        />
                       </div>
                       <div className="cv-ptz-cardinal cv-ptz-cardinal-s">
-                        <PtzButton icon={<PtzDirectionIcon rotation={180} />} label="S" title="Pan south" disabled={ptzDisabled} onClick={() => void pan(-90)} />
+                        <PtzButton
+                          icon={<PtzDirectionIcon rotation={180} />}
+                          label="DN"
+                          title="Tilt down"
+                          disabled={ptzCommandDisabled}
+                          onClick={() => void movePtz({ relative: true, tiltDeg: -PTZ_TILT_STEP_DEG })}
+                        />
                       </div>
                       <div className="cv-ptz-cardinal cv-ptz-cardinal-w">
-                        <PtzButton icon={<PtzDirectionIcon rotation={-90} />} label="W" title="Pan west" disabled={ptzDisabled} onClick={() => void pan(180)} />
+                        <PtzButton
+                          icon={<PtzDirectionIcon rotation={-90} />}
+                          label="L"
+                          title="Pan left"
+                          disabled={ptzCommandDisabled}
+                          onClick={() => void movePtz({ relative: true, panDeg: PTZ_PAN_STEP_DEG })}
+                        />
                       </div>
                     </div>
                   </div>
-                  {/* Right wing — NE · SE only */}
                   <div className="cv-ptz-wing cv-ptz-wing-right">
                     <div className="cv-ptz-dial-btn cv-ptz-dial-btn-ne">
-                      <PtzButton icon={<PtzDirectionIcon rotation={45} />} label="NE" title="Pan northeast" disabled={ptzDisabled} onClick={() => void pan(45)} />
+                      <PtzButton
+                        icon={<PtzDirectionIcon rotation={45} />}
+                        label="NE"
+                        title="Pan right and tilt up"
+                        disabled={ptzCommandDisabled}
+                        onClick={() => void movePtz({ relative: true, panDeg: -PTZ_PAN_STEP_DEG, tiltDeg: PTZ_TILT_STEP_DEG })}
+                      />
                     </div>
                     <div className="cv-ptz-dial-btn cv-ptz-dial-btn-se">
-                      <PtzButton icon={<PtzDirectionIcon rotation={135} />} label="SE" title="Pan southeast" disabled={ptzDisabled} onClick={() => void pan(-45)} />
+                      <PtzButton
+                        icon={<PtzDirectionIcon rotation={135} />}
+                        label="SE"
+                        title="Pan right and tilt down"
+                        disabled={ptzCommandDisabled}
+                        onClick={() => void movePtz({ relative: true, panDeg: -PTZ_PAN_STEP_DEG, tiltDeg: -PTZ_TILT_STEP_DEG })}
+                      />
                     </div>
                   </div>
+                </div>
+                <div className="cv-ptz-zoom-row">
+                  <button
+                    type="button"
+                    className="cv-ptz-chip-btn"
+                    disabled={ptzCommandDisabled}
+                    onClick={() => void movePtz({ relative: true, zoomLevel: -PTZ_ZOOM_STEP })}
+                  >
+                    Zoom -
+                  </button>
+                  <button
+                    type="button"
+                    className="cv-ptz-chip-btn"
+                    disabled={ptzCommandDisabled}
+                    onClick={() => void toggleZoom()}
+                  >
+                    Toggle
+                  </button>
+                  <button
+                    type="button"
+                    className="cv-ptz-chip-btn"
+                    disabled={ptzCommandDisabled}
+                    onClick={() => void movePtz({ relative: true, zoomLevel: PTZ_ZOOM_STEP })}
+                  >
+                    Zoom +
+                  </button>
+                </div>
+                <div className="cv-ptz-preset-row">
+                  {["front", "left", "right", "rear"].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`cv-ptz-preset-btn${ptzState?.activePreset === preset ? " is-active" : ""}`}
+                      disabled={ptzCommandDisabled}
+                      onClick={() => void goPreset(preset)}
+                    >
+                      {formatPresetLabel(preset)}
+                    </button>
+                  ))}
                 </div>
               </div>
             </section>

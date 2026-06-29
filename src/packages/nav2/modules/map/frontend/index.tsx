@@ -13,6 +13,8 @@ import { NavigationService, type NavigationState } from "../../navigation/servic
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { calculateProtractorAngleDeg, snapToCartesianAxis } from "./protractor";
+import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
+import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.map";
@@ -74,8 +76,6 @@ interface Nav2MapConfig {
   map_default_center_lat?: unknown;
   map_default_center_lon?: unknown;
   map_default_zoom?: unknown;
-  camera_probe_timeout_ms?: unknown;
-  camera_load_timeout_ms?: unknown;
 }
 
 function readNav2MapConfig(runtime: ModuleContext): Nav2MapConfig {
@@ -141,20 +141,6 @@ function isReturnHomeAssistRequired(
   if (!routeMission.loop || !routeMission.lowBatteryActive) return false;
   if (routeMission.returnHomePhase === "completed") return true;
   return normalizeRouteMissionStatus(routeMission.status).includes("return home completed");
-}
-
-function parseCameraProbeTimeout(config: Nav2MapConfig, runtime: ModuleContext): number {
-  const fallback = Math.max(500, Number(runtime.env.cameraProbeTimeoutMs ?? 3000));
-  const parsed = Number(config.camera_probe_timeout_ms);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(500, Math.round(parsed));
-}
-
-function parseCameraLoadTimeout(config: Nav2MapConfig, runtime: ModuleContext): number {
-  const fallback = Math.max(1000, Number(runtime.env.cameraLoadTimeoutMs ?? 7000));
-  const parsed = Number(config.camera_load_timeout_ms);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(1000, Math.round(parsed));
 }
 
 function parseCameraDetections(payload: unknown): CameraDetectionOverlayItem[] {
@@ -2266,12 +2252,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }
   const [state, setState] = useState<MapWorkspaceState>(mapService.getState());
   const [mainPane, setMainPane] = useState<"map" | "camera">("map");
-  const [frameSrc, setFrameSrc] = useState("");
-  const [frameReady, setFrameReady] = useState(false);
-  const [snapSrc, setSnapSrc] = useState("");
+  const [videoRequested, setVideoRequested] = useState(false);
   const [cameraDetections, setCameraDetections] = useState<CameraDetectionOverlayItem[]>([]);
-  const [cameraStreamPending, setCameraStreamPending] = useState<"idle" | "connecting">("idle");
-  const [cameraConnectError, setCameraConnectError] = useState("");
+  const [cameraStreamStatus, setCameraStreamStatus] = useState<CameraStreamStatus>({
+    connected: false,
+    connecting: false,
+    error: "",
+    lastFrameMs: 0,
+    transport: "mjpeg"
+  });
   const [leafletZoneToolActive, setLeafletZoneToolActive] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
   const [mapZoom, setMapZoom] = useState(GPS_DEFAULT_ZOOM);
@@ -2291,8 +2280,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const [datumProfiles, setDatumProfiles] = useState<DatumProfilesState | null>(mapService.getDatumProfilesState());
   const wasConnectedRef = useRef(false);
   const pendingCenterOnConnectRef = useRef(false);
-  const cameraStreamSeqRef = useRef(0);
-  const cameraLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraDetectionLastMsRef = useRef(0);
   const missionProgressHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousLoopWaypointRef = useRef<number | null>(null);
@@ -2414,15 +2401,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const cameraPaneAvailable = !isSimPreset;
   const mainIsMap = !cameraPaneAvailable || mainPane === "map";
   const showMiniCameraPane = mainIsMap;
-  const cameraEnabled = connectionService?.isCameraEnabled() ?? false;
-  const cameraUrl = connectionService?.getCameraIframeUrl() ?? "";
-  const cameraProbeTimeoutMs = parseCameraProbeTimeout(nav2Config, runtime);
-  const cameraLoadTimeoutMs = parseCameraLoadTimeout(nav2Config, runtime);
+  const cameraConfig = readCameraStreamConfig(runtime);
+  const cameraEnabled = connectionState?.preset !== "sim" && isCameraFeedConfigured(cameraConfig);
   const initialCenter = parseCenter(nav2Config);
   const initialCenterLat = initialCenter[0];
   const initialCenterLon = initialCenter[1];
   const initialZoom = parseZoom(nav2Config);
-  const cameraStreamConnected = navigationState?.cameraStreamConnected === true;
+  const cameraStreamConnected = navigationState?.cameraStreamConnected === true || cameraStreamStatus.connected;
+  const showVideo = cameraEnabled && videoRequested;
   const mapInteractive = mainIsMap;
   const mapToolsEnabled = mainIsMap;
   const routeMission = navigationState?.routeMission ?? null;
@@ -2546,12 +2532,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const batteryStatusLabel = batteryLabel(batteryStatusTone, batteryConnected);
   const showAssistAlert = isReturnHomeAssistRequired(routeMission);
 
-  const clearCameraLoadTimer = (): void => {
-    if (!cameraLoadTimerRef.current) return;
-    clearTimeout(cameraLoadTimerRef.current);
-    cameraLoadTimerRef.current = null;
-  };
-
   useEffect(() => {
     if (cameraPaneAvailable) return;
     if (mainPane === "camera") {
@@ -2562,37 +2542,6 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   useEffect(() => {
     setMapZoom(initialZoom);
   }, [initialZoom]);
-
-  useEffect(() => {
-    if (!cameraEnabled || !cameraUrl || !cameraPaneAvailable) {
-      setSnapSrc("");
-      setFrameReady(false);
-      return;
-    }
-
-    setFrameReady(false);
-    const snapUrl = cameraUrl.replace(/\/?$/, "/snap.jpg");
-    let cancelled = false;
-
-    function pollNext(): void {
-      if (cancelled) return;
-      const img = new Image();
-      img.onload = () => {
-        if (cancelled) return;
-        setSnapSrc(img.src);
-        setFrameReady(true);
-        setTimeout(pollNext, 100);
-      };
-      img.onerror = () => {
-        if (cancelled) return;
-        setTimeout(pollNext, 1000);
-      };
-      img.src = `${snapUrl}?_=${Date.now()}`;
-    }
-
-    pollNext();
-    return () => { cancelled = true; };
-  }, [cameraEnabled, cameraPaneAvailable, cameraUrl]);
 
   useEffect(() => {
     if (!cameraPaneAvailable) {
@@ -2643,11 +2592,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     ? connectionState?.preset === "sim"
       ? "camera disabled in sim"
       : "camera unavailable"
-    : cameraStreamPending === "connecting"
+    : !videoRequested
+      ? "video paused"
+    : cameraStreamStatus.connecting
         ? "camera connecting"
-        : cameraConnectError
-          ? `camera ${cameraConnectError}`
-          : frameReady
+        : cameraStreamStatus.error
+          ? `camera ${cameraStreamStatus.error}`
+          : cameraStreamStatus.connected
         ? ""
         : "camera connecting";
   const cameraRisk = cameraRiskFromDetections(cameraDetections);
@@ -2840,8 +2791,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           <section className="stage-pane main map-camera-stage-pane map-camera-stage-pane-full">
             <div className="map-camera-full-card">
               <div className={`camera-frame-wrap map-camera-frame-wrap map-camera-alert-${cameraRisk}`}>
-                {snapSrc ? (
-                  <img className="camera-frame map-camera-frame" src={snapSrc} alt="camera" draggable={false} />
+                {cameraEnabled ? (
+                  <CameraStreamSurface
+                    isActive={showVideo}
+                    config={cameraConfig}
+                    className="camera-frame map-camera-frame"
+                    alt="camera"
+                    onStatusChange={setCameraStreamStatus}
+                  />
+                ) : null}
+                {cameraEnabled ? (
+                  <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
+                    {videoRequested ? "Stop video" : "Start video"}
+                  </button>
                 ) : null}
                 {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
               </div>
@@ -2909,8 +2871,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                     </div>
                   </div>
                   <div className={`camera-frame-wrap map-camera-frame-wrap map-camera-alert-${cameraRisk}`}>
-                    {snapSrc ? (
-                      <img className="camera-frame map-camera-frame" src={snapSrc} alt="camera" draggable={false} />
+                    {cameraEnabled ? (
+                      <CameraStreamSurface
+                        isActive={showVideo}
+                        config={cameraConfig}
+                        className="camera-frame map-camera-frame"
+                        alt="camera"
+                        onStatusChange={setCameraStreamStatus}
+                      />
+                    ) : null}
+                    {cameraEnabled ? (
+                      <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
+                        {videoRequested ? "Stop video" : "Start video"}
+                      </button>
                     ) : null}
                     {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
                     <div className="map-camera-crosshair" aria-hidden="true" />

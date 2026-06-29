@@ -6,6 +6,9 @@
     "ws_sim_port": 8766,
     "rtk_default_source_id": "casisa",
     "rtk_default_source_label": "CASISA",
+    "camera_transport": "webrtc",
+    "camera_mjpeg_url": "http://localhost:8089/stream.mjpg",
+    "camera_webrtc_url": "http://100.66.15.45:8889/cam3/whep",
     "camera_probe_timeout_ms": 3000,
     "camera_load_timeout_ms": 7000,
     "map_default_center_lat": -31.4201,
@@ -57,6 +60,24 @@
         "label": "RTK Default Source Name",
         "type": "string",
         "placeholder": "CASISA"
+      },
+      {
+        "key": "camera_transport",
+        "label": "Camera Transport",
+        "type": "string",
+        "placeholder": "webrtc | mjpeg"
+      },
+      {
+        "key": "camera_mjpeg_url",
+        "label": "Camera MJPEG URL",
+        "type": "string",
+        "placeholder": "http://localhost:8089/stream.mjpg"
+      },
+      {
+        "key": "camera_webrtc_url",
+        "label": "Camera WebRTC WHEP URL",
+        "type": "string",
+        "placeholder": "http://100.66.15.45:8889/cam3/whep"
       },
       {
         "key": "camera_probe_timeout_ms",

@@ -78,7 +78,20 @@ export interface CameraStatusData {
   error: string;
   zoomIn: boolean;
   lastCommand: string;
+  panDeg: number;
+  tiltDeg: number;
+  zoomLevel: number;
+  activePreset: string;
 }
+
+export interface CameraPtzMoveInput {
+  relative: boolean;
+  panDeg?: number;
+  tiltDeg?: number;
+  zoomLevel?: number;
+}
+
+export interface CameraPtzStateData extends CameraStatusData {}
 
 export interface ManualKeysState {
   w: boolean;
@@ -1604,7 +1617,65 @@ export class NavigationService {
       ok: payload.ok === true || payload.error == null,
       error: String(payload.error ?? ""),
       zoomIn: payload.zoom_in === true || payload.zoomIn === true,
-      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none")
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none"),
+      panDeg: Number(payload.pan_deg ?? payload.panDeg ?? 0) || 0,
+      tiltDeg: Number(payload.tilt_deg ?? payload.tiltDeg ?? 0) || 0,
+      zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
+      activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
+    };
+  }
+
+  async moveCameraPtz(input: CameraPtzMoveInput): Promise<CameraPtzStateData> {
+    const response = await this.robotDispatcher.requestCameraPtzMove(input);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Camera PTZ move failed");
+    }
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
+    return {
+      ok: payload.ok === true || payload.error == null,
+      error: String(payload.error ?? ""),
+      zoomIn: payload.zoom_in === true || payload.zoomIn === true,
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none"),
+      panDeg: Number(payload.pan_deg ?? payload.panDeg ?? 0) || 0,
+      tiltDeg: Number(payload.tilt_deg ?? payload.tiltDeg ?? 0) || 0,
+      zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
+      activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
+    };
+  }
+
+  async goCameraPreset(preset: string): Promise<CameraPtzStateData> {
+    const response = await this.robotDispatcher.requestCameraPtzPreset(preset);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Camera preset failed");
+    }
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
+    return {
+      ok: payload.ok === true || payload.error == null,
+      error: String(payload.error ?? ""),
+      zoomIn: payload.zoom_in === true || payload.zoomIn === true,
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none"),
+      panDeg: Number(payload.pan_deg ?? payload.panDeg ?? 0) || 0,
+      tiltDeg: Number(payload.tilt_deg ?? payload.tiltDeg ?? 0) || 0,
+      zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
+      activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
+    };
+  }
+
+  async readCameraPtzState(): Promise<CameraPtzStateData> {
+    const response = await this.robotDispatcher.requestCameraPtzState();
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Camera PTZ state failed");
+    }
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
+    return {
+      ok: payload.ok === true || payload.error == null,
+      error: String(payload.error ?? ""),
+      zoomIn: payload.zoom_in === true || payload.zoomIn === true,
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none"),
+      panDeg: Number(payload.pan_deg ?? payload.panDeg ?? 0) || 0,
+      tiltDeg: Number(payload.tilt_deg ?? payload.tiltDeg ?? 0) || 0,
+      zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
+      activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
     };
   }
 

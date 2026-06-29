@@ -1899,6 +1899,22 @@ input[type="range"]:disabled {
   background: #c8ccd0;
 }
 
+.map-camera-request-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 10px 16px;
+  border: 1px solid rgba(106, 143, 168, 0.44);
+  border-radius: 999px;
+  background: rgba(15, 27, 36, 0.9);
+  color: #eef5f8;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .map-camera-stage-pane .camera-overlay.visible,
 .map-camera-stage-pane-mini .camera-overlay.visible {
   background: rgba(180, 184, 188, 0.92);

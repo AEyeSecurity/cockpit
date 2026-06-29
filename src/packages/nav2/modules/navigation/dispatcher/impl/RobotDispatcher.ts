@@ -91,6 +91,29 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("get_camera_status", {}, { timeoutMs: 4000 });
   }
 
+  async requestCameraPtzMove(input: {
+    relative: boolean;
+    panDeg?: number;
+    tiltDeg?: number;
+    zoomLevel?: number;
+  }): Promise<Nav2IncomingMessage> {
+    const payload: Record<string, unknown> = {
+      relative: input.relative
+    };
+    if (input.panDeg !== undefined) payload.pan_deg = input.panDeg;
+    if (input.tiltDeg !== undefined) payload.tilt_deg = input.tiltDeg;
+    if (input.zoomLevel !== undefined) payload.zoom_level = input.zoomLevel;
+    return this.request("camera_ptz_move", payload as never, { timeoutMs: 5000 });
+  }
+
+  async requestCameraPtzPreset(preset: string): Promise<Nav2IncomingMessage> {
+    return this.request("camera_ptz_preset", { preset } as never, { timeoutMs: 5000 });
+  }
+
+  async requestCameraPtzState(): Promise<Nav2IncomingMessage> {
+    return this.request("get_camera_ptz_state", {}, { timeoutMs: 4000 });
+  }
+
   async requestState(): Promise<Nav2IncomingMessage> {
     return this.request("get_state", {}, { timeoutMs: 5000 });
   }
