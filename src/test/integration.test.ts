@@ -67,7 +67,7 @@ describe("integration", () => {
 
     const runtime1 = await bootstrapApp();
     const base = runtime1.getPackageConfig<Record<string, unknown>>("nav2");
-    expect(base.ws_real_host).toBe("100.111.4.7");
+    expect(base.ws_real_host).toBe("100.66.15.45");
     expect(base.map_default_zoom).toBe(16);
     expect(base.camera_transport).toBe("webrtc");
     expect(base.camera_webrtc_url).toBe("http://100.66.15.45:8889/cam3/whep");
@@ -97,7 +97,7 @@ describe("integration", () => {
     await runtime2.resetPackageConfig("nav2");
     const runtime3 = await bootstrapApp();
     const restored = runtime3.getPackageConfig<Record<string, unknown>>("nav2");
-    expect(restored.ws_real_host).toBe("100.111.4.7");
+    expect(restored.ws_real_host).toBe("100.66.15.45");
     expect(restored.map_default_zoom).toBe(16);
 
     await removeConfig("packages/nav2.json");
