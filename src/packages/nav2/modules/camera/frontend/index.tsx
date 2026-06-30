@@ -164,6 +164,7 @@ const PTZ_PAN_STEP_DEG = 15;
 const PTZ_TILT_STEP_DEG = 10;
 const PTZ_ZOOM_STEP = 0.5;
 const PTZ_STATE_POLL_INTERVAL_MS = 2000;
+const PTZ_SAVE_CONFIRM_WINDOW_MS = 4000;
 
 type DetectionZone = "left" | "center" | "right";
 type RiskLevel = "normal" | "low" | "medium" | "high";
@@ -426,6 +427,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const [ptzError, setPtzError] = useState<string>("");
   const [ptzBusy, setPtzBusy] = useState<boolean>(false);
   const [ptzExpanded, setPtzExpanded] = useState<boolean>(true);
+  const [armedSavePreset, setArmedSavePreset] = useState<string | null>(null);
+  const presetSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [feedExpanded, setFeedExpanded] = useState<boolean>(true);
   const [detectionsExpanded, setDetectionsExpanded] = useState<boolean>(true);
 
@@ -555,9 +558,29 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const fpsLabel = cameraFps > 0 ? `${cameraFps} FPS` : streamStatus.transport === "webrtc" ? "WEBRTC" : "LIVE";
   const showVideo = cameraEnabled && videoRequested;
 
+  const clearPresetSaveArm = (): void => {
+    if (presetSaveTimerRef.current) {
+      clearTimeout(presetSaveTimerRef.current);
+      presetSaveTimerRef.current = null;
+    }
+    setArmedSavePreset(null);
+  };
+
+  const armPresetSave = (preset: string): void => {
+    if (presetSaveTimerRef.current) {
+      clearTimeout(presetSaveTimerRef.current);
+    }
+    setArmedSavePreset(preset);
+    presetSaveTimerRef.current = setTimeout(() => {
+      presetSaveTimerRef.current = null;
+      setArmedSavePreset((current) => (current === preset ? null : current));
+    }, PTZ_SAVE_CONFIRM_WINDOW_MS);
+  };
+
   useEffect(() => {
     if (!navigationService || !cameraEnabled || !navBackendConnected) {
       setPtzState(null);
+      clearPresetSaveArm();
       if (!cameraEnabled) {
         setPtzError("Camera disabled in current preset");
       } else if (!navBackendConnected) {
@@ -594,6 +617,15 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       if (timer) clearTimeout(timer);
     };
   }, [cameraEnabled, connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
+
+  useEffect(
+    () => () => {
+      if (presetSaveTimerRef.current) {
+        clearTimeout(presetSaveTimerRef.current);
+      }
+    },
+    []
+  );
 
   const runPtzAction = async (
     action: () => Promise<CameraPtzStateData>,
@@ -658,6 +690,22 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       () => navigationService!.goCameraPreset(preset),
       `Camera preset ${formatPresetLabel(preset)}`
     );
+  };
+
+  const savePreset = async (preset: string, saveZoom: boolean): Promise<void> => {
+    clearPresetSaveArm();
+    await runPtzAction(
+      () => navigationService!.saveCameraPreset(preset, saveZoom),
+      `Camera preset ${formatPresetLabel(preset)} saved`
+    );
+  };
+
+  const handlePresetSaveClick = (preset: string, saveZoom: boolean): void => {
+    if (armedSavePreset === preset) {
+      void savePreset(preset, saveZoom);
+      return;
+    }
+    armPresetSave(preset);
   };
 
   const toggleZoom = async (): Promise<void> => {
@@ -1090,6 +1138,31 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                       {formatPresetLabel(preset)}
                     </button>
                   ))}
+                </div>
+                <div className="cv-ptz-save-row">
+                  {[
+                    { preset: "home", saveZoom: true },
+                    { preset: "left", saveZoom: false },
+                    { preset: "right", saveZoom: false }
+                  ].map(({ preset, saveZoom }) => {
+                    const armed = armedSavePreset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`cv-ptz-save-btn${armed ? " is-armed" : ""}`}
+                        disabled={ptzCommandDisabled}
+                        onClick={() => handlePresetSaveClick(preset, saveZoom)}
+                        title={
+                          armed
+                            ? `Confirm save ${formatPresetLabel(preset)}`
+                            : `Save current camera as ${formatPresetLabel(preset)}`
+                        }
+                      >
+                        {armed ? `Confirm ${formatPresetLabel(preset)}` : `Set ${formatPresetLabel(preset)}`}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </section>

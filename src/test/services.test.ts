@@ -127,6 +127,36 @@ describe("services", () => {
     expect(map.title).toBe("Main map");
   });
 
+  it("maps saved camera preset payload in NavigationService", async () => {
+    const dispatcher = {
+      requestCameraPtzSetPreset: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        payload: {
+          ok: true,
+          error: "",
+          last_command: "save_preset:home",
+          zoom_in: true,
+          pan_deg: 33,
+          tilt_deg: 11,
+          zoom_level: 3.5,
+          active_preset: "home"
+        } as never
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    const state = await service.saveCameraPreset("home", true);
+    expect(dispatcher.requestCameraPtzSetPreset).toHaveBeenCalledWith("home", true);
+    expect(state).toMatchObject({
+      ok: true,
+      lastCommand: "save_preset:home",
+      panDeg: 33,
+      tiltDeg: 11,
+      zoomLevel: 3.5,
+      activePreset: "home"
+    });
+  });
+
   it("marks connection as lost on unexpected transport disconnect", async () => {
     let subscribed = false;
     let onStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void = () => undefined;

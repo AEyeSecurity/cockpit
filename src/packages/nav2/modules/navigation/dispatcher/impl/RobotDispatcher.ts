@@ -110,6 +110,14 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("camera_ptz_preset", { preset } as never, { timeoutMs: 5000 });
   }
 
+  async requestCameraPtzSetPreset(preset: string, saveZoom: boolean): Promise<Nav2IncomingMessage> {
+    return this.request(
+      "camera_ptz_set_preset",
+      { preset, save_zoom: saveZoom } as never,
+      { timeoutMs: 5000 }
+    );
+  }
+
   async requestCameraPtzState(): Promise<Nav2IncomingMessage> {
     return this.request("get_camera_ptz_state", {}, { timeoutMs: 4000 });
   }

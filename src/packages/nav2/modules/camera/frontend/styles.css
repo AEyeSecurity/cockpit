@@ -1261,7 +1261,8 @@
 }
 
 .cv-ptz-zoom-row,
-.cv-ptz-preset-row {
+.cv-ptz-preset-row,
+.cv-ptz-save-row {
   display: grid !important;
   gap: 8px !important;
   margin-top: 10px !important;
@@ -1275,8 +1276,13 @@
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
 }
 
+.cv-ptz-save-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
 .cv-ptz-chip-btn,
-.cv-ptz-preset-btn {
+.cv-ptz-preset-btn,
+.cv-ptz-save-btn {
   min-height: 34px !important;
   border: 1px solid rgba(127, 157, 183, 0.28) !important;
   border-radius: 10px !important;
@@ -1289,14 +1295,16 @@
 }
 
 .cv-ptz-chip-btn:hover:not(:disabled),
-.cv-ptz-preset-btn:hover:not(:disabled) {
+.cv-ptz-preset-btn:hover:not(:disabled),
+.cv-ptz-save-btn:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(33, 61, 88, 0.98), rgba(13, 31, 49, 0.98)) !important;
   border-color: rgba(112, 192, 255, 0.42) !important;
   transform: translateY(-1px) !important;
 }
 
 .cv-ptz-chip-btn:disabled,
-.cv-ptz-preset-btn:disabled {
+.cv-ptz-preset-btn:disabled,
+.cv-ptz-save-btn:disabled {
   opacity: 0.5 !important;
   cursor: not-allowed !important;
 }
@@ -1307,9 +1315,16 @@
   color: #ffffff !important;
 }
 
+.cv-ptz-save-btn.is-armed {
+  background: linear-gradient(180deg, rgba(151, 85, 18, 0.98), rgba(95, 45, 7, 0.98)) !important;
+  border-color: rgba(255, 198, 112, 0.54) !important;
+  color: #fff4dc !important;
+}
+
 @media (max-width: 1100px) {
   .cv-ptz-readout-camera,
-  .cv-ptz-preset-row {
+  .cv-ptz-preset-row,
+  .cv-ptz-save-row {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }

@@ -1661,6 +1661,24 @@ export class NavigationService {
     };
   }
 
+  async saveCameraPreset(preset: string, saveZoom: boolean): Promise<CameraPtzStateData> {
+    const response = await this.robotDispatcher.requestCameraPtzSetPreset(preset, saveZoom);
+    if (response.ok === false) {
+      throw new Error(response.error ?? "Camera save preset failed");
+    }
+    const payload = ((response.payload as Record<string, unknown> | undefined) ?? response) as Record<string, unknown>;
+    return {
+      ok: payload.ok === true || payload.error == null,
+      error: String(payload.error ?? ""),
+      zoomIn: payload.zoom_in === true || payload.zoomIn === true,
+      lastCommand: String(payload.last_command ?? payload.lastCommand ?? "none"),
+      panDeg: Number(payload.pan_deg ?? payload.panDeg ?? 0) || 0,
+      tiltDeg: Number(payload.tilt_deg ?? payload.tiltDeg ?? 0) || 0,
+      zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
+      activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
+    };
+  }
+
   async readCameraPtzState(): Promise<CameraPtzStateData> {
     const response = await this.robotDispatcher.requestCameraPtzState();
     if (response.ok === false) {
