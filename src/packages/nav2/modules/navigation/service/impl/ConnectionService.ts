@@ -18,7 +18,7 @@ export interface ConnectionState {
 
 type ConnectionListener = (state: ConnectionState) => void;
 
-const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v3";
+const CONNECTION_PRESET_STORAGE_KEY = "map_tools.connection_presets.v4";
 
 export interface ConnectionPresetDefaults {
   real: { host: string; port: string };
