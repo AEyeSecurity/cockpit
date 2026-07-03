@@ -353,6 +353,10 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
       : {
           robotStatus: {
             batteryPct: 0,
+            batteryVoltageV: null,
+            batteryState: "",
+            batteryPresent: null,
+            batteryUpdatedAgeS: null,
             mode: "disconnected",
             connected: false
           },

@@ -3,6 +3,10 @@ import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface RobotStatus {
   batteryPct: number;
+  batteryVoltageV: number | null;
+  batteryState: string;
+  batteryPresent: boolean | null;
+  batteryUpdatedAgeS: number | null;
   mode: string;
   connected: boolean;
 }
@@ -163,10 +167,21 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   subscribeRobotStatus(callback: (status: RobotStatus) => void): () => void {
     return this.subscribe("nav_telemetry", (message) => {
       const connected = message.connected === true || message.ok === true;
+      const batteryVoltageV = Number(message.battery_voltage_v);
+      const batteryUpdatedAgeS = Number(message.battery_updated_age_s);
       callback({
         connected,
         mode: String(message.mode ?? (connected ? "connected" : "disconnected")),
-        batteryPct: Number(message.battery_pct ?? 0)
+        batteryPct: Number(message.battery_pct ?? 0),
+        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : null,
+        batteryState: String(message.battery_state ?? ""),
+        batteryPresent:
+          message.battery_present === true
+            ? true
+            : message.battery_present === false
+              ? false
+              : null,
+        batteryUpdatedAgeS: Number.isFinite(batteryUpdatedAgeS) ? batteryUpdatedAgeS : null
       });
     });
   }

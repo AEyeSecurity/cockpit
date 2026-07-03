@@ -113,11 +113,25 @@ function formatBatteryPct(value: number | null): string {
   return `${value.toFixed(1)}%`;
 }
 
+function formatBatteryVoltage(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "Voltage unavailable";
+  return `${value.toFixed(2)} V`;
+}
+
 function batteryTone(
   batteryPct: number | null,
   connected: boolean,
-  lowBatteryActive: boolean
+  lowBatteryActive: boolean,
+  batteryState: string,
+  batteryPresent: boolean | null
 ): "ok" | "warn" | "critical" | "off" {
+  const normalizedState = String(batteryState ?? "").trim().toUpperCase();
+  if (batteryPresent === false) return "off";
+  if (normalizedState === "CRITICAL") return "critical";
+  if (normalizedState === "LOW" || normalizedState === "SUSPECT") return "warn";
+  if (normalizedState === "STALE" || normalizedState === "LINK_STALE" || normalizedState === "UNAVAILABLE") {
+    return "off";
+  }
   if (!connected || batteryPct === null || !Number.isFinite(batteryPct)) return "off";
   if (lowBatteryActive || batteryPct <= 15) return "critical";
   if (batteryPct <= 25) return "warn";
@@ -126,8 +140,19 @@ function batteryTone(
 
 function batteryLabel(
   tone: "ok" | "warn" | "critical" | "off",
-  connected: boolean
+  connected: boolean,
+  batteryState: string,
+  batteryPresent: boolean | null
 ): string {
+  const normalizedState = String(batteryState ?? "").trim().toUpperCase();
+  if (batteryPresent === false) return "Unavailable";
+  if (normalizedState === "OK") return "Normal";
+  if (normalizedState === "LOW") return "Low";
+  if (normalizedState === "CRITICAL") return "Critical";
+  if (normalizedState === "STALE") return "Stale";
+  if (normalizedState === "LINK_STALE") return "Link stale";
+  if (normalizedState === "UNAVAILABLE") return "Unavailable";
+  if (normalizedState === "SUSPECT") return "Suspect";
   if (!connected || tone === "off") return "Telemetry unavailable";
   if (tone === "critical") return "Critical";
   if (tone === "warn") return "Low";
@@ -2527,9 +2552,24 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
   const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
   const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
+  const batteryVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryVoltageV);
+  const batteryVoltageV = Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
+  const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
+  const batteryPresent = telemetrySnapshot?.robotStatus.batteryPresent ?? null;
   const batteryConnected = telemetrySnapshot?.robotStatus.connected === true;
-  const batteryStatusTone = batteryTone(batteryPct, batteryConnected, routeMission?.lowBatteryActive === true);
-  const batteryStatusLabel = batteryLabel(batteryStatusTone, batteryConnected);
+  const batteryStatusTone = batteryTone(
+    batteryPct,
+    batteryConnected,
+    routeMission?.lowBatteryActive === true,
+    batteryState,
+    batteryPresent
+  );
+  const batteryStatusLabel = batteryLabel(
+    batteryStatusTone,
+    batteryConnected,
+    batteryState,
+    batteryPresent
+  );
   const showAssistAlert = isReturnHomeAssistRequired(routeMission);
 
   useEffect(() => {
@@ -2941,6 +2981,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   </div>
                   <div className="map-battery-main">
                     <span className="map-battery-value">{formatBatteryPct(batteryPct)}</span>
+                    <span className="map-battery-subvalue">{formatBatteryVoltage(batteryVoltageV)}</span>
                   </div>
                 </div>
               </div>

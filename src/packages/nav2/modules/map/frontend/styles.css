@@ -7052,6 +7052,7 @@ input[type="range"]::-moz-range-track {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .map-html-overlay-cards-inline .map-battery-value {
@@ -7059,6 +7060,14 @@ input[type="range"]::-moz-range-track {
   font-size: 22px !important;
   line-height: 1 !important;
   font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-subvalue {
+  color: rgba(255, 255, 255, 0.72) !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
   letter-spacing: 0 !important;
 }
 

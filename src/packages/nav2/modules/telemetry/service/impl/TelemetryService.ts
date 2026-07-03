@@ -227,6 +227,10 @@ export class TelemetryService {
   private snapshot: TelemetrySnapshot = {
     robotStatus: {
       batteryPct: 0,
+      batteryVoltageV: null,
+      batteryState: "",
+      batteryPresent: null,
+      batteryUpdatedAgeS: null,
       mode: "disconnected",
       connected: false
     },
@@ -453,12 +457,31 @@ export class TelemetryService {
     const allowLegacyAlias = isLegacyLockAliasMessage(raw);
     const mode = String(payload.mode ?? this.snapshot.robotStatus.mode);
     const battery = Number(payload.battery_pct ?? payload.batteryPct ?? this.snapshot.robotStatus.batteryPct);
+    const batteryVoltageV = Number(
+      payload.battery_voltage_v ?? payload.batteryVoltageV ?? this.snapshot.robotStatus.batteryVoltageV
+    );
+    const batteryUpdatedAgeS = Number(
+      payload.battery_updated_age_s ??
+        payload.batteryUpdatedAgeS ??
+        this.snapshot.robotStatus.batteryUpdatedAgeS
+    );
     const connected = payload.connected === true || this.snapshot.robotStatus.connected;
     this.snapshot = {
       ...this.snapshot,
       robotStatus: {
         mode,
         batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
+        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : this.snapshot.robotStatus.batteryVoltageV,
+        batteryState: String(payload.battery_state ?? payload.batteryState ?? this.snapshot.robotStatus.batteryState),
+        batteryPresent:
+          payload.battery_present === true
+            ? true
+            : payload.battery_present === false
+              ? false
+              : this.snapshot.robotStatus.batteryPresent,
+        batteryUpdatedAgeS: Number.isFinite(batteryUpdatedAgeS)
+          ? batteryUpdatedAgeS
+          : this.snapshot.robotStatus.batteryUpdatedAgeS,
         connected
       },
       cmdVelSafe: String(payload.cmd_vel_safe ?? this.snapshot.cmdVelSafe),
