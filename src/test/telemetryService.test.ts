@@ -114,6 +114,10 @@ describe("TelemetryService RTK state", () => {
       battery_pct: 92.0,
       battery_voltage_v: 61.87,
       battery_state: "OK",
+      battery_mission_state: "OK",
+      battery_return_home_recommended: false,
+      battery_recovered_voltage_v: 61.95,
+      battery_loaded_voltage_v: 61.87,
       battery_present: true,
       battery_updated_age_s: 0.6
     });
@@ -122,6 +126,10 @@ describe("TelemetryService RTK state", () => {
       batteryPct: 92.0,
       batteryVoltageV: 61.87,
       batteryState: "OK",
+      batteryMissionState: "OK",
+      batteryReturnHomeRecommended: false,
+      batteryRecoveredVoltageV: 61.95,
+      batteryLoadedVoltageV: 61.87,
       batteryPresent: true,
       batteryUpdatedAgeS: 0.6,
       mode: "auto",
@@ -154,7 +162,11 @@ describe("TelemetryService RTK state", () => {
       connected: true,
       battery_pct: 75.0,
       battery_voltage_v: 60.4,
-      battery_state: "LOW"
+      battery_state: "LOW",
+      battery_mission_state: "OK",
+      battery_return_home_recommended: false,
+      battery_recovered_voltage_v: 60.55,
+      battery_loaded_voltage_v: 60.2
     });
     onNavTelemetry?.({
       op: "nav_telemetry",
@@ -166,6 +178,10 @@ describe("TelemetryService RTK state", () => {
       batteryPct: 74.0,
       batteryVoltageV: 60.4,
       batteryState: "LOW",
+      batteryMissionState: "OK",
+      batteryReturnHomeRecommended: false,
+      batteryRecoveredVoltageV: 60.55,
+      batteryLoadedVoltageV: 60.2,
       connected: true
     });
   });

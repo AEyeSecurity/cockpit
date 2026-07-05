@@ -229,6 +229,10 @@ export class TelemetryService {
       batteryPct: 0,
       batteryVoltageV: null,
       batteryState: "",
+      batteryMissionState: "",
+      batteryReturnHomeRecommended: null,
+      batteryRecoveredVoltageV: null,
+      batteryLoadedVoltageV: null,
       batteryPresent: null,
       batteryUpdatedAgeS: null,
       mode: "disconnected",
@@ -465,6 +469,16 @@ export class TelemetryService {
         payload.batteryUpdatedAgeS ??
         this.snapshot.robotStatus.batteryUpdatedAgeS
     );
+    const batteryRecoveredVoltageV = Number(
+      payload.battery_recovered_voltage_v ??
+        payload.batteryRecoveredVoltageV ??
+        this.snapshot.robotStatus.batteryRecoveredVoltageV
+    );
+    const batteryLoadedVoltageV = Number(
+      payload.battery_loaded_voltage_v ??
+        payload.batteryLoadedVoltageV ??
+        this.snapshot.robotStatus.batteryLoadedVoltageV
+    );
     const connected = payload.connected === true || this.snapshot.robotStatus.connected;
     this.snapshot = {
       ...this.snapshot,
@@ -473,6 +487,25 @@ export class TelemetryService {
         batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
         batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : this.snapshot.robotStatus.batteryVoltageV,
         batteryState: String(payload.battery_state ?? payload.batteryState ?? this.snapshot.robotStatus.batteryState),
+        batteryMissionState: String(
+          payload.battery_mission_state ?? payload.batteryMissionState ?? this.snapshot.robotStatus.batteryMissionState
+        ),
+        batteryReturnHomeRecommended:
+          payload.battery_return_home_recommended === true
+            ? true
+            : payload.battery_return_home_recommended === false
+              ? false
+              : payload.batteryReturnHomeRecommended === true
+                ? true
+                : payload.batteryReturnHomeRecommended === false
+                  ? false
+                  : this.snapshot.robotStatus.batteryReturnHomeRecommended,
+        batteryRecoveredVoltageV: Number.isFinite(batteryRecoveredVoltageV)
+          ? batteryRecoveredVoltageV
+          : this.snapshot.robotStatus.batteryRecoveredVoltageV,
+        batteryLoadedVoltageV: Number.isFinite(batteryLoadedVoltageV)
+          ? batteryLoadedVoltageV
+          : this.snapshot.robotStatus.batteryLoadedVoltageV,
         batteryPresent:
           payload.battery_present === true
             ? true
