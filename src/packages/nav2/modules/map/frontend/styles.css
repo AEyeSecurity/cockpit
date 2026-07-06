@@ -7069,6 +7069,7 @@ input[type="range"]::-moz-range-track {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22) !important;
 }
 
+.map-html-overlay-cards-inline .map-patrol-card,
 .map-html-overlay-cards-inline .map-battery-card,
 .map-html-overlay-cards-inline .map-assist-alert {
   width: 100% !important;
@@ -7085,6 +7086,100 @@ input[type="range"]::-moz-range-track {
     inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
   backdrop-filter: blur(14px) saturate(0.95) !important;
   -webkit-backdrop-filter: blur(14px) saturate(0.95) !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.map-html-overlay-cards-inline .map-patrol-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.map-html-overlay-cards-inline .map-patrol-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-title {
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+}
+
+.map-html-overlay-cards-inline .map-patrol-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail {
+  display: grid;
+  gap: 3px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail-primary {
+  color: rgba(255, 255, 255, 0.82) !important;
+  font-size: 12px !important;
+  line-height: 1.25 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail-secondary {
+  color: rgba(255, 255, 255, 0.58) !important;
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-idle .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-idle .map-patrol-detail-primary {
+  color: rgba(255, 255, 255, 0.74) !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-ready .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-ready .map-patrol-detail-primary {
+  color: #8dd7ff !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-active .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-active .map-patrol-detail-primary {
+  color: #86efac !important;
 }
 
 .map-html-overlay-cards-inline .map-battery-card {

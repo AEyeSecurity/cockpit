@@ -104,16 +104,15 @@ describe("navigation sidebar", () => {
     expect(brakeButton).not.toBeDisabled();
 
     fireEvent.click(setHomeButton as HTMLButtonElement);
+    act(() => {
+      navigationService.clearWaypointSelection();
+      navigationService.toggleWaypointSelection(1);
+    });
+
     fireEvent.click(waypointToolsButton as HTMLButtonElement);
     const reopenedSetReturnButton = screen.getByText("Set RETURN").closest("button");
     expect(reopenedSetReturnButton).not.toBeNull();
     fireEvent.click(reopenedSetReturnButton as HTMLButtonElement);
-
-    act(() => {
-      navigationService.toggleWaypointSelection(0);
-      navigationService.toggleWaypointSelection(0);
-    });
-
     fireEvent.click(waypointToolsButton as HTMLButtonElement);
 
     const updatedSetHomeButton = screen.getByText("Set HOME").closest("button");
@@ -127,9 +126,86 @@ describe("navigation sidebar", () => {
     expect(updatedSetReturnButton).not.toBeNull();
     expect(updatedClearReturnButton).not.toBeNull();
     expect(updatedBrakeButton).not.toBeNull();
-    expect(updatedSetHomeButton?.className).toContain("active");
-    expect(updatedClearHomeButton).not.toBeDisabled();
+    expect(updatedSetHomeButton?.className).not.toContain("active");
+    expect(updatedClearHomeButton).toBeDisabled();
     expect(updatedClearReturnButton).not.toBeDisabled();
-    expect(updatedBrakeButton).toBeDisabled();
+    expect(updatedBrakeButton).not.toBeDisabled();
+  });
+
+  it("blocks simple route start when a structured patrol profile is configured", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+      navigationService.queueWaypoint({ x: 30, y: 30 });
+      navigationService.toggleWaypointSelection(2);
+      navigationService.setPatrolHomeFromSelected();
+      navigationService.clearWaypointSelection();
+      navigationService.toggleWaypointSelection(0);
+      navigationService.toggleWaypointSelection(1);
+      navigationService.useQueuedWaypointsAsPatrolLoop();
+      navigationService.clearWaypointSelection();
+      navigationService.toggleWaypointSelection(1);
+      navigationService.setPatrolDepartEntryFromSelected();
+    });
+
+    const startRouteButton = screen.getByText("START ROUTE").closest("button");
+    const startPatrolButton = screen.getByText("START PATROL").closest("button");
+
+    expect(startRouteButton).not.toBeNull();
+    expect(startPatrolButton).not.toBeNull();
+    expect(startRouteButton).toBeDisabled();
+    expect(startPatrolButton).not.toBeDisabled();
+    expect(screen.getByText("Structured patrol loaded: use START PATROL")).toBeInTheDocument();
+  });
+
+  it("shows exactly which patrol requirements are missing", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+    });
+
+    expect(screen.getByText("Missing: LOOP, HOME, ENTRY")).toBeInTheDocument();
+
+    act(() => {
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+      navigationService.queueWaypoint({ x: 30, y: 30 });
+      navigationService.useQueuedWaypointsAsPatrolLoop();
+    });
+
+    expect(screen.getByText("Missing: HOME, ENTRY")).toBeInTheDocument();
+
+    act(() => {
+      navigationService.toggleWaypointSelection(2);
+      navigationService.setPatrolHomeFromSelected();
+      navigationService.clearWaypointSelection();
+    });
+
+    expect(screen.getByText("Missing: ENTRY")).toBeInTheDocument();
+
+    act(() => {
+      navigationService.toggleWaypointSelection(1);
+      navigationService.setPatrolDepartEntryFromSelected();
+    });
+
+    expect(screen.getByText("2 loop · home · entry #2")).toBeInTheDocument();
   });
 });

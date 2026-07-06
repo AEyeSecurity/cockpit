@@ -10,6 +10,7 @@ import { MapService, type DatumProfilesState, type MapWorkspaceState } from "../
 import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInfoService";
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
+import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -879,12 +880,24 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const patrolLoopCount = patrolProfile.loopWaypoints.length;
   const patrolReturnCount = patrolProfile.returnWaypoints.length;
   const patrolDepartCount = patrolProfile.departWaypoints.length;
-  const patrolHomeReady = patrolProfile.homeWaypoint !== null;
-  const patrolReady =
-    patrolLoopCount >= 2 &&
-    patrolHomeReady &&
-    patrolProfile.departEntryLoopIndex >= 0 &&
-    patrolProfile.departEntryLoopIndex < patrolLoopCount;
+  const patrolReadiness = getPatrolProfileReadiness(patrolProfile);
+  const patrolProfileConfigured = patrolReadiness.profileConfigured;
+  const patrolReady = patrolReadiness.isReady;
+  const patrolStartMeta = patrolReady
+    ? patrolReadiness.summary
+    : `Missing: ${patrolReadiness.missingRequirements.join(", ")}`;
+  const routeStartBlockedByPatrol = patrolProfileConfigured;
+  const routeStartDisabled = wps < 2 || navState.controlLocked || routeStartBlockedByPatrol;
+  const routeStartMeta = wps < 2
+    ? "Needs 2+ waypoints"
+    : routeStartBlockedByPatrol
+      ? "Structured patrol loaded: use START PATROL"
+      : "Expanded route mission";
+  const routeStartTitle = navState.controlLocked
+    ? lockReasonText
+    : routeStartBlockedByPatrol
+      ? "Structured patrol configured. Use START PATROL or clear the patrol profile."
+      : "Start a simple route mission from the queued waypoints";
   const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMission.active || routeMission.paused;
   const goalModeSelected = navState.goalMode;
@@ -1065,7 +1078,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
-            disabled={wps < 2 || navState.controlLocked}
+            disabled={routeStartDisabled}
+            title={routeStartTitle}
             onClick={async () => {
               try {
                 const started = await navService.sendRouteMission();
@@ -1075,7 +1089,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={wps < 2 ? "Needs 2+ waypoints" : "Expanded route mission"} />
+            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={routeStartMeta} />
           </button>
           <button
             type="button"
@@ -1135,11 +1149,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <ButtonFace
               icon={<NavGlyph kind="route" />}
               label="START PATROL"
-              meta={
-                patrolReady
-                  ? `${patrolLoopCount} loop · home · entry #${patrolProfile.departEntryLoopIndex + 1}`
-                  : "Need loop + HOME + entry"
-              }
+              meta={patrolStartMeta}
             />
           </button>
           <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">

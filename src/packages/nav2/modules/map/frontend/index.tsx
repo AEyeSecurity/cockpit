@@ -11,12 +11,14 @@ import { ConnectionService, type ConnectionState } from "../../navigation/servic
 import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
 import {
   NavigationService,
+  type GoalInput,
   type NavigationState,
   type PatrolMissionProfile
 } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { getBatteryPresentation } from "./batteryPresentation";
+import { getPatrolPresentation } from "./patrolPresentation";
 import { calculateProtractorAngleDeg, snapToCartesianAxis } from "./protractor";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
 import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
@@ -424,39 +426,109 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-type PatrolSegmentVisual = "return" | "depart" | null;
+type PatrolSegmentVisual = "loop" | "return" | "depart" | null;
 
-function normalizeWaypointCoord(value: number): string {
-  return Number(value).toFixed(7);
+interface PatrolWaypointDisplay {
+  segment: PatrolSegmentVisual;
+  badge: string | null;
+  previewYawDeg?: number;
 }
 
-function waypointMembershipKey(point: { x: number; y: number }): string {
-  return `${normalizeWaypointCoord(point.x)}:${normalizeWaypointCoord(point.y)}`;
+interface PreviewWaypointPoint {
+  localId: string;
+  lat: number;
+  lon: number;
+  yawDeg: number | undefined;
+  manual: boolean;
 }
 
-function buildPatrolSegmentSets(profile: PatrolMissionProfile): {
-  returnSet: Set<string>;
-  departSet: Set<string>;
-} {
-  return {
-    returnSet: new Set(profile.returnWaypoints.map((point) => waypointMembershipKey(point))),
-    departSet: new Set(profile.departWaypoints.map((point) => waypointMembershipKey(point)))
-  };
+function waypointLocalId(point: { localId?: string | null }): string {
+  return typeof point.localId === "string" ? point.localId.trim() : "";
 }
 
-function resolvePatrolSegmentVisual(
-  point: { x: number; y: number; role?: string },
-  segmentSets: { returnSet: Set<string>; departSet: Set<string> }
-): PatrolSegmentVisual {
-  if (point.role === "home") return null;
-  const key = waypointMembershipKey(point);
-  if (segmentSets.returnSet.has(key)) return "return";
-  if (segmentSets.departSet.has(key)) return "depart";
-  return null;
+function buildSegmentPreviewDisplay(
+  waypoints: GoalInput[],
+  segment: Exclude<PatrolSegmentVisual, null>,
+  prefix: "L" | "R" | "D",
+  robotPose: TelemetrySnapshot["robotPose"],
+  loopRoute: boolean,
+  tailWaypoint?: GoalInput | null
+): Map<string, PatrolWaypointDisplay> {
+  const resolved = new Map<string, PatrolWaypointDisplay>();
+  const points = waypoints
+    .map((waypoint) => {
+      const localId = waypointLocalId(waypoint);
+      const lat = Number(waypoint.x);
+      const lon = Number(waypoint.y);
+      if (!localId || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      return {
+        localId,
+        lat,
+        lon,
+        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(waypoint)
+      };
+    })
+    .filter((entry): entry is PreviewWaypointPoint => entry !== null);
+  const previewPoints = points.map((entry) => ({
+    lat: entry.lat,
+    lon: entry.lon,
+    yawDeg: entry.yawDeg,
+    manual: entry.manual
+  }));
+  if (tailWaypoint) {
+    const lat = Number(tailWaypoint.x);
+    const lon = Number(tailWaypoint.y);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      previewPoints.push({
+        lat,
+        lon,
+        yawDeg: waypointHasManualYaw(tailWaypoint) ? Number(tailWaypoint.yawDeg) : undefined,
+        manual: waypointHasManualYaw(tailWaypoint)
+      });
+    }
+  }
+  points.forEach((point, index) => {
+    resolved.set(point.localId, {
+      segment,
+      badge: `${prefix}${index + 1}`,
+      previewYawDeg: resolveWaypointPreviewYawDeg(previewPoints, index, loopRoute, robotPose)
+    });
+  });
+  return resolved;
+}
+
+function buildPatrolWaypointDisplayMap(
+  profile: PatrolMissionProfile,
+  robotPose: TelemetrySnapshot["robotPose"]
+): Map<string, PatrolWaypointDisplay> {
+  const displays = new Map<string, PatrolWaypointDisplay>();
+  const entryWaypoint =
+    profile.departEntryLoopIndex >= 0 && profile.departEntryLoopIndex < profile.loopWaypoints.length
+      ? profile.loopWaypoints[profile.departEntryLoopIndex]
+      : null;
+  [
+    buildSegmentPreviewDisplay(profile.loopWaypoints, "loop", "L", robotPose, true),
+    buildSegmentPreviewDisplay(profile.returnWaypoints, "return", "R", robotPose, false),
+    buildSegmentPreviewDisplay(profile.departWaypoints, "depart", "D", robotPose, false, entryWaypoint)
+  ].forEach((segmentMap) => {
+    segmentMap.forEach((value, key) => {
+      displays.set(key, value);
+    });
+  });
+  const homeId = profile.homeWaypoint ? waypointLocalId(profile.homeWaypoint) : "";
+  if (homeId) {
+    displays.set(homeId, {
+      segment: null,
+      badge: "H"
+    });
+  }
+  return displays;
 }
 
 function buildWaypointLabel(home: boolean, segment: PatrolSegmentVisual, action: boolean): string {
   if (home) return "HOME";
+  if (segment === "loop") return "LOOP";
   if (segment === "return") return "RETURN";
   if (segment === "depart") return "DEPART";
   if (action) return "Action WP";
@@ -464,7 +536,7 @@ function buildWaypointLabel(home: boolean, segment: PatrolSegmentVisual, action:
 }
 
 function buildWaypointIcon(
-  index: number,
+  badge: string,
   yawDeg: number,
   draft = false,
   selected = false,
@@ -483,7 +555,7 @@ function buildWaypointIcon(
     html:
       `<div class="${cls}" style="transform: rotate(${cssRotationDeg}deg);">` +
       `<div class="wp-arrow">${home ? '<span class="wp-home-glyph">H</span>' : ""}</div>` +
-      `<div class="wp-index">${home ? "H" : Number(index) + 1}</div>` +
+      `<div class="wp-index">${badge}</div>` +
       "</div>",
     iconSize: [30, 30],
     iconAnchor: [15, 15]
@@ -656,7 +728,7 @@ function LeafletMapCanvas({
     }
     layer.clearLayers();
     const marker = L.marker([draft.lat, draft.lon], {
-      icon: buildWaypointIcon(waypointCountRef.current, draft.yawDeg ?? 0, true, false, draft.dragYaw),
+      icon: buildWaypointIcon(String(waypointCountRef.current + 1), draft.yawDeg ?? 0, true, false, draft.dragYaw),
       interactive: false
     });
     marker.addTo(layer);
@@ -1457,7 +1529,7 @@ function LeafletMapCanvas({
   useEffect(() => {
     const layer = waypointLayerRef.current;
     if (!layer) return;
-    const patrolSegmentSets = buildPatrolSegmentSets(patrolMissionProfile);
+    const patrolDisplayMap = buildPatrolWaypointDisplayMap(patrolMissionProfile, robotPose);
     if (!Array.isArray(waypoints) || waypoints.length === 0) {
       if (waypointRenderKeyRef.current !== "__empty__") {
         layer.clearLayers();
@@ -1466,17 +1538,20 @@ function LeafletMapCanvas({
       return;
     }
     const points = waypoints
-      .map((waypoint, index) => ({
-        index,
-        lat: Number(waypoint.x),
-        lon: Number(waypoint.y),
-        yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
-        manual: waypointHasManualYaw(waypoint),
-        action: (waypoint.actions ?? []).length > 0,
-        home: waypoint.role === "home",
-        selected: selectedWaypointIndexes.includes(index),
-        patrolSegment: resolvePatrolSegmentVisual(waypoint, patrolSegmentSets)
-      }))
+      .map((waypoint, index) => {
+        const patrolDisplay = patrolDisplayMap.get(waypointLocalId(waypoint));
+        return {
+          index,
+          lat: Number(waypoint.x),
+          lon: Number(waypoint.y),
+          yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
+          manual: waypointHasManualYaw(waypoint),
+          action: (waypoint.actions ?? []).length > 0,
+          home: waypoint.role === "home" || patrolDisplay?.badge === "H",
+          selected: selectedWaypointIndexes.includes(index),
+          patrolDisplay
+        };
+      })
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
     const previewPoints = points.map((entry) => ({
       lat: entry.lat,
@@ -1486,7 +1561,11 @@ function LeafletMapCanvas({
     }));
     const displayPoints = points.map((entry, displayIndex) => ({
       ...entry,
-      displayYawDeg: resolveWaypointPreviewYawDeg(previewPoints, displayIndex, loopRoute, robotPose)
+      patrolSegment: entry.patrolDisplay?.segment ?? null,
+      displayBadge: entry.home ? "H" : entry.patrolDisplay?.badge ?? String(entry.index + 1),
+      displayYawDeg:
+        entry.patrolDisplay?.previewYawDeg ??
+        resolveWaypointPreviewYawDeg(previewPoints, displayIndex, loopRoute, robotPose)
     }));
     const renderKey =
       displayPoints.length === 0
@@ -1495,6 +1574,7 @@ function LeafletMapCanvas({
             .map(
               (entry) =>
                 `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}:${entry.patrolSegment ?? "-"}`
+                + `:${entry.displayBadge}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
@@ -1504,7 +1584,7 @@ function LeafletMapCanvas({
       displayPoints.forEach((entry) => {
         const marker = L.marker([entry.lat, entry.lon], {
           icon: buildWaypointIcon(
-            entry.index,
+            entry.displayBadge,
             entry.displayYawDeg,
             false,
             entry.selected,
@@ -1515,7 +1595,7 @@ function LeafletMapCanvas({
           ),
           interactive: true,
           draggable: true
-        }).bindTooltip(`${buildWaypointLabel(entry.home, entry.patrolSegment, entry.action)} ${entry.home ? "" : `#${entry.index + 1}`}`.trim(), { direction: "top" });
+        }).bindTooltip(`${buildWaypointLabel(entry.home, entry.patrolSegment, entry.action)} ${entry.displayBadge}`.trim(), { direction: "top" });
       marker.on("dragstart", () => {
         const map = mapRef.current;
         if (map?.dragging.enabled()) {
@@ -1894,7 +1974,7 @@ function CockpitMapCanvas({
     state.toolMode
   ]);
 
-  const patrolSegmentSets = buildPatrolSegmentSets(patrolMissionProfile);
+  const patrolDisplayMap = buildPatrolWaypointDisplayMap(patrolMissionProfile, robotPose);
   const routePolylinePoints: Array<{
     index: number;
     lat: number;
@@ -1904,11 +1984,14 @@ function CockpitMapCanvas({
     action: boolean;
     home: boolean;
     patrolSegment: PatrolSegmentVisual;
+    displayBadge: string;
+    patrolPreviewYawDeg?: number;
   }> = waypoints
     .flatMap((waypoint, index) => {
       const lat = Number(waypoint.x);
       const lon = Number(waypoint.y);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+      const patrolDisplay = patrolDisplayMap.get(waypointLocalId(waypoint));
       return [{
         index,
         lat,
@@ -1916,8 +1999,10 @@ function CockpitMapCanvas({
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
         manual: waypointHasManualYaw(waypoint),
         action: (waypoint.actions ?? []).length > 0,
-        home: waypoint.role === "home",
-        patrolSegment: resolvePatrolSegmentVisual(waypoint, patrolSegmentSets)
+        home: waypoint.role === "home" || patrolDisplay?.badge === "H",
+        patrolSegment: patrolDisplay?.segment ?? null,
+        displayBadge: waypoint.role === "home" || patrolDisplay?.badge === "H" ? "H" : patrolDisplay?.badge ?? String(index + 1),
+        patrolPreviewYawDeg: patrolDisplay?.previewYawDeg
       }];
     });
   const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
@@ -1928,7 +2013,9 @@ function CockpitMapCanvas({
   }));
   const displayRoutePolylinePoints = routePolylinePoints.map((entry, displayIndex) => ({
     ...entry,
-    displayYawDeg: resolveWaypointPreviewYawDeg(waypointPreviewPoints, displayIndex, loopRoute, robotPose)
+    displayYawDeg:
+      entry.patrolPreviewYawDeg ??
+      resolveWaypointPreviewYawDeg(waypointPreviewPoints, displayIndex, loopRoute, robotPose)
   }));
   const decorativeWaypoints = routePolylinePoints.length === 0
     ? [
@@ -2161,13 +2248,13 @@ function CockpitMapCanvas({
               `wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}${waypoint.home ? " home" : ""}` +
               `${waypoint.patrolSegment === "return" ? " patrol-return" : waypoint.patrolSegment === "depart" ? " patrol-depart" : ""}`
             }
-            data-index={waypoint.index + 1}
+            data-index={waypoint.displayBadge}
             style={{
               left: projected.x,
               top: projected.y,
               transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
             }}
-            title={`${buildWaypointLabel(waypoint.home, waypoint.patrolSegment, waypoint.action)} ${waypoint.home ? "" : waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+            title={`${buildWaypointLabel(waypoint.home, waypoint.patrolSegment, waypoint.action)} ${waypoint.displayBadge}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
               waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
             }`}
             disabled={!interactive}
@@ -2593,6 +2680,16 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           : "";
   const routeBadgeText =
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
+  const patrolPresentation = getPatrolPresentation(
+    navigationState?.patrolMissionProfile ?? {
+      loopWaypoints: [],
+      homeWaypoint: null,
+      returnWaypoints: [],
+      departWaypoints: [],
+      departEntryLoopIndex: -1
+    },
+    navigationState?.patrolMission ?? null
+  );
   const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
   const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
   const batteryVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryVoltageV);
@@ -3031,6 +3128,31 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                       <div className="ms-bar-fill" style={{ width: `${displayMissionProgressPct}%` }} />
                     </div>
                     <span className="ms-progress-label">{missionProgressLabel}</span>
+                  </div>
+                </div>
+                <div className={`map-patrol-card tone-${patrolPresentation.tone}`.trim()}>
+                  <div className="map-patrol-head">
+                    <div className="map-patrol-title-wrap">
+                      <span className="map-patrol-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="6" cy="17" r="1.8" />
+                          <circle cx="12" cy="7" r="1.8" />
+                          <circle cx="18" cy="13" r="1.8" />
+                          <path d="M7.5 15.8 10.5 8.4" />
+                          <path d="m13.5 8.2 3 3.6" />
+                        </svg>
+                      </span>
+                      <span className="map-patrol-title">{patrolPresentation.title}</span>
+                    </div>
+                    <span className={`map-patrol-pill tone-${patrolPresentation.tone}`.trim()}>
+                      {patrolPresentation.badgeLabel}
+                    </span>
+                  </div>
+                  <div className="map-patrol-detail">
+                    <span className="map-patrol-detail-primary">{patrolPresentation.detail}</span>
+                    {patrolPresentation.secondaryDetail ? (
+                      <span className="map-patrol-detail-secondary">{patrolPresentation.secondaryDetail}</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className={`map-battery-card tone-${batteryStatusTone}`.trim()}>

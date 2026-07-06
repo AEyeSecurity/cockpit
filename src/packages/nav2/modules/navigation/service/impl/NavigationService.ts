@@ -2,6 +2,7 @@ import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface GoalInput {
+  localId?: string;
   x: number;
   y: number;
   yawDeg?: number;
@@ -44,6 +45,27 @@ export interface PatrolMissionStateData {
   returnWaypoints: RouteMissionWaypoint[];
   departWaypoints: RouteMissionWaypoint[];
   activeChunkWaypoints: RouteMissionWaypoint[];
+}
+
+interface PatrolMissionProfileRefs {
+  homeWaypointIndex: number;
+  loopWaypointIndices: number[];
+  returnWaypointIndices: number[];
+  departWaypointIndices: number[];
+  departEntryWaypointIndex: number;
+}
+
+interface StoredRouteRecord {
+  waypoints: GoalInput[];
+  patrolMissionProfileRefs?: PatrolMissionProfileRefs;
+}
+
+interface PatrolMissionProfileWireRefs {
+  home_waypoint_index?: number;
+  loop_waypoint_indices?: number[];
+  return_waypoint_indices?: number[];
+  depart_waypoint_indices?: number[];
+  depart_entry_waypoint_index?: number;
 }
 
 export type ReturnHomePhase = "idle" | "requested" | "waiting_exit" | "active" | "completed" | "unavailable";
@@ -188,6 +210,7 @@ const MANUAL_ACKERMANN_WHEELBASE_M = 0.94;
 const MANUAL_STEERING_FALLBACK_SPEED_MPS = 0.5;
 const MANUAL_LOOP_INTERVAL_MS = 50;
 const navigationMemoryStorage = new Map<string, string>();
+let waypointLocalIdCounter = 0;
 
 export interface NavigationManualDefaults {
   linearSpeed: number;
@@ -255,6 +278,16 @@ function getStorageAdapter(): {
   };
 }
 
+function createWaypointLocalId(): string {
+  waypointLocalIdCounter += 1;
+  return `wp-${Date.now().toString(36)}-${waypointLocalIdCounter.toString(36)}`;
+}
+
+function normalizeWaypointLocalId(raw: unknown): string {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  return text || createWaypointLocalId();
+}
+
 function parseGoal(input: GoalInput): GoalInput {
   const yawRaw = input.yawDeg;
   const hasYaw = yawRaw !== undefined && yawRaw !== null;
@@ -268,7 +301,9 @@ function parseGoal(input: GoalInput): GoalInput {
   if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y) || (hasYaw && !Number.isFinite(parsed.yawDeg))) {
     throw new Error("Invalid goal input");
   }
-  const base = hasYaw ? { x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg } : { x: parsed.x, y: parsed.y };
+  const base = hasYaw
+    ? { localId: normalizeWaypointLocalId(input.localId), x: parsed.x, y: parsed.y, yawDeg: parsed.yawDeg }
+    : { localId: normalizeWaypointLocalId(input.localId), x: parsed.x, y: parsed.y };
   const withRole: GoalInput = role === "home" ? { ...base, role: "home" } : base;
   return actions.length > 0 && role !== "home" ? { ...withRole, actions } : withRole;
 }
@@ -299,25 +334,239 @@ function cloneGoal(input: GoalInput): GoalInput {
   return parseGoal(input);
 }
 
-function parseStoredWaypoints(raw: string): GoalInput[] {
-  const parsed = JSON.parse(raw) as GoalInput[];
-  if (!Array.isArray(parsed)) {
-    throw new Error("Invalid waypoint payload");
-  }
-  return parsed.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS);
+function stripGoalRole(input: GoalInput): GoalInput {
+  const cloned = cloneGoal(input);
+  const { role: _role, ...base } = cloned;
+  return base;
 }
 
-function readSavedRoutesMap(): Record<string, GoalInput[]> {
+function waypointLocalId(input: GoalInput): string {
+  return parseGoal(input).localId!;
+}
+
+function uniqueWaypointIds(waypoints: GoalInput[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  waypoints.forEach((waypoint) => {
+    const id = waypointLocalId(waypoint);
+    if (seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  });
+  return ids;
+}
+
+function sanitizeWaypointIndices(indices: unknown, max: number): number[] {
+  if (!Array.isArray(indices)) return [];
+  const sanitized = indices
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0 && value < max);
+  return Array.from(new Set(sanitized));
+}
+
+function buildPatrolMissionProfileRefs(
+  queuedWaypoints: GoalInput[],
+  profile: PatrolMissionProfile
+): PatrolMissionProfileRefs {
+  const normalizedProfile = reconcilePatrolMissionProfile(queuedWaypoints, profile);
+  const queued = queuedWaypoints.map((waypoint) => parseGoal(waypoint));
+  const queuedIds = queued.map((waypoint) => waypoint.localId!);
+  const idToIndex = new Map<string, number>(queuedIds.map((id, index) => [id, index]));
+  const homeWaypointIndex =
+    normalizedProfile.homeWaypoint ? idToIndex.get(waypointLocalId(normalizedProfile.homeWaypoint)) ?? -1 : -1;
+  const loopWaypointIndices = normalizedProfile.loopWaypoints
+    .map((waypoint) => idToIndex.get(waypointLocalId(waypoint)))
+    .filter((value): value is number => value !== undefined);
+  const returnWaypointIndices = normalizedProfile.returnWaypoints
+    .map((waypoint) => idToIndex.get(waypointLocalId(waypoint)))
+    .filter((value): value is number => value !== undefined);
+  const departWaypointIndices = normalizedProfile.departWaypoints
+    .map((waypoint) => idToIndex.get(waypointLocalId(waypoint)))
+    .filter((value): value is number => value !== undefined);
+  const departEntryWaypointIndex =
+    normalizedProfile.departEntryLoopIndex >= 0 &&
+    normalizedProfile.departEntryLoopIndex < normalizedProfile.loopWaypoints.length
+      ? idToIndex.get(waypointLocalId(normalizedProfile.loopWaypoints[normalizedProfile.departEntryLoopIndex]!)) ?? -1
+      : -1;
+  return {
+    homeWaypointIndex,
+    loopWaypointIndices,
+    returnWaypointIndices,
+    departWaypointIndices,
+    departEntryWaypointIndex
+  };
+}
+
+function patrolMissionProfileRefsToWire(refs: PatrolMissionProfileRefs): PatrolMissionProfileWireRefs {
+  return {
+    home_waypoint_index: refs.homeWaypointIndex,
+    loop_waypoint_indices: [...refs.loopWaypointIndices],
+    return_waypoint_indices: [...refs.returnWaypointIndices],
+    depart_waypoint_indices: [...refs.departWaypointIndices],
+    depart_entry_waypoint_index: refs.departEntryWaypointIndex
+  };
+}
+
+function patrolMissionProfileRefsFromUnknown(raw: unknown): PatrolMissionProfileRefs | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  return {
+    homeWaypointIndex: Number.isInteger(record.homeWaypointIndex)
+      ? Number(record.homeWaypointIndex)
+      : Number.isInteger(record.home_waypoint_index)
+        ? Number(record.home_waypoint_index)
+        : -1,
+    loopWaypointIndices: Array.isArray(record.loopWaypointIndices)
+      ? sanitizeWaypointIndices(record.loopWaypointIndices, Number.MAX_SAFE_INTEGER)
+      : Array.isArray(record.loop_waypoint_indices)
+        ? sanitizeWaypointIndices(record.loop_waypoint_indices, Number.MAX_SAFE_INTEGER)
+        : [],
+    returnWaypointIndices: Array.isArray(record.returnWaypointIndices)
+      ? sanitizeWaypointIndices(record.returnWaypointIndices, Number.MAX_SAFE_INTEGER)
+      : Array.isArray(record.return_waypoint_indices)
+        ? sanitizeWaypointIndices(record.return_waypoint_indices, Number.MAX_SAFE_INTEGER)
+        : [],
+    departWaypointIndices: Array.isArray(record.departWaypointIndices)
+      ? sanitizeWaypointIndices(record.departWaypointIndices, Number.MAX_SAFE_INTEGER)
+      : Array.isArray(record.depart_waypoint_indices)
+        ? sanitizeWaypointIndices(record.depart_waypoint_indices, Number.MAX_SAFE_INTEGER)
+        : [],
+    departEntryWaypointIndex: Number.isInteger(record.departEntryWaypointIndex)
+      ? Number(record.departEntryWaypointIndex)
+      : Number.isInteger(record.depart_entry_waypoint_index)
+        ? Number(record.depart_entry_waypoint_index)
+        : -1
+  };
+}
+
+function createPatrolMissionProfileFromRefs(
+  queuedWaypoints: GoalInput[],
+  refs?: PatrolMissionProfileRefs | null
+): PatrolMissionProfile {
+  if (!refs) {
+    return reconcilePatrolMissionProfile(queuedWaypoints, createDefaultPatrolMissionProfile());
+  }
+  const queued = queuedWaypoints.map((waypoint) => parseGoal(waypoint));
+  const max = queued.length;
+  const homeWaypointIndex = Number.isInteger(refs.homeWaypointIndex) ? refs.homeWaypointIndex : -1;
+  const returnWaypointIndices = sanitizeWaypointIndices(refs.returnWaypointIndices, max);
+  const returnIndexSet = new Set(returnWaypointIndices.filter((index) => index !== homeWaypointIndex));
+  const departWaypointIndices = sanitizeWaypointIndices(refs.departWaypointIndices, max).filter(
+    (index) => index !== homeWaypointIndex && !returnIndexSet.has(index)
+  );
+  const departIndexSet = new Set(departWaypointIndices);
+  const loopWaypointIndices = sanitizeWaypointIndices(refs.loopWaypointIndices, max).filter(
+    (index) => index !== homeWaypointIndex && !returnIndexSet.has(index) && !departIndexSet.has(index)
+  );
+  const departEntryWaypointIndex = Number.isInteger(refs.departEntryWaypointIndex)
+    ? refs.departEntryWaypointIndex
+    : -1;
+  return reconcilePatrolMissionProfile(queued, {
+    loopWaypoints: loopWaypointIndices.map((index) => stripGoalRole(queued[index]!)),
+    homeWaypoint:
+      homeWaypointIndex >= 0 && homeWaypointIndex < queued.length
+        ? { ...stripGoalRole(queued[homeWaypointIndex]!), role: "home" as const }
+        : null,
+    returnWaypoints: returnWaypointIndices.map((index) => stripGoalRole(queued[index]!)),
+    departWaypoints: departWaypointIndices.map((index) => stripGoalRole(queued[index]!)),
+    departEntryLoopIndex: loopWaypointIndices.indexOf(departEntryWaypointIndex)
+  });
+}
+
+function reconcilePatrolMissionProfile(
+  queuedWaypoints: GoalInput[],
+  profile: PatrolMissionProfile
+): PatrolMissionProfile {
+  const queueMap = new Map<string, GoalInput>();
+  queuedWaypoints.forEach((waypoint) => {
+    const parsed = parseGoal(waypoint);
+    queueMap.set(parsed.localId!, parsed);
+  });
+
+  const queueHome = queuedWaypoints
+    .map((waypoint) => parseGoal(waypoint))
+    .find((waypoint) => waypoint.role === "home") ?? null;
+  const homeId = queueHome?.localId ?? (profile.homeWaypoint ? waypointLocalId(profile.homeWaypoint) : "");
+  const homeSource = homeId ? queueMap.get(homeId) ?? queueHome : queueHome;
+  const homeWaypoint =
+    homeSource
+      ? ({ ...stripGoalRole(homeSource), role: "home" as const } satisfies GoalInput)
+      : null;
+
+  const returnIds = uniqueWaypointIds(profile.returnWaypoints).filter((id) => id !== homeId && queueMap.has(id));
+  const returnIdSet = new Set(returnIds);
+
+  const departIds = uniqueWaypointIds(profile.departWaypoints).filter(
+    (id) => id !== homeId && !returnIdSet.has(id) && queueMap.has(id)
+  );
+  const departIdSet = new Set(departIds);
+
+  const loopIds = uniqueWaypointIds(profile.loopWaypoints).filter(
+    (id) => id !== homeId && !returnIdSet.has(id) && !departIdSet.has(id) && queueMap.has(id)
+  );
+
+  const entryLoopId =
+    profile.departEntryLoopIndex >= 0 && profile.departEntryLoopIndex < profile.loopWaypoints.length
+      ? waypointLocalId(profile.loopWaypoints[profile.departEntryLoopIndex]!)
+      : "";
+  const departEntryLoopIndex = entryLoopId ? loopIds.indexOf(entryLoopId) : -1;
+
+  return {
+    loopWaypoints: loopIds.map((id) => stripGoalRole(queueMap.get(id)!)),
+    homeWaypoint,
+    returnWaypoints: returnIds.map((id) => stripGoalRole(queueMap.get(id)!)),
+    departWaypoints: departIds.map((id) => stripGoalRole(queueMap.get(id)!)),
+    departEntryLoopIndex
+  };
+}
+
+function parseStoredWaypoints(raw: string): { waypoints: GoalInput[]; patrolMissionProfile: PatrolMissionProfile } {
+  const parsed = JSON.parse(raw) as GoalInput[] | StoredRouteRecord;
+  if (Array.isArray(parsed)) {
+    const waypoints = parsed.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS);
+    return {
+      waypoints,
+      patrolMissionProfile: createPatrolMissionProfileFromRefs(waypoints)
+    };
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.waypoints)) {
+    throw new Error("Invalid waypoint payload");
+  }
+  const waypoints = parsed.waypoints.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS);
+  return {
+    waypoints,
+    patrolMissionProfile: createPatrolMissionProfileFromRefs(
+      waypoints,
+      patrolMissionProfileRefsFromUnknown(parsed.patrolMissionProfileRefs)
+    )
+  };
+}
+
+function readSavedRoutesMap(): Record<string, StoredRouteRecord> {
   const raw = getStorageAdapter().getItem(SAVED_ROUTES_STORAGE_KEY);
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const routes: Record<string, GoalInput[]> = {};
+    const routes: Record<string, StoredRouteRecord> = {};
     for (const [name, value] of Object.entries(parsed)) {
-      if (!name.trim() || !Array.isArray(value)) continue;
+      if (!name.trim()) continue;
       try {
-        routes[name] = value.map((entry) => parseGoal(entry as GoalInput)).slice(0, MAX_WAYPOINTS);
+        if (Array.isArray(value)) {
+          routes[name] = {
+            waypoints: value.map((entry) => parseGoal(entry as GoalInput)).slice(0, MAX_WAYPOINTS)
+          };
+          continue;
+        }
+        if (!value || typeof value !== "object") continue;
+        const record = value as StoredRouteRecord;
+        if (!Array.isArray(record.waypoints)) continue;
+        routes[name] = {
+          waypoints: record.waypoints.map((entry) => parseGoal(entry)).slice(0, MAX_WAYPOINTS),
+          ...(record.patrolMissionProfileRefs
+            ? { patrolMissionProfileRefs: patrolMissionProfileRefsFromUnknown(record.patrolMissionProfileRefs) }
+            : {})
+        };
       } catch {
         // Skip routes with corrupt waypoint payloads instead of failing the whole read.
       }
@@ -328,11 +577,11 @@ function readSavedRoutesMap(): Record<string, GoalInput[]> {
   }
 }
 
-function writeSavedRoutesMap(routes: Record<string, GoalInput[]>): void {
+function writeSavedRoutesMap(routes: Record<string, StoredRouteRecord>): void {
   getStorageAdapter().setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(routes));
 }
 
-function sortedRouteNames(routes: Record<string, GoalInput[]>): string[] {
+function sortedRouteNames(routes: Record<string, StoredRouteRecord>): string[] {
   return Object.keys(routes).sort((a, b) => a.localeCompare(b));
 }
 
@@ -1020,9 +1269,11 @@ export class NavigationService {
 
   queueWaypoint(input: GoalInput): void {
     const parsed = parseGoal(input);
+    const waypoints = [...this.state.waypoints, parsed].slice(-MAX_WAYPOINTS);
     this.state = {
       ...this.state,
-      waypoints: [...this.state.waypoints, parsed].slice(-MAX_WAYPOINTS),
+      waypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(waypoints, this.state.patrolMissionProfile),
       selectedWaypointIndexes: [],
       lastStatus: "Waypoint added"
     };
@@ -1033,6 +1284,7 @@ export class NavigationService {
     if (!Number.isInteger(index) || index < 0 || index >= this.state.waypoints.length) return;
     const current = this.state.waypoints[index];
     const next = parseGoal({
+      localId: current.localId,
       x,
       y,
       ...(hasExplicitYaw(current) ? { yawDeg: current.yawDeg } : {}),
@@ -1043,16 +1295,19 @@ export class NavigationService {
     this.state = {
       ...this.state,
       waypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(waypoints, this.state.patrolMissionProfile),
       lastStatus: `Waypoint ${index + 1} moved`
     };
     this.emit();
   }
 
   removeLastWaypoint(): void {
+    const waypoints = this.state.waypoints.slice(0, Math.max(0, this.state.waypoints.length - 1));
     this.state = {
       ...this.state,
-      waypoints: this.state.waypoints.slice(0, Math.max(0, this.state.waypoints.length - 1)),
-      selectedWaypointIndexes: sanitizeSelection(this.state.selectedWaypointIndexes, this.state.waypoints.length - 1),
+      waypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(waypoints, this.state.patrolMissionProfile),
+      selectedWaypointIndexes: sanitizeSelection(this.state.selectedWaypointIndexes, waypoints.length),
       lastStatus: "Waypoint removed"
     };
     this.emit();
@@ -1062,6 +1317,7 @@ export class NavigationService {
     this.state = {
       ...this.state,
       waypoints: [],
+      patrolMissionProfile: createDefaultPatrolMissionProfile(),
       selectedWaypointIndexes: [],
       lastStatus: "Waypoints cleared"
     };
@@ -1109,6 +1365,7 @@ export class NavigationService {
     this.state = {
       ...this.state,
       waypoints: nextWaypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(nextWaypoints, this.state.patrolMissionProfile),
       selectedWaypointIndexes: [],
       lastStatus: removed > 0 ? `Removed ${removed} waypoint${removed > 1 ? "s" : ""}` : this.state.lastStatus
     };
@@ -1134,9 +1391,20 @@ export class NavigationService {
       }
       return current;
     });
+    const selectedWaypoint = nextWaypoints[homeIndex];
+    const patrolMissionProfile = reconcilePatrolMissionProfile(nextWaypoints, {
+      ...this.state.patrolMissionProfile,
+      homeWaypoint: selectedWaypoint ? { ...stripGoalRole(selectedWaypoint), role: "home" } : null,
+      departEntryLoopIndex:
+        this.state.patrolMissionProfile.homeWaypoint &&
+        waypointLocalId(this.state.patrolMissionProfile.homeWaypoint) === waypointLocalId(this.state.waypoints[homeIndex]!)
+          ? -1
+          : this.state.patrolMissionProfile.departEntryLoopIndex
+    });
     this.state = {
       ...this.state,
       waypoints: nextWaypoints,
+      patrolMissionProfile,
       lastStatus: `Waypoint ${homeIndex + 1} marked as HOME`
     };
     this.emit();
@@ -1149,15 +1417,31 @@ export class NavigationService {
       throw new Error("No waypoint selected");
     }
     let changed = 0;
+    const clearedIds = new Set<string>();
     const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
       if (!selection.has(index) || waypoint.role !== "home") return waypoint;
       changed += 1;
+      clearedIds.add(waypointLocalId(waypoint));
       const { role: _role, ...base } = cloneGoal(waypoint);
       return base;
+    });
+    const patrolMissionProfile = reconcilePatrolMissionProfile(nextWaypoints, {
+      ...this.state.patrolMissionProfile,
+      homeWaypoint:
+        this.state.patrolMissionProfile.homeWaypoint &&
+        clearedIds.has(waypointLocalId(this.state.patrolMissionProfile.homeWaypoint))
+          ? null
+          : this.state.patrolMissionProfile.homeWaypoint,
+      departEntryLoopIndex:
+        this.state.patrolMissionProfile.homeWaypoint &&
+        clearedIds.has(waypointLocalId(this.state.patrolMissionProfile.homeWaypoint))
+          ? -1
+          : this.state.patrolMissionProfile.departEntryLoopIndex
     });
     this.state = {
       ...this.state,
       waypoints: nextWaypoints,
+      patrolMissionProfile,
       lastStatus: changed > 0 ? "HOME removed from selected waypoint" : this.state.lastStatus
     };
     this.emit();
@@ -1202,6 +1486,7 @@ export class NavigationService {
     this.state = {
       ...this.state,
       waypoints: nextWaypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(nextWaypoints, this.state.patrolMissionProfile),
       lastStatus: enabled
         ? `Brake hold set on ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
         : `Brake hold removed from ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
@@ -1211,7 +1496,13 @@ export class NavigationService {
   }
 
   saveWaypoints(): number {
-    getStorageAdapter().setItem(WAYPOINT_STORAGE_KEY, JSON.stringify(this.state.waypoints));
+    getStorageAdapter().setItem(
+      WAYPOINT_STORAGE_KEY,
+      JSON.stringify({
+        waypoints: this.state.waypoints,
+        patrolMissionProfileRefs: buildPatrolMissionProfileRefs(this.state.waypoints, this.state.patrolMissionProfile)
+      } satisfies StoredRouteRecord)
+    );
     this.state = {
       ...this.state,
       lastStatus: `Saved ${this.state.waypoints.length} waypoints`
@@ -1225,7 +1516,12 @@ export class NavigationService {
       throw new Error("No waypoints to save");
     }
     const waypoints = this.state.waypoints.map((entry) => goalToWireWaypoint(entry));
-    const response = await this.robotDispatcher.requestSaveWaypointsFile(waypoints);
+    const response = await this.robotDispatcher.requestSaveWaypointsFile({
+      waypoints,
+      patrol_profile: patrolMissionProfileRefsToWire(
+        buildPatrolMissionProfileRefs(this.state.waypoints, this.state.patrolMissionProfile)
+      )
+    });
     if (response.ok === false) {
       throw new Error(response.error ?? "Save waypoints failed");
     }
@@ -1251,12 +1547,13 @@ export class NavigationService {
     const loaded = parseStoredWaypoints(raw);
     this.state = {
       ...this.state,
-      waypoints: loaded,
+      waypoints: loaded.waypoints,
+      patrolMissionProfile: loaded.patrolMissionProfile,
       selectedWaypointIndexes: [],
-      lastStatus: `Loaded ${loaded.length} waypoints`
+      lastStatus: `Loaded ${loaded.waypoints.length} waypoints`
     };
     this.emit();
-    return loaded.length;
+    return loaded.waypoints.length;
   }
 
   listSavedRouteNames(): string[] {
@@ -1272,15 +1569,18 @@ export class NavigationService {
       throw new Error("No hay waypoints para guardar");
     }
     const routes = readSavedRoutesMap();
-    routes[trimmed] = this.state.waypoints.map((waypoint) => cloneGoal(waypoint));
+    routes[trimmed] = {
+      waypoints: this.state.waypoints.map((waypoint) => cloneGoal(waypoint)),
+      patrolMissionProfileRefs: buildPatrolMissionProfileRefs(this.state.waypoints, this.state.patrolMissionProfile)
+    };
     writeSavedRoutesMap(routes);
     this.state = {
       ...this.state,
       savedRouteNames: sortedRouteNames(routes),
-      lastStatus: `Ruta "${trimmed}" guardada (${routes[trimmed].length} waypoints)`
+      lastStatus: `Ruta "${trimmed}" guardada (${routes[trimmed].waypoints.length} waypoints)`
     };
     this.emit();
-    return routes[trimmed].length;
+    return routes[trimmed].waypoints.length;
   }
 
   loadNamedRoute(name: string): number {
@@ -1289,15 +1589,17 @@ export class NavigationService {
     if (!loaded) {
       throw new Error(`No existe la ruta "${name}"`);
     }
+    const waypoints = loaded.waypoints.map((waypoint) => cloneGoal(waypoint));
     this.state = {
       ...this.state,
-      waypoints: loaded.map((waypoint) => cloneGoal(waypoint)),
+      waypoints,
+      patrolMissionProfile: createPatrolMissionProfileFromRefs(waypoints, loaded.patrolMissionProfileRefs),
       selectedWaypointIndexes: [],
       savedRouteNames: sortedRouteNames(routes),
-      lastStatus: `Ruta "${name}" cargada (${loaded.length} waypoints)`
+      lastStatus: `Ruta "${name}" cargada (${waypoints.length} waypoints)`
     };
     this.emit();
-    return loaded.length;
+    return waypoints.length;
   }
 
   deleteNamedRoute(name: string): void {
@@ -1353,6 +1655,10 @@ export class NavigationService {
     this.state = {
       ...this.state,
       waypoints: loaded,
+      patrolMissionProfile: createPatrolMissionProfileFromRefs(
+        loaded,
+        patrolMissionProfileRefsFromUnknown(response.patrol_profile)
+      ),
       selectedWaypointIndexes: [],
       lastStatus: `Waypoints loaded (${loaded.length})`
     };
@@ -1589,38 +1895,43 @@ export class NavigationService {
   }
 
   setPatrolMissionProfile(profile: PatrolMissionProfile): void {
+    const nextProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+      loopWaypoints: profile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+      homeWaypoint: profile.homeWaypoint ? cloneGoal(profile.homeWaypoint) : null,
+      returnWaypoints: profile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+      departWaypoints: profile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+      departEntryLoopIndex: Number.isFinite(Number(profile.departEntryLoopIndex))
+        ? Math.trunc(Number(profile.departEntryLoopIndex))
+        : -1
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        loopWaypoints: profile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        homeWaypoint: profile.homeWaypoint ? cloneGoal(profile.homeWaypoint) : null,
-        returnWaypoints: profile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        departWaypoints: profile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        departEntryLoopIndex: Number.isFinite(Number(profile.departEntryLoopIndex))
-          ? Math.trunc(Number(profile.departEntryLoopIndex))
-          : -1
-      }
+      patrolMissionProfile: nextProfile
     };
     this.emit();
   }
 
   useQueuedWaypointsAsPatrolLoop(): number {
+    const blockedIds = new Set([
+      ...(this.state.patrolMissionProfile.homeWaypoint
+        ? [waypointLocalId(this.state.patrolMissionProfile.homeWaypoint)]
+        : []),
+      ...this.state.patrolMissionProfile.returnWaypoints.map((waypoint) => waypointLocalId(waypoint)),
+      ...this.state.patrolMissionProfile.departWaypoints.map((waypoint) => waypointLocalId(waypoint))
+    ]);
     const loopWaypoints = this.state.waypoints
-      .filter((waypoint) => waypoint.role !== "home")
-      .map((waypoint) => {
-        const cloned = cloneGoal(waypoint);
-        const { role: _role, ...base } = cloned;
-        return base;
-      });
+      .filter((waypoint) => waypoint.role !== "home" && !blockedIds.has(waypointLocalId(waypoint)))
+      .map((waypoint) => stripGoalRole(waypoint));
     if (loopWaypoints.length < 2) {
       throw new Error("Need at least 2 non-HOME waypoints to define the patrol loop");
     }
+    const patrolMissionProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+      ...this.state.patrolMissionProfile,
+      loopWaypoints
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        ...this.state.patrolMissionProfile,
-        loopWaypoints
-      },
+      patrolMissionProfile,
       lastStatus: `Patrol loop updated (${loopWaypoints.length} waypoints)`
     };
     this.emit();
@@ -1632,17 +1943,32 @@ export class NavigationService {
     if (selection.length !== 1) {
       throw new Error("Select exactly one waypoint to set patrol HOME");
     }
-    const waypoint = this.state.waypoints[selection[0]];
+    const homeIndex = selection[0];
+    const waypoint = this.state.waypoints[homeIndex];
     if (!waypoint) {
       throw new Error("Selected waypoint is unavailable");
     }
-    const { actions: _actions, ...base } = cloneGoal(waypoint);
+    const nextWaypoints = this.state.waypoints.map((entry, index) => {
+      const current = cloneGoal(entry);
+      if (index === homeIndex) {
+        const { actions: _actions, ...base } = current;
+        return { ...base, role: "home" as const };
+      }
+      if (current.role === "home") {
+        const { role: _role, ...base } = current;
+        return base;
+      }
+      return current;
+    });
+    const { actions: _actions, ...base } = cloneGoal(nextWaypoints[homeIndex]!);
+    const patrolMissionProfile = reconcilePatrolMissionProfile(nextWaypoints, {
+      ...this.state.patrolMissionProfile,
+      homeWaypoint: { ...base, role: "home" }
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        ...this.state.patrolMissionProfile,
-        homeWaypoint: { ...base, role: "home" }
-      },
+      waypoints: nextWaypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(nextWaypoints, patrolMissionProfile),
       lastStatus: `Patrol HOME set from waypoint ${selection[0] + 1}`
     };
     this.emit();
@@ -1656,19 +1982,27 @@ export class NavigationService {
     const segmentWaypoints = indexes
       .map((index) => this.state.waypoints[index])
       .filter((entry): entry is GoalInput => Boolean(entry))
-      .map((waypoint) => {
-        const cloned = cloneGoal(waypoint);
-        const { role: _role, ...base } = cloned;
-        return base;
-      });
+      .map((waypoint) => stripGoalRole(waypoint));
+    const selectedIds = new Set(segmentWaypoints.map((waypoint) => waypointLocalId(waypoint)));
+    const patrolMissionProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+      ...this.state.patrolMissionProfile,
+      ...(segment === "return"
+        ? {
+            returnWaypoints: segmentWaypoints,
+            departWaypoints: this.state.patrolMissionProfile.departWaypoints.filter(
+              (waypoint) => !selectedIds.has(waypointLocalId(waypoint))
+            )
+          }
+        : {
+            departWaypoints: segmentWaypoints,
+            returnWaypoints: this.state.patrolMissionProfile.returnWaypoints.filter(
+              (waypoint) => !selectedIds.has(waypointLocalId(waypoint))
+            )
+          })
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        ...this.state.patrolMissionProfile,
-        ...(segment === "return"
-          ? { returnWaypoints: segmentWaypoints }
-          : { departWaypoints: segmentWaypoints })
-      },
+      patrolMissionProfile,
       lastStatus: `Patrol ${segment} connector updated (${segmentWaypoints.length} waypoints)`
     };
     this.emit();
@@ -1676,12 +2010,13 @@ export class NavigationService {
   }
 
   clearPatrolSegment(segment: "return" | "depart"): void {
+    const patrolMissionProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+      ...this.state.patrolMissionProfile,
+      ...(segment === "return" ? { returnWaypoints: [] } : { departWaypoints: [] })
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        ...this.state.patrolMissionProfile,
-        ...(segment === "return" ? { returnWaypoints: [] } : { departWaypoints: [] })
-      },
+      patrolMissionProfile,
       lastStatus: `Patrol ${segment} connector cleared`
     };
     this.emit();
@@ -1696,20 +2031,30 @@ export class NavigationService {
     if (!selectedWaypoint) {
       throw new Error("Selected waypoint is unavailable");
     }
-    const loopIndex = this.state.patrolMissionProfile.loopWaypoints.findIndex((waypoint) => {
-      const sameLat = Math.abs(waypoint.x - selectedWaypoint.x) <= 1.0e-9;
-      const sameLon = Math.abs(waypoint.y - selectedWaypoint.y) <= 1.0e-9;
-      return sameLat && sameLon;
-    });
+    if (selectedWaypoint.role === "home") {
+      throw new Error("HOME waypoint cannot be the patrol entry");
+    }
+    const selectedId = waypointLocalId(selectedWaypoint);
+    if (
+      this.state.patrolMissionProfile.returnWaypoints.some((waypoint) => waypointLocalId(waypoint) === selectedId) ||
+      this.state.patrolMissionProfile.departWaypoints.some((waypoint) => waypointLocalId(waypoint) === selectedId)
+    ) {
+      throw new Error("Connector waypoint cannot be the patrol entry");
+    }
+    const reconciledProfile = reconcilePatrolMissionProfile(this.state.waypoints, this.state.patrolMissionProfile);
+    const loopIndex = reconciledProfile.loopWaypoints.findIndex(
+      (waypoint) => waypointLocalId(waypoint) === selectedId
+    );
     if (loopIndex < 0) {
       throw new Error("Selected waypoint is not part of the current patrol loop");
     }
+    const patrolMissionProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+      ...reconciledProfile,
+      departEntryLoopIndex: loopIndex
+    });
     this.state = {
       ...this.state,
-      patrolMissionProfile: {
-        ...this.state.patrolMissionProfile,
-        departEntryLoopIndex: loopIndex
-      },
+      patrolMissionProfile,
       lastStatus: `Patrol depart entry set to loop waypoint ${loopIndex + 1}`
     };
     this.emit();
@@ -1740,14 +2085,18 @@ export class NavigationService {
     if (!profile.homeWaypoint) {
       throw new Error("Patrol HOME waypoint is missing");
     }
+    const reconciledProfile = reconcilePatrolMissionProfile(this.state.waypoints, profile);
+    if (!reconciledProfile.homeWaypoint) {
+      throw new Error("Patrol HOME waypoint is missing");
+    }
 
     const payload: Record<string, unknown> = {
       patrol_mission: {
-        loop_waypoints: profile.loopWaypoints.map((entry) => goalToWireWaypoint(entry)),
-        home_waypoint: goalToWireWaypoint(profile.homeWaypoint),
-        return_waypoints: profile.returnWaypoints.map((entry) => goalToWireWaypoint(entry)),
-        depart_waypoints: profile.departWaypoints.map((entry) => goalToWireWaypoint(entry)),
-        depart_entry_loop_index: profile.departEntryLoopIndex
+        loop_waypoints: reconciledProfile.loopWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        home_waypoint: goalToWireWaypoint(reconciledProfile.homeWaypoint),
+        return_waypoints: reconciledProfile.returnWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        depart_waypoints: reconciledProfile.departWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        depart_entry_loop_index: reconciledProfile.departEntryLoopIndex
       }
     };
     if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
@@ -1758,10 +2107,15 @@ export class NavigationService {
     if (response.ok === false) {
       throw new Error(String(response.error ?? "Patrol mission dispatch failed"));
     }
-    const inputCount = Number(response.loop_input_waypoint_count ?? profile.loopWaypoints.length) || profile.loopWaypoints.length;
-    const expandedCount = Number(response.loop_expanded_waypoint_count ?? profile.loopWaypoints.length) || profile.loopWaypoints.length;
+    const inputCount =
+      Number(response.loop_input_waypoint_count ?? reconciledProfile.loopWaypoints.length) ||
+      reconciledProfile.loopWaypoints.length;
+    const expandedCount =
+      Number(response.loop_expanded_waypoint_count ?? reconciledProfile.loopWaypoints.length) ||
+      reconciledProfile.loopWaypoints.length;
     this.state = {
       ...this.state,
+      patrolMissionProfile: reconciledProfile,
       lastStatus: `Patrol mission sent (${inputCount} -> ${expandedCount})`
     };
     this.emit();
