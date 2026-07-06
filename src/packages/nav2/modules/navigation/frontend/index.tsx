@@ -11,6 +11,7 @@ import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInf
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
+import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../routeMissionActivity";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -139,12 +140,8 @@ function formatControlLockReason(reason: string): string {
   return labels[normalized] ?? `Robot bloqueado: ${normalized}`;
 }
 
-function cleanRouteStatus(status: string): string {
-  return status.replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
-}
-
 function formatRouteStatus(status: string): string {
-  const normalized = cleanRouteStatus(status);
+  const normalized = normalizeRouteMissionStatus(status);
   if (!normalized || normalized === "idle") return "Idle";
   if (normalized === "route starting") return "Starting route";
   if (normalized.startsWith("route active")) return "Following route";
@@ -155,17 +152,21 @@ function formatRouteStatus(status: string): string {
   return status.trim();
 }
 
-function routeTone(routeMission: NavigationState["routeMission"]): "active" | "paused" | "done" | "error" | "idle" {
+function routeTone(
+  routeMission: NavigationState["routeMission"],
+  goalActive = false
+): "active" | "paused" | "done" | "error" | "idle" {
+  const activity = getRouteMissionActivityState(routeMission, goalActive);
   if (routeMission.returnHomeActive) return "active";
   if (routeMission.returnHomeRequested) return "paused";
   if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
   if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
-  const status = cleanRouteStatus(routeMission.status);
+  const status = normalizeRouteMissionStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
   if (status.includes("completed")) return "done";
   if (status.includes("cancelled")) return "idle";
-  if (routeMission.active || status.includes("active") || status.includes("starting")) return "active";
+  if (activity.running || status.includes("active") || status.includes("starting")) return "active";
   return "idle";
 }
 
@@ -199,9 +200,10 @@ function buildNavigationStatus(
   routeMetaText: string;
 } {
   const routeMission = state.routeMission;
-  const tone = routeTone(routeMission);
+  const activity = getRouteMissionActivityState(routeMission, telemetry?.goalActive === true);
+  const tone = routeTone(routeMission, telemetry?.goalActive === true);
   const expandedCount = Math.max(0, Math.round(routeMission.expandedWaypointCount));
-  const status = cleanRouteStatus(routeMission.status);
+  const status = normalizeRouteMissionStatus(routeMission.status);
   const startIndex = Math.max(0, Math.round(routeMission.currentStartIndex));
   const routeProgressCount =
     expandedCount > 0
@@ -210,8 +212,7 @@ function buildNavigationStatus(
         : Math.min(expandedCount, startIndex)
       : 0;
   const progressPct = expandedCount > 0 ? Math.min(100, Math.max(0, (routeProgressCount / expandedCount) * 100)) : 0;
-  const hasRouteHistory =
-    expandedCount > 0 || routeMission.inputWaypointCount > 0 || cleanRouteStatus(routeMission.status) !== "idle";
+  const hasRouteHistory = activity.hasHistory;
   const routeMetaText =
     expandedCount > 0
       ? `${routeProgressCount}/${expandedCount} route points${routeMission.loop ? " · loop" : ""}`
@@ -275,7 +276,7 @@ function buildNavigationStatus(
 
   if (tone !== "idle" || hasRouteHistory) {
     return {
-      title: tone === "paused" ? "Route paused" : formatRouteStatus(routeMission.status),
+      title: tone === "paused" ? "Route paused" : activity.running && tone === "active" ? "Following route" : formatRouteStatus(routeMission.status),
       detail: routeMission.loop ? "Mission loop enabled" : tone === "done" ? "Final brake expected" : "Route mission",
       tone,
       progressPct,
@@ -898,8 +899,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     : routeStartBlockedByPatrol
       ? "Structured patrol configured. Use START PATROL or clear the patrol profile."
       : "Start a simple route mission from the queued waypoints";
-  const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
-  const routeMissionRunning = routeMission.active || routeMission.paused;
+  const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
+  const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
+  const routeMissionRunning = routeMissionActivity.running;
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(

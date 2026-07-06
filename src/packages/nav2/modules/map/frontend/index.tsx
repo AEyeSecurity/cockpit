@@ -15,6 +15,7 @@ import {
   type NavigationState,
   type PatrolMissionProfile
 } from "../../navigation/service/impl/NavigationService";
+import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../../navigation/routeMissionActivity";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { getBatteryPresentation } from "./batteryPresentation";
@@ -109,10 +110,6 @@ function isNavigationGoalSucceeded(snapshot: TelemetrySnapshot | null): boolean 
   if (!snapshot) return false;
   const resultText = String(snapshot.navResultText ?? "").trim().toLowerCase();
   return Number(snapshot.navResultStatus) === NAV_GOAL_STATUS_SUCCEEDED || resultText === "succeeded" || resultText.includes("succeeded");
-}
-
-function normalizeRouteMissionStatus(status: string): string {
-  return String(status ?? "").replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
 }
 
 function formatBatteryPct(value: number | null): string {
@@ -2567,8 +2564,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const mapInteractive = mainIsMap;
   const mapToolsEnabled = mainIsMap;
   const routeMission = navigationState?.routeMission ?? null;
+  const routeMissionActivity = routeMission
+    ? getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true)
+    : null;
   const routePointCount = Math.max(0, routeMission?.expandedWaypointCount ?? 0);
-  const routeStatusText = routeMission?.status?.toLowerCase() ?? "";
+  const routeStatusText = normalizeRouteMissionStatus(routeMission?.status ?? "");
   const routeComplete = routePointCount > 0 && (routeStatusText.includes("complete") || routeStatusText.includes("done") || routeStatusText.includes("succeeded"));
   const routeCompletedCount =
     routePointCount > 0
@@ -2642,7 +2642,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     blockedState === "BLOCKED_WAITING" ? "Route blocked" :
     routeComplete ? "Route complete" :
     routeMission?.paused ? "Route paused" :
-    routeMission?.active ? "Following route" :
+    routeMissionActivity?.running ? "Following route" :
     navigationState?.manualMode ? "Manual control" :
     goalActive ? "Goal active" :
     navigationState?.goalMode ? "Goal mode" :
@@ -2675,7 +2675,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       ? "error"
       : blockedState || routeMission?.paused || navigationState?.manualMode
         ? "warn"
-        : routeMission?.active || routeComplete || goalActive || navigationState?.goalMode
+        : routeMissionActivity?.activeVisual || routeComplete || goalActive || navigationState?.goalMode
           ? "active"
           : "";
   const routeBadgeText =

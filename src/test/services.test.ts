@@ -763,6 +763,66 @@ describe("services", () => {
     });
   });
 
+  it("preserves active route mission state across transient idle telemetry snapshots", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      goal_active: true,
+      route_mission: {
+        active: true,
+        paused: false,
+        loop: true,
+        status: "route active (1->4)",
+        input_waypoint_count: 3,
+        expanded_waypoint_count: 7,
+        active_chunk_size: 4,
+        mission_waypoints: [{ lat: 1, lon: 2, yaw_deg: 0 }]
+      }
+    });
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      goal_active: true,
+      route_mission: {
+        active: false,
+        paused: false,
+        loop: false,
+        status: "idle",
+        input_waypoint_count: 0,
+        expanded_waypoint_count: 0,
+        active_chunk_size: 0,
+        mission_waypoints: [],
+        active_chunk_waypoints: []
+      }
+    });
+
+    expect(service.getState().routeMission).toMatchObject({
+      active: true,
+      loop: true,
+      status: "route active (1->4)",
+      expandedWaypointCount: 7,
+      activeChunkSize: 4
+    });
+  });
+
   it("infers return-home phase from legacy route status payloads", () => {
     let onState: ((message: Record<string, unknown>) => void) | undefined;
     const dispatcher = {

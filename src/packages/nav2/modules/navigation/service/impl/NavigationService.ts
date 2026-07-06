@@ -1,5 +1,6 @@
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
+import { shouldPreserveRouteMissionSnapshot } from "../../routeMissionActivity";
 
 export interface GoalInput {
   localId?: string;
@@ -624,6 +625,14 @@ function extractMessageText(message: Record<string, unknown>): string {
   const payload = asRecord(message.payload);
   const nested = payload && typeof payload.message === "string" ? payload.message.trim() : "";
   return nested || "";
+}
+
+function extractGoalActiveHint(message: Record<string, unknown>): boolean | undefined {
+  for (const candidate of messageCandidates(message)) {
+    if (candidate.goal_active === true) return true;
+    if (candidate.goal_active === false) return false;
+  }
+  return undefined;
 }
 
 function normalizeRecordingError(response: Nav2IncomingMessage, fallback: string): string {
@@ -2662,10 +2671,15 @@ export class NavigationService {
   private applyRouteMissionPayload(message: Record<string, unknown>): void {
     const routeMission = parseRouteMissionState(message);
     if (!routeMission) return;
-    const routeStatus = routeMission.status.trim();
+    const goalActiveHint = extractGoalActiveHint(message);
+    const nextRouteMission = shouldPreserveRouteMissionSnapshot(this.state.routeMission, routeMission, goalActiveHint)
+      ? this.state.routeMission
+      : routeMission;
+    const routeStatus = nextRouteMission.status.trim();
+    if (nextRouteMission === this.state.routeMission && routeStatus.length === 0) return;
     this.state = {
       ...this.state,
-      routeMission,
+      routeMission: nextRouteMission,
       lastStatus: routeStatus.length > 0 ? routeStatus : this.state.lastStatus
     };
     this.emit();
