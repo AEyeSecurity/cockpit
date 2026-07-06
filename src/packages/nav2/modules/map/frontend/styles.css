@@ -7052,6 +7052,7 @@ input[type="range"]::-moz-range-track {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .map-html-overlay-cards-inline .map-battery-value {
@@ -7062,18 +7063,50 @@ input[type="range"]::-moz-range-track {
   letter-spacing: 0 !important;
 }
 
+.map-html-overlay-cards-inline .map-battery-subvalue {
+  color: rgba(255, 255, 255, 0.72) !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-detail {
+  display: grid;
+  gap: 3px;
+}
+
+.map-html-overlay-cards-inline .map-battery-detail-primary {
+  color: rgba(255, 255, 255, 0.82) !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-battery-detail-secondary {
+  color: rgba(255, 255, 255, 0.58) !important;
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+}
+
 .map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-value,
-.map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-pill {
+.map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-pill,
+.map-html-overlay-cards-inline .map-battery-card.tone-ok .map-battery-detail-primary {
   color: #86efac !important;
 }
 
 .map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-value,
-.map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-pill {
+.map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-pill,
+.map-html-overlay-cards-inline .map-battery-card.tone-warn .map-battery-detail-primary {
   color: #fbbf24 !important;
 }
 
 .map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-value,
-.map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-pill {
+.map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-pill,
+.map-html-overlay-cards-inline .map-battery-card.tone-critical .map-battery-detail-primary {
   color: #f87171 !important;
 }
 

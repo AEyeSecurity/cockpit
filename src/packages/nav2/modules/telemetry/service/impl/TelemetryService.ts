@@ -227,6 +227,14 @@ export class TelemetryService {
   private snapshot: TelemetrySnapshot = {
     robotStatus: {
       batteryPct: 0,
+      batteryVoltageV: null,
+      batteryState: "",
+      batteryMissionState: "",
+      batteryReturnHomeRecommended: null,
+      batteryRecoveredVoltageV: null,
+      batteryLoadedVoltageV: null,
+      batteryPresent: null,
+      batteryUpdatedAgeS: null,
       mode: "disconnected",
       connected: false
     },
@@ -453,12 +461,60 @@ export class TelemetryService {
     const allowLegacyAlias = isLegacyLockAliasMessage(raw);
     const mode = String(payload.mode ?? this.snapshot.robotStatus.mode);
     const battery = Number(payload.battery_pct ?? payload.batteryPct ?? this.snapshot.robotStatus.batteryPct);
+    const batteryVoltageV = Number(
+      payload.battery_voltage_v ?? payload.batteryVoltageV ?? this.snapshot.robotStatus.batteryVoltageV
+    );
+    const batteryUpdatedAgeS = Number(
+      payload.battery_updated_age_s ??
+        payload.batteryUpdatedAgeS ??
+        this.snapshot.robotStatus.batteryUpdatedAgeS
+    );
+    const batteryRecoveredVoltageV = Number(
+      payload.battery_recovered_voltage_v ??
+        payload.batteryRecoveredVoltageV ??
+        this.snapshot.robotStatus.batteryRecoveredVoltageV
+    );
+    const batteryLoadedVoltageV = Number(
+      payload.battery_loaded_voltage_v ??
+        payload.batteryLoadedVoltageV ??
+        this.snapshot.robotStatus.batteryLoadedVoltageV
+    );
     const connected = payload.connected === true || this.snapshot.robotStatus.connected;
     this.snapshot = {
       ...this.snapshot,
       robotStatus: {
         mode,
         batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
+        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : this.snapshot.robotStatus.batteryVoltageV,
+        batteryState: String(payload.battery_state ?? payload.batteryState ?? this.snapshot.robotStatus.batteryState),
+        batteryMissionState: String(
+          payload.battery_mission_state ?? payload.batteryMissionState ?? this.snapshot.robotStatus.batteryMissionState
+        ),
+        batteryReturnHomeRecommended:
+          payload.battery_return_home_recommended === true
+            ? true
+            : payload.battery_return_home_recommended === false
+              ? false
+              : payload.batteryReturnHomeRecommended === true
+                ? true
+                : payload.batteryReturnHomeRecommended === false
+                  ? false
+                  : this.snapshot.robotStatus.batteryReturnHomeRecommended,
+        batteryRecoveredVoltageV: Number.isFinite(batteryRecoveredVoltageV)
+          ? batteryRecoveredVoltageV
+          : this.snapshot.robotStatus.batteryRecoveredVoltageV,
+        batteryLoadedVoltageV: Number.isFinite(batteryLoadedVoltageV)
+          ? batteryLoadedVoltageV
+          : this.snapshot.robotStatus.batteryLoadedVoltageV,
+        batteryPresent:
+          payload.battery_present === true
+            ? true
+            : payload.battery_present === false
+              ? false
+              : this.snapshot.robotStatus.batteryPresent,
+        batteryUpdatedAgeS: Number.isFinite(batteryUpdatedAgeS)
+          ? batteryUpdatedAgeS
+          : this.snapshot.robotStatus.batteryUpdatedAgeS,
         connected
       },
       cmdVelSafe: String(payload.cmd_vel_safe ?? this.snapshot.cmdVelSafe),

@@ -86,4 +86,103 @@ describe("TelemetryService RTK state", () => {
       ]
     });
   });
+
+  it("keeps battery percentage, voltage and state synchronized from nav telemetry", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      subscribeRobotStatus: vi.fn(() => () => undefined),
+      subscribeState: vi.fn(() => () => undefined),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      }),
+      subscribeNavEvent: vi.fn(() => () => undefined),
+      subscribeNavAlerts: vi.fn(() => () => undefined),
+      subscribeRobotPose: vi.fn(() => () => undefined),
+      subscribeAck: vi.fn(() => () => undefined),
+      subscribeRtkSourceState: vi.fn(() => () => undefined)
+    };
+    const eventBus = {
+      on: vi.fn(() => () => undefined)
+    };
+    const service = new TelemetryService(dispatcher as never, eventBus as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      connected: true,
+      mode: "auto",
+      battery_pct: 92.0,
+      battery_voltage_v: 61.87,
+      battery_state: "OK",
+      battery_mission_state: "OK",
+      battery_return_home_recommended: false,
+      battery_recovered_voltage_v: 61.95,
+      battery_loaded_voltage_v: 61.87,
+      battery_present: true,
+      battery_updated_age_s: 0.6
+    });
+
+    expect(service.getSnapshot().robotStatus).toMatchObject({
+      batteryPct: 92.0,
+      batteryVoltageV: 61.87,
+      batteryState: "OK",
+      batteryMissionState: "OK",
+      batteryReturnHomeRecommended: false,
+      batteryRecoveredVoltageV: 61.95,
+      batteryLoadedVoltageV: 61.87,
+      batteryPresent: true,
+      batteryUpdatedAgeS: 0.6,
+      mode: "auto",
+      connected: true
+    });
+  });
+
+  it("preserves battery fallback values when extended fields are missing", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      subscribeRobotStatus: vi.fn(() => () => undefined),
+      subscribeState: vi.fn(() => () => undefined),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      }),
+      subscribeNavEvent: vi.fn(() => () => undefined),
+      subscribeNavAlerts: vi.fn(() => () => undefined),
+      subscribeRobotPose: vi.fn(() => () => undefined),
+      subscribeAck: vi.fn(() => () => undefined),
+      subscribeRtkSourceState: vi.fn(() => () => undefined)
+    };
+    const eventBus = {
+      on: vi.fn(() => () => undefined)
+    };
+    const service = new TelemetryService(dispatcher as never, eventBus as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      connected: true,
+      battery_pct: 75.0,
+      battery_voltage_v: 60.4,
+      battery_state: "LOW",
+      battery_mission_state: "OK",
+      battery_return_home_recommended: false,
+      battery_recovered_voltage_v: 60.55,
+      battery_loaded_voltage_v: 60.2
+    });
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      connected: true,
+      battery_pct: 74.0
+    });
+
+    expect(service.getSnapshot().robotStatus).toMatchObject({
+      batteryPct: 74.0,
+      batteryVoltageV: 60.4,
+      batteryState: "LOW",
+      batteryMissionState: "OK",
+      batteryReturnHomeRecommended: false,
+      batteryRecoveredVoltageV: 60.55,
+      batteryLoadedVoltageV: 60.2,
+      connected: true
+    });
+  });
 });

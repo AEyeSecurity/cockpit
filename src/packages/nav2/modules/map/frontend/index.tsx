@@ -12,6 +12,7 @@ import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspac
 import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
+import { getBatteryPresentation } from "./batteryPresentation";
 import { calculateProtractorAngleDeg, snapToCartesianAxis } from "./protractor";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
 import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
@@ -113,25 +114,9 @@ function formatBatteryPct(value: number | null): string {
   return `${value.toFixed(1)}%`;
 }
 
-function batteryTone(
-  batteryPct: number | null,
-  connected: boolean,
-  lowBatteryActive: boolean
-): "ok" | "warn" | "critical" | "off" {
-  if (!connected || batteryPct === null || !Number.isFinite(batteryPct)) return "off";
-  if (lowBatteryActive || batteryPct <= 15) return "critical";
-  if (batteryPct <= 25) return "warn";
-  return "ok";
-}
-
-function batteryLabel(
-  tone: "ok" | "warn" | "critical" | "off",
-  connected: boolean
-): string {
-  if (!connected || tone === "off") return "Telemetry unavailable";
-  if (tone === "critical") return "Critical";
-  if (tone === "warn") return "Low";
-  return "Normal";
+function formatBatteryVoltage(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "Voltage unavailable";
+  return `${value.toFixed(2)} V`;
 }
 
 function isReturnHomeAssistRequired(
@@ -2527,9 +2512,30 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     routePointCount > 0 ? `${missionCompletedCount}/${routePointCount}` : `${navigationState?.selectedWaypointIndexes.length ?? 0} selected`;
   const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
   const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
+  const batteryVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryVoltageV);
+  const batteryVoltageV = Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
+  const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
+  const batteryMissionState = String(telemetrySnapshot?.robotStatus.batteryMissionState ?? "");
+  const batteryReturnHomeRecommended = telemetrySnapshot?.robotStatus.batteryReturnHomeRecommended ?? null;
+  const batteryRecoveredVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryRecoveredVoltageV);
+  const batteryRecoveredVoltageV = Number.isFinite(batteryRecoveredVoltageRaw) ? batteryRecoveredVoltageRaw : null;
+  const batteryLoadedVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryLoadedVoltageV);
+  const batteryLoadedVoltageV = Number.isFinite(batteryLoadedVoltageRaw) ? batteryLoadedVoltageRaw : null;
+  const batteryPresent = telemetrySnapshot?.robotStatus.batteryPresent ?? null;
   const batteryConnected = telemetrySnapshot?.robotStatus.connected === true;
-  const batteryStatusTone = batteryTone(batteryPct, batteryConnected, routeMission?.lowBatteryActive === true);
-  const batteryStatusLabel = batteryLabel(batteryStatusTone, batteryConnected);
+  const batteryPresentation = getBatteryPresentation({
+    batteryPct,
+    connected: batteryConnected,
+    lowBatteryActive: routeMission?.lowBatteryActive === true,
+    batteryState,
+    batteryMissionState,
+    batteryReturnHomeRecommended,
+    batteryPresent,
+    batteryRecoveredVoltageV,
+    batteryLoadedVoltageV
+  });
+  const batteryStatusTone = batteryPresentation.tone;
+  const batteryStatusLabel = batteryPresentation.badgeLabel;
   const showAssistAlert = isReturnHomeAssistRequired(routeMission);
 
   useEffect(() => {
@@ -2941,6 +2947,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   </div>
                   <div className="map-battery-main">
                     <span className="map-battery-value">{formatBatteryPct(batteryPct)}</span>
+                    <span className="map-battery-subvalue">{formatBatteryVoltage(batteryVoltageV)}</span>
+                  </div>
+                  <div className="map-battery-detail">
+                    <span className="map-battery-detail-primary">{batteryPresentation.detail}</span>
+                    {batteryPresentation.contextualVoltageText ? (
+                      <span className="map-battery-detail-secondary">{batteryPresentation.contextualVoltageText}</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
