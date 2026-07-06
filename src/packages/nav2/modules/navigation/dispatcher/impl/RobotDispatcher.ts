@@ -28,12 +28,24 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_route_ll", goal, { timeoutMs: 7000 });
   }
 
+  async requestPatrolMission(goal: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("set_patrol_ll", goal, { timeoutMs: 7000 });
+  }
+
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_goal", {}, { timeoutMs: 5000 });
   }
 
   async requestCancelRouteMission(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_route", {}, { timeoutMs: 5000 });
+  }
+
+  async requestCancelPatrolMission(): Promise<Nav2IncomingMessage> {
+    return this.request("cancel_patrol", {}, { timeoutMs: 5000 });
+  }
+
+  async requestReturnHome(): Promise<Nav2IncomingMessage> {
+    return this.request("request_return_home", {}, { timeoutMs: 5000 });
   }
 
   async requestManualMode(enabled: boolean): Promise<Nav2IncomingMessage> {

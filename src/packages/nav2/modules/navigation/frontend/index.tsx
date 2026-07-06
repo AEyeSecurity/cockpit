@@ -361,6 +361,7 @@ type NavGlyphKind =
   | "snapshot"
   | "gpsFix"
   | "pin"
+  | "home"
   | "refresh";
 
 function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
@@ -508,6 +509,14 @@ function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
         <svg {...baseProps}>
           <path d="M12 21s6-5.3 6-10a6 6 0 1 0-12 0c0 4.7 6 10 6 10z" />
           <circle cx="12" cy="11" r="2.2" />
+        </svg>
+      );
+    case "home":
+      return (
+        <svg {...baseProps}>
+          <path d="M3.5 11 12 4l8.5 7" />
+          <path d="M6.5 10.5V20h11v-9.5" />
+          <path d="M10 20v-5h4v5" />
         </svg>
       );
     case "refresh":
@@ -865,6 +874,17 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const programmedWaypointCount = navState.waypoints.filter((waypoint) => (waypoint.actions ?? []).length > 0).length;
   const lockReasonText = formatControlLockReason(navState.controlLockReason);
   const routeMission = navState.routeMission;
+  const patrolMission = navState.patrolMission;
+  const patrolProfile = navState.patrolMissionProfile;
+  const patrolLoopCount = patrolProfile.loopWaypoints.length;
+  const patrolReturnCount = patrolProfile.returnWaypoints.length;
+  const patrolDepartCount = patrolProfile.departWaypoints.length;
+  const patrolHomeReady = patrolProfile.homeWaypoint !== null;
+  const patrolReady =
+    patrolLoopCount >= 2 &&
+    patrolHomeReady &&
+    patrolProfile.departEntryLoopIndex >= 0 &&
+    patrolProfile.departEntryLoopIndex < patrolLoopCount;
   const missionActive = routeMission.active || routeMission.paused || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMission.active || routeMission.paused;
   const goalModeSelected = navState.goalMode;
@@ -1077,6 +1097,96 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL" meta="Stop active navigation" />
           </button>
+          <button
+            type="button"
+            className="ncb-wide sec-btn"
+            disabled={navState.controlLocked || !(patrolMission.active || patrolMission.phase === "return_pending" || patrolMission.phase === "loop_main")}
+            title={navState.controlLocked ? lockReasonText : "Solicitar retorno estructurado a HOME"}
+            onClick={async () => {
+              try {
+                await navService.requestReturnHome();
+                emitInfo("Return HOME requested");
+              } catch (error) {
+                emitError(`Return HOME failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace icon={<NavGlyph kind="home" />} label="RETURN HOME" meta={patrolMission.phase || "Patrol only"} />
+          </button>
+        </div>
+        <div className="nav-route-subsection nav-route-execution">
+          <div className="nav-route-subhead">
+            <span>Patrol Mission</span>
+            <small>{patrolMission.active ? patrolMission.phase : patrolReady ? "Ready" : "Setup needed"}</small>
+          </div>
+          <button
+            type="button"
+            className={joinClassNames("ncb-wide send-btn", patrolMission.active && "active")}
+            disabled={!patrolReady || navState.controlLocked}
+            onClick={async () => {
+              try {
+                const started = await navService.sendPatrolMission();
+                emitInfo(`Patrol mission started (${started.inputCount} loop wps, ${started.expandedCount} pts)`);
+              } catch (error) {
+                emitError(`Patrol mission failed: ${String(error)}`);
+              }
+            }}
+          >
+            <ButtonFace
+              icon={<NavGlyph kind="route" />}
+              label="START PATROL"
+              meta={
+                patrolReady
+                  ? `${patrolLoopCount} loop · home · entry #${patrolProfile.departEntryLoopIndex + 1}`
+                  : "Need loop + HOME + entry"
+              }
+            />
+          </button>
+          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={wps < 2}
+              title="Usar los waypoints en cola como loop principal"
+              onClick={() => {
+                try {
+                  const count = navService.useQueuedWaypointsAsPatrolLoop();
+                  emitInfo(`Patrol loop updated (${count} waypoints)`);
+                } catch (error) {
+                  emitError(`Patrol loop failed: ${String(error)}`);
+                }
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="route" />} label="USE LOOP" meta={`${wps} queued`} compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={selectedCount !== 1}
+              title="Usar el waypoint seleccionado como HOME de la patrulla"
+              onClick={() => {
+                try {
+                  navService.setPatrolHomeFromSelected();
+                  emitInfo("Patrol HOME updated");
+                } catch (error) {
+                  emitError(`Patrol HOME failed: ${String(error)}`);
+                }
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="home" />} label="SET HOME" meta={selectedCount === 1 ? "Selected" : "Pick 1"} compact />
+            </button>
+            <button
+              type="button"
+              className="ncb danger-btn"
+              title="Limpiar el perfil de misión de patrulla"
+              onClick={() => {
+                navService.clearPatrolMissionProfile();
+                emitInfo("Patrol mission profile cleared");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="Patrol profile" compact />
+            </button>
+          </div>
         </div>
         <div className="nav-route-subsection nav-route-setup">
           <div className="nav-route-subhead">
@@ -1229,6 +1339,120 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                   >
                     <span>Clear HOME</span>
                     <small>Selected HOME</small>
+                  </button>
+                </div>
+                <div className="nav-route-action-group">
+                  <div className="nav-route-action-group-label">PATROL SEGMENTS</div>
+                  <button
+                    type="button"
+                    className={joinClassNames("nav-route-action-option", patrolReturnCount > 0 && "active")}
+                    disabled={selectedCount === 0 || navState.controlLocked}
+                    title={
+                      navState.controlLocked
+                        ? lockReasonText
+                        : selectedCount === 0
+                          ? "Select one or more waypoints for the return connector"
+                          : "Use selected waypoints as connector back to HOME"
+                    }
+                    onClick={() => {
+                      try {
+                        const count = navService.useSelectedWaypointsAsPatrolSegment("return");
+                        setActionMenuOpen(false);
+                        emitInfo(`Patrol return connector updated (${count} waypoints)`);
+                      } catch (error) {
+                        emitError(`Patrol return connector failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Set RETURN</span>
+                    <small>{selectedCount > 0 ? `${selectedCount} selected` : `${patrolReturnCount} saved`}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-route-action-option danger"
+                    disabled={patrolReturnCount === 0 || navState.controlLocked}
+                    title={navState.controlLocked ? lockReasonText : "Clear the return connector"}
+                    onClick={() => {
+                      try {
+                        navService.clearPatrolSegment("return");
+                        setActionMenuOpen(false);
+                        emitInfo("Patrol return connector cleared");
+                      } catch (error) {
+                        emitError(`Patrol return connector failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Clear RETURN</span>
+                    <small>{patrolReturnCount} waypoint{patrolReturnCount === 1 ? "" : "s"}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={joinClassNames("nav-route-action-option", patrolDepartCount > 0 && "active")}
+                    disabled={selectedCount === 0 || navState.controlLocked}
+                    title={
+                      navState.controlLocked
+                        ? lockReasonText
+                        : selectedCount === 0
+                          ? "Select one or more waypoints for the depart connector"
+                          : "Use selected waypoints as connector from HOME back to the loop"
+                    }
+                    onClick={() => {
+                      try {
+                        const count = navService.useSelectedWaypointsAsPatrolSegment("depart");
+                        setActionMenuOpen(false);
+                        emitInfo(`Patrol depart connector updated (${count} waypoints)`);
+                      } catch (error) {
+                        emitError(`Patrol depart connector failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Set DEPART</span>
+                    <small>{selectedCount > 0 ? `${selectedCount} selected` : `${patrolDepartCount} saved`}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-route-action-option danger"
+                    disabled={patrolDepartCount === 0 || navState.controlLocked}
+                    title={navState.controlLocked ? lockReasonText : "Clear the depart connector"}
+                    onClick={() => {
+                      try {
+                        navService.clearPatrolSegment("depart");
+                        setActionMenuOpen(false);
+                        emitInfo("Patrol depart connector cleared");
+                      } catch (error) {
+                        emitError(`Patrol depart connector failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Clear DEPART</span>
+                    <small>{patrolDepartCount} waypoint{patrolDepartCount === 1 ? "" : "s"}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={joinClassNames(
+                      "nav-route-action-option",
+                      patrolProfile.departEntryLoopIndex >= 0 && "active"
+                    )}
+                    disabled={selectedCount !== 1 || patrolLoopCount < 2 || navState.controlLocked}
+                    title={
+                      navState.controlLocked
+                        ? lockReasonText
+                        : selectedCount !== 1
+                          ? "Select exactly one loop waypoint as re-entry point"
+                          : "Use selected loop waypoint as the re-entry point for DEPART"
+                    }
+                    onClick={() => {
+                      try {
+                        const index = navService.setPatrolDepartEntryFromSelected();
+                        setActionMenuOpen(false);
+                        emitInfo(`Patrol entry set to loop waypoint ${index + 1}`);
+                      } catch (error) {
+                        emitError(`Patrol entry failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Set ENTRY</span>
+                    <small>{patrolProfile.departEntryLoopIndex >= 0 ? `Loop #${patrolProfile.departEntryLoopIndex + 1}` : "Pick 1 loop wp"}</small>
                   </button>
                 </div>
                 <div className="nav-route-action-group">

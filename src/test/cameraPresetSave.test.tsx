@@ -22,6 +22,30 @@ function createPtzState(activePreset = "home"): CameraPtzStateData {
 function createNavigationState(): NavigationState {
   return {
     waypoints: [],
+    patrolMissionProfile: {
+      loopWaypoints: [],
+      homeWaypoint: null,
+      returnWaypoints: [],
+      departWaypoints: [],
+      departEntryLoopIndex: -1
+    },
+    patrolMission: {
+      active: false,
+      phase: "idle",
+      lowBatteryActive: false,
+      returnHomeRequested: false,
+      returnHomeActive: false,
+      returnExitLoopIndex: -1,
+      departEntryLoopIndex: -1,
+      homeAvailable: false,
+      missionId: "",
+      status: "",
+      homeWaypoint: null,
+      loopWaypoints: [],
+      returnWaypoints: [],
+      departWaypoints: [],
+      activeChunkWaypoints: []
+    },
     selectedWaypointIndexes: [],
     loopRoute: false,
     routeMission: {

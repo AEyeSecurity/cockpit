@@ -20,6 +20,32 @@ export interface WaypointAction {
 
 export interface RouteMissionWaypoint extends GoalInput {}
 
+export interface PatrolMissionProfile {
+  loopWaypoints: GoalInput[];
+  homeWaypoint: GoalInput | null;
+  returnWaypoints: GoalInput[];
+  departWaypoints: GoalInput[];
+  departEntryLoopIndex: number;
+}
+
+export interface PatrolMissionStateData {
+  active: boolean;
+  phase: string;
+  lowBatteryActive: boolean;
+  returnHomeRequested: boolean;
+  returnHomeActive: boolean;
+  returnExitLoopIndex: number;
+  departEntryLoopIndex: number;
+  homeAvailable: boolean;
+  missionId: string;
+  status: string;
+  homeWaypoint: RouteMissionWaypoint | null;
+  loopWaypoints: RouteMissionWaypoint[];
+  returnWaypoints: RouteMissionWaypoint[];
+  departWaypoints: RouteMissionWaypoint[];
+  activeChunkWaypoints: RouteMissionWaypoint[];
+}
+
 export type ReturnHomePhase = "idle" | "requested" | "waiting_exit" | "active" | "completed" | "unavailable";
 
 export interface RouteMissionStateData {
@@ -115,6 +141,8 @@ export interface PatrolLoopState {
 
 export interface NavigationState {
   waypoints: GoalInput[];
+  patrolMissionProfile: PatrolMissionProfile;
+  patrolMission: PatrolMissionStateData;
   selectedWaypointIndexes: number[];
   loopRoute: boolean;
   routeMission: RouteMissionStateData;
@@ -405,6 +433,36 @@ function createDefaultRouteMission(): RouteMissionStateData {
   };
 }
 
+function createDefaultPatrolMissionProfile(): PatrolMissionProfile {
+  return {
+    loopWaypoints: [],
+    homeWaypoint: null,
+    returnWaypoints: [],
+    departWaypoints: [],
+    departEntryLoopIndex: -1
+  };
+}
+
+function createDefaultPatrolMissionState(): PatrolMissionStateData {
+  return {
+    active: false,
+    phase: "idle",
+    lowBatteryActive: false,
+    returnHomeRequested: false,
+    returnHomeActive: false,
+    returnExitLoopIndex: -1,
+    departEntryLoopIndex: -1,
+    homeAvailable: false,
+    missionId: "",
+    status: "idle",
+    homeWaypoint: null,
+    loopWaypoints: [],
+    returnWaypoints: [],
+    departWaypoints: [],
+    activeChunkWaypoints: []
+  };
+}
+
 function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
   if (!input || typeof input !== "object") return null;
   const value = input as Record<string, unknown>;
@@ -561,6 +619,39 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
   };
 }
 
+function parsePatrolMissionState(message: Record<string, unknown>): PatrolMissionStateData | null {
+  const candidate = messageCandidates(message)
+    .map((entry) => asRecord(entry.patrol_mission))
+    .find((entry): entry is Record<string, unknown> => entry !== null);
+  if (!candidate) return null;
+
+  const parseWaypoints = (raw: unknown): RouteMissionWaypoint[] =>
+    Array.isArray(raw)
+      ? raw.map((entry) => parseRouteWaypoint(entry)).filter((entry): entry is RouteMissionWaypoint => entry !== null)
+      : [];
+
+  return {
+    active: candidate.active === true,
+    phase: String(candidate.phase ?? "idle"),
+    lowBatteryActive: candidate.low_battery_active === true || candidate.lowBatteryActive === true,
+    returnHomeRequested:
+      candidate.return_home_requested === true || candidate.returnHomeRequested === true,
+    returnHomeActive:
+      candidate.return_home_active === true || candidate.returnHomeActive === true,
+    returnExitLoopIndex: Number(candidate.return_exit_loop_index ?? candidate.returnExitLoopIndex ?? -1) || -1,
+    departEntryLoopIndex:
+      Number(candidate.depart_entry_loop_index ?? candidate.departEntryLoopIndex ?? -1) || -1,
+    homeAvailable: candidate.home_available === true || candidate.homeAvailable === true,
+    missionId: String(candidate.mission_id ?? candidate.missionId ?? ""),
+    status: String(candidate.status ?? "idle"),
+    homeWaypoint: parseRouteWaypoint(candidate.home_waypoint),
+    loopWaypoints: parseWaypoints(candidate.loop_waypoints),
+    returnWaypoints: parseWaypoints(candidate.return_waypoints),
+    departWaypoints: parseWaypoints(candidate.depart_waypoints),
+    activeChunkWaypoints: parseWaypoints(candidate.active_chunk_waypoints)
+  };
+}
+
 function isLegacyLockAliasMessage(message: Record<string, unknown>): boolean {
   if (String(message.op ?? "") !== "ack") return false;
   const request = String(message.request ?? "").trim();
@@ -697,6 +788,8 @@ export class NavigationService {
   private manualSteeringAngleMaxDeg = DEFAULT_MANUAL_STEERING_ANGLE_MAX_DEG;
   private state: NavigationState = {
     waypoints: [],
+    patrolMissionProfile: createDefaultPatrolMissionProfile(),
+    patrolMission: createDefaultPatrolMissionState(),
     selectedWaypointIndexes: [],
     loopRoute: true,
     routeMission: createDefaultRouteMission(),
@@ -799,11 +892,13 @@ export class NavigationService {
       this.applyRecordingCountPayload(message);
       this.applyPatrolLoopPayload(message);
       this.applyRouteMissionPayload(message);
+      this.applyPatrolMissionPayload(message);
     });
     dispatcher.subscribeNavTelemetry?.((message) => {
       this.applyControlLockPayload(message);
       this.applyManualControlPayload(message);
       this.applyRouteMissionPayload(message);
+      this.applyPatrolMissionPayload(message);
     });
     dispatcher.subscribeAck?.((message) => {
       const request = String(message.request ?? "").trim();
@@ -814,6 +909,7 @@ export class NavigationService {
       });
       this.applyManualControlPayload(message);
       this.applyRouteMissionPayload(message);
+      this.applyPatrolMissionPayload(message);
     });
     dispatcher.subscribeNavEvent?.((message) => {
       const fromEvent = extractControlLockFromNavEvent(message);
@@ -831,6 +927,21 @@ export class NavigationService {
     return {
       ...this.state,
       waypoints: this.state.waypoints.map((waypoint) => cloneGoal(waypoint)),
+      patrolMissionProfile: {
+        loopWaypoints: this.state.patrolMissionProfile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        homeWaypoint: this.state.patrolMissionProfile.homeWaypoint ? cloneGoal(this.state.patrolMissionProfile.homeWaypoint) : null,
+        returnWaypoints: this.state.patrolMissionProfile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departWaypoints: this.state.patrolMissionProfile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departEntryLoopIndex: this.state.patrolMissionProfile.departEntryLoopIndex
+      },
+      patrolMission: {
+        ...this.state.patrolMission,
+        homeWaypoint: this.state.patrolMission.homeWaypoint ? cloneGoal(this.state.patrolMission.homeWaypoint) : null,
+        loopWaypoints: this.state.patrolMission.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        returnWaypoints: this.state.patrolMission.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departWaypoints: this.state.patrolMission.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        activeChunkWaypoints: this.state.patrolMission.activeChunkWaypoints.map((waypoint) => cloneGoal(waypoint))
+      },
       routeMission: {
         ...this.state.routeMission,
         missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => cloneGoal(waypoint)),
@@ -1477,6 +1588,201 @@ export class NavigationService {
     };
   }
 
+  setPatrolMissionProfile(profile: PatrolMissionProfile): void {
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        loopWaypoints: profile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        homeWaypoint: profile.homeWaypoint ? cloneGoal(profile.homeWaypoint) : null,
+        returnWaypoints: profile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departWaypoints: profile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departEntryLoopIndex: Number.isFinite(Number(profile.departEntryLoopIndex))
+          ? Math.trunc(Number(profile.departEntryLoopIndex))
+          : -1
+      }
+    };
+    this.emit();
+  }
+
+  useQueuedWaypointsAsPatrolLoop(): number {
+    const loopWaypoints = this.state.waypoints
+      .filter((waypoint) => waypoint.role !== "home")
+      .map((waypoint) => {
+        const cloned = cloneGoal(waypoint);
+        const { role: _role, ...base } = cloned;
+        return base;
+      });
+    if (loopWaypoints.length < 2) {
+      throw new Error("Need at least 2 non-HOME waypoints to define the patrol loop");
+    }
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        ...this.state.patrolMissionProfile,
+        loopWaypoints
+      },
+      lastStatus: `Patrol loop updated (${loopWaypoints.length} waypoints)`
+    };
+    this.emit();
+    return loopWaypoints.length;
+  }
+
+  setPatrolHomeFromSelected(): void {
+    const selection = this.state.selectedWaypointIndexes;
+    if (selection.length !== 1) {
+      throw new Error("Select exactly one waypoint to set patrol HOME");
+    }
+    const waypoint = this.state.waypoints[selection[0]];
+    if (!waypoint) {
+      throw new Error("Selected waypoint is unavailable");
+    }
+    const { actions: _actions, ...base } = cloneGoal(waypoint);
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        ...this.state.patrolMissionProfile,
+        homeWaypoint: { ...base, role: "home" }
+      },
+      lastStatus: `Patrol HOME set from waypoint ${selection[0] + 1}`
+    };
+    this.emit();
+  }
+
+  useSelectedWaypointsAsPatrolSegment(segment: "return" | "depart"): number {
+    const indexes = [...this.state.selectedWaypointIndexes].sort((a, b) => a - b);
+    if (indexes.length === 0) {
+      throw new Error(`Select one or more waypoints for patrol ${segment}`);
+    }
+    const segmentWaypoints = indexes
+      .map((index) => this.state.waypoints[index])
+      .filter((entry): entry is GoalInput => Boolean(entry))
+      .map((waypoint) => {
+        const cloned = cloneGoal(waypoint);
+        const { role: _role, ...base } = cloned;
+        return base;
+      });
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        ...this.state.patrolMissionProfile,
+        ...(segment === "return"
+          ? { returnWaypoints: segmentWaypoints }
+          : { departWaypoints: segmentWaypoints })
+      },
+      lastStatus: `Patrol ${segment} connector updated (${segmentWaypoints.length} waypoints)`
+    };
+    this.emit();
+    return segmentWaypoints.length;
+  }
+
+  clearPatrolSegment(segment: "return" | "depart"): void {
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        ...this.state.patrolMissionProfile,
+        ...(segment === "return" ? { returnWaypoints: [] } : { departWaypoints: [] })
+      },
+      lastStatus: `Patrol ${segment} connector cleared`
+    };
+    this.emit();
+  }
+
+  setPatrolDepartEntryFromSelected(): number {
+    const selection = this.state.selectedWaypointIndexes;
+    if (selection.length !== 1) {
+      throw new Error("Select exactly one queued waypoint as patrol depart entry");
+    }
+    const selectedWaypoint = this.state.waypoints[selection[0]];
+    if (!selectedWaypoint) {
+      throw new Error("Selected waypoint is unavailable");
+    }
+    const loopIndex = this.state.patrolMissionProfile.loopWaypoints.findIndex((waypoint) => {
+      const sameLat = Math.abs(waypoint.x - selectedWaypoint.x) <= 1.0e-9;
+      const sameLon = Math.abs(waypoint.y - selectedWaypoint.y) <= 1.0e-9;
+      return sameLat && sameLon;
+    });
+    if (loopIndex < 0) {
+      throw new Error("Selected waypoint is not part of the current patrol loop");
+    }
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: {
+        ...this.state.patrolMissionProfile,
+        departEntryLoopIndex: loopIndex
+      },
+      lastStatus: `Patrol depart entry set to loop waypoint ${loopIndex + 1}`
+    };
+    this.emit();
+    return loopIndex;
+  }
+
+  clearPatrolMissionProfile(): void {
+    this.state = {
+      ...this.state,
+      patrolMissionProfile: createDefaultPatrolMissionProfile(),
+      lastStatus: "Patrol mission profile cleared"
+    };
+    this.emit();
+  }
+
+  async sendPatrolMission(options?: {
+    legSpacingM?: number;
+    chunkSpanM?: number;
+    chunkMaxWaypoints?: number;
+  }): Promise<{ inputCount: number; expandedCount: number }> {
+    if (this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    const profile = this.state.patrolMissionProfile;
+    if (profile.loopWaypoints.length === 0) {
+      throw new Error("Patrol loop is empty");
+    }
+    if (!profile.homeWaypoint) {
+      throw new Error("Patrol HOME waypoint is missing");
+    }
+
+    const payload: Record<string, unknown> = {
+      patrol_mission: {
+        loop_waypoints: profile.loopWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        home_waypoint: goalToWireWaypoint(profile.homeWaypoint),
+        return_waypoints: profile.returnWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        depart_waypoints: profile.departWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        depart_entry_loop_index: profile.departEntryLoopIndex
+      }
+    };
+    if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
+    if (options?.chunkSpanM !== undefined) payload.chunk_span_m = Number(options.chunkSpanM);
+    if (options?.chunkMaxWaypoints !== undefined) payload.chunk_max_waypoints = Number(options.chunkMaxWaypoints);
+
+    const response = await this.robotDispatcher.requestPatrolMission(payload as never);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Patrol mission dispatch failed"));
+    }
+    const inputCount = Number(response.loop_input_waypoint_count ?? profile.loopWaypoints.length) || profile.loopWaypoints.length;
+    const expandedCount = Number(response.loop_expanded_waypoint_count ?? profile.loopWaypoints.length) || profile.loopWaypoints.length;
+    this.state = {
+      ...this.state,
+      lastStatus: `Patrol mission sent (${inputCount} -> ${expandedCount})`
+    };
+    this.emit();
+    return { inputCount, expandedCount };
+  }
+
+  async requestReturnHome(): Promise<void> {
+    if (this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    const response = await this.robotDispatcher.requestReturnHome();
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Return home request failed"));
+    }
+    this.state = {
+      ...this.state,
+      lastStatus: "Return HOME requested"
+    };
+    this.emit();
+  }
+
   async sendGoal(input: GoalInput): Promise<void> {
     if (this.state.controlLocked) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
@@ -2007,6 +2313,17 @@ export class NavigationService {
       ...this.state,
       routeMission,
       lastStatus: routeStatus.length > 0 ? routeStatus : this.state.lastStatus
+    };
+    this.emit();
+  }
+
+  private applyPatrolMissionPayload(message: Record<string, unknown>): void {
+    const patrolMission = parsePatrolMissionState(message);
+    if (!patrolMission) return;
+    this.state = {
+      ...this.state,
+      patrolMission,
+      lastStatus: patrolMission.status.trim() || this.state.lastStatus
     };
     this.emit();
   }

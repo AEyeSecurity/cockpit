@@ -22,6 +22,12 @@ describe("navigation sidebar", () => {
     expect(screen.getByText("CANCEL")).toBeInTheDocument();
     expect(screen.getByText("ADD WAYPOINT")).toBeInTheDocument();
     expect(screen.getByText("WAYPOINT TOOLS")).toBeInTheDocument();
+    expect(screen.getByText("Patrol Mission")).toBeInTheDocument();
+    expect(screen.getByText("USE LOOP")).toBeInTheDocument();
+    expect(screen.getByText("SET HOME")).toBeInTheDocument();
+    expect(screen.queryByText("SET RETURN")).not.toBeInTheDocument();
+    expect(screen.queryByText("SET DEPART")).not.toBeInTheDocument();
+    expect(screen.queryByText("SET ENTRY")).not.toBeInTheDocument();
     expect(screen.queryByText("MARK HOME")).not.toBeInTheDocument();
     expect(screen.queryByText("ACTION WAYPOINT")).not.toBeInTheDocument();
     expect(screen.queryByText("CONTROL MODE")).not.toBeInTheDocument();
@@ -44,7 +50,7 @@ describe("navigation sidebar", () => {
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
   });
 
-  it("shows HOME and action tools together with correct enablement", async () => {
+  it("shows HOME, patrol, and action tools together with correct enablement", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
     if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
@@ -73,16 +79,35 @@ describe("navigation sidebar", () => {
 
     const setHomeButton = screen.getByText("Set HOME").closest("button");
     const clearHomeButton = screen.getByText("Clear HOME").closest("button");
+    const setReturnButton = screen.getByText("Set RETURN").closest("button");
+    const clearReturnButton = screen.getByText("Clear RETURN").closest("button");
+    const setDepartButton = screen.getByText("Set DEPART").closest("button");
+    const clearDepartButton = screen.getByText("Clear DEPART").closest("button");
+    const setEntryButton = screen.getByText("Set ENTRY").closest("button");
     const brakeButton = screen.getByText("Brake").closest("button");
 
     expect(setHomeButton).not.toBeNull();
     expect(clearHomeButton).not.toBeNull();
+    expect(setReturnButton).not.toBeNull();
+    expect(clearReturnButton).not.toBeNull();
+    expect(setDepartButton).not.toBeNull();
+    expect(clearDepartButton).not.toBeNull();
+    expect(setEntryButton).not.toBeNull();
     expect(brakeButton).not.toBeNull();
     expect(setHomeButton).not.toBeDisabled();
     expect(clearHomeButton).toBeDisabled();
+    expect(setReturnButton).not.toBeDisabled();
+    expect(clearReturnButton).toBeDisabled();
+    expect(setDepartButton).not.toBeDisabled();
+    expect(clearDepartButton).toBeDisabled();
+    expect(setEntryButton).toBeDisabled();
     expect(brakeButton).not.toBeDisabled();
 
     fireEvent.click(setHomeButton as HTMLButtonElement);
+    fireEvent.click(waypointToolsButton as HTMLButtonElement);
+    const reopenedSetReturnButton = screen.getByText("Set RETURN").closest("button");
+    expect(reopenedSetReturnButton).not.toBeNull();
+    fireEvent.click(reopenedSetReturnButton as HTMLButtonElement);
 
     act(() => {
       navigationService.toggleWaypointSelection(0);
@@ -93,13 +118,18 @@ describe("navigation sidebar", () => {
 
     const updatedSetHomeButton = screen.getByText("Set HOME").closest("button");
     const updatedClearHomeButton = screen.getByText("Clear HOME").closest("button");
+    const updatedSetReturnButton = screen.getByText("Set RETURN").closest("button");
+    const updatedClearReturnButton = screen.getByText("Clear RETURN").closest("button");
     const updatedBrakeButton = screen.getByText("Brake").closest("button");
 
     expect(updatedSetHomeButton).not.toBeNull();
     expect(updatedClearHomeButton).not.toBeNull();
+    expect(updatedSetReturnButton).not.toBeNull();
+    expect(updatedClearReturnButton).not.toBeNull();
     expect(updatedBrakeButton).not.toBeNull();
     expect(updatedSetHomeButton?.className).toContain("active");
     expect(updatedClearHomeButton).not.toBeDisabled();
+    expect(updatedClearReturnButton).not.toBeDisabled();
     expect(updatedBrakeButton).toBeDisabled();
   });
 });

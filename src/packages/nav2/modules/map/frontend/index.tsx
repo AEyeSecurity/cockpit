@@ -9,7 +9,11 @@ import type { CockpitModule, ModuleContext } from "../../../../../core/types/mod
 import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
 import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
-import { NavigationService, type NavigationState } from "../../navigation/service/impl/NavigationService";
+import {
+  NavigationService,
+  type NavigationState,
+  type PatrolMissionProfile
+} from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { getBatteryPresentation } from "./batteryPresentation";
@@ -420,10 +424,60 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildWaypointIcon(index: number, yawDeg: number, draft = false, selected = false, manual = true, action = false, home = false): L.DivIcon {
+type PatrolSegmentVisual = "return" | "depart" | null;
+
+function normalizeWaypointCoord(value: number): string {
+  return Number(value).toFixed(7);
+}
+
+function waypointMembershipKey(point: { x: number; y: number }): string {
+  return `${normalizeWaypointCoord(point.x)}:${normalizeWaypointCoord(point.y)}`;
+}
+
+function buildPatrolSegmentSets(profile: PatrolMissionProfile): {
+  returnSet: Set<string>;
+  departSet: Set<string>;
+} {
+  return {
+    returnSet: new Set(profile.returnWaypoints.map((point) => waypointMembershipKey(point))),
+    departSet: new Set(profile.departWaypoints.map((point) => waypointMembershipKey(point)))
+  };
+}
+
+function resolvePatrolSegmentVisual(
+  point: { x: number; y: number; role?: string },
+  segmentSets: { returnSet: Set<string>; departSet: Set<string> }
+): PatrolSegmentVisual {
+  if (point.role === "home") return null;
+  const key = waypointMembershipKey(point);
+  if (segmentSets.returnSet.has(key)) return "return";
+  if (segmentSets.departSet.has(key)) return "depart";
+  return null;
+}
+
+function buildWaypointLabel(home: boolean, segment: PatrolSegmentVisual, action: boolean): string {
+  if (home) return "HOME";
+  if (segment === "return") return "RETURN";
+  if (segment === "depart") return "DEPART";
+  if (action) return "Action WP";
+  return "WP";
+}
+
+function buildWaypointIcon(
+  index: number,
+  yawDeg: number,
+  draft = false,
+  selected = false,
+  manual = true,
+  action = false,
+  home = false,
+  patrolSegment: PatrolSegmentVisual = null
+): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const cls = `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}${home ? " home" : ""}`;
+  const cls =
+    `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}${home ? " home" : ""}` +
+    `${patrolSegment === "return" ? " patrol-return" : patrolSegment === "depart" ? " patrol-depart" : ""}`;
   return L.divIcon({
     className: "",
     html:
@@ -485,6 +539,7 @@ function LeafletMapCanvas({
   interactive,
   goalMode,
   waypoints,
+  patrolMissionProfile,
   selectedWaypointIndexes,
   robotPose,
   datumPose,
@@ -506,6 +561,7 @@ function LeafletMapCanvas({
   interactive: boolean;
   goalMode: boolean;
   waypoints: NavigationState["waypoints"];
+  patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
@@ -1401,6 +1457,7 @@ function LeafletMapCanvas({
   useEffect(() => {
     const layer = waypointLayerRef.current;
     if (!layer) return;
+    const patrolSegmentSets = buildPatrolSegmentSets(patrolMissionProfile);
     if (!Array.isArray(waypoints) || waypoints.length === 0) {
       if (waypointRenderKeyRef.current !== "__empty__") {
         layer.clearLayers();
@@ -1417,7 +1474,8 @@ function LeafletMapCanvas({
         manual: waypointHasManualYaw(waypoint),
         action: (waypoint.actions ?? []).length > 0,
         home: waypoint.role === "home",
-        selected: selectedWaypointIndexes.includes(index)
+        selected: selectedWaypointIndexes.includes(index),
+        patrolSegment: resolvePatrolSegmentVisual(waypoint, patrolSegmentSets)
       }))
       .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lon));
     const previewPoints = points.map((entry) => ({
@@ -1436,19 +1494,28 @@ function LeafletMapCanvas({
         : displayPoints
             .map(
               (entry) =>
-                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}`
+                `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}:${entry.patrolSegment ?? "-"}`
             )
             .join("|");
     if (renderKey === waypointRenderKeyRef.current) return;
     waypointRenderKeyRef.current = renderKey;
     layer.clearLayers();
     if (displayPoints.length === 0) return;
-    displayPoints.forEach((entry) => {
-      const marker = L.marker([entry.lat, entry.lon], {
-        icon: buildWaypointIcon(entry.index, entry.displayYawDeg, false, entry.selected, entry.manual, entry.action, entry.home),
-        interactive: true,
-        draggable: true
-      }).bindTooltip(`${entry.home ? "HOME" : entry.action ? "Action" : "WP"} ${entry.home ? "" : `#${entry.index + 1}`}`.trim(), { direction: "top" });
+      displayPoints.forEach((entry) => {
+        const marker = L.marker([entry.lat, entry.lon], {
+          icon: buildWaypointIcon(
+            entry.index,
+            entry.displayYawDeg,
+            false,
+            entry.selected,
+            entry.manual,
+            entry.action,
+            entry.home,
+            entry.patrolSegment
+          ),
+          interactive: true,
+          draggable: true
+        }).bindTooltip(`${buildWaypointLabel(entry.home, entry.patrolSegment, entry.action)} ${entry.home ? "" : `#${entry.index + 1}`}`.trim(), { direction: "top" });
       marker.on("dragstart", () => {
         const map = mapRef.current;
         if (map?.dragging.enabled()) {
@@ -1470,7 +1537,7 @@ function LeafletMapCanvas({
       });
       marker.addTo(layer);
     });
-  }, [loopRoute, robotPose, selectedWaypointIndexes, waypoints]);
+  }, [loopRoute, patrolMissionProfile, robotPose, selectedWaypointIndexes, waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1574,6 +1641,7 @@ function CockpitMapCanvas({
   interactive,
   goalMode,
   waypoints,
+  patrolMissionProfile,
   selectedWaypointIndexes,
   robotPose,
   datumPose,
@@ -1594,6 +1662,7 @@ function CockpitMapCanvas({
   interactive: boolean;
   goalMode: boolean;
   waypoints: NavigationState["waypoints"];
+  patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
@@ -1825,7 +1894,17 @@ function CockpitMapCanvas({
     state.toolMode
   ]);
 
-  const routePolylinePoints: Array<{ index: number; lat: number; lon: number; yawDeg?: number; manual: boolean; action: boolean; home: boolean }> = waypoints
+  const patrolSegmentSets = buildPatrolSegmentSets(patrolMissionProfile);
+  const routePolylinePoints: Array<{
+    index: number;
+    lat: number;
+    lon: number;
+    yawDeg?: number;
+    manual: boolean;
+    action: boolean;
+    home: boolean;
+    patrolSegment: PatrolSegmentVisual;
+  }> = waypoints
     .flatMap((waypoint, index) => {
       const lat = Number(waypoint.x);
       const lon = Number(waypoint.y);
@@ -1837,7 +1916,8 @@ function CockpitMapCanvas({
         yawDeg: waypointHasManualYaw(waypoint) ? Number(waypoint.yawDeg) : undefined,
         manual: waypointHasManualYaw(waypoint),
         action: (waypoint.actions ?? []).length > 0,
-        home: waypoint.role === "home"
+        home: waypoint.role === "home",
+        patrolSegment: resolvePatrolSegmentVisual(waypoint, patrolSegmentSets)
       }];
     });
   const waypointPreviewPoints = routePolylinePoints.map((entry) => ({
@@ -2077,14 +2157,17 @@ function CockpitMapCanvas({
           <button
             key={`waypoint-${waypoint.index}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`}
             type="button"
-            className={`wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}${waypoint.home ? " home" : ""}`}
+            className={
+              `wp${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}${activeDrag ? " dragging" : ""}${waypoint.manual ? " manual" : " auto"}${waypoint.action ? " action" : ""}${waypoint.home ? " home" : ""}` +
+              `${waypoint.patrolSegment === "return" ? " patrol-return" : waypoint.patrolSegment === "depart" ? " patrol-depart" : ""}`
+            }
             data-index={waypoint.index + 1}
             style={{
               left: projected.x,
               top: projected.y,
               transform: `translate(-50%, -50%) rotate(${normalizeYawDeg(90 - waypoint.displayYawDeg)}deg)`
             }}
-            title={`${waypoint.home ? "HOME" : waypoint.action ? "Action WP" : "WP"} ${waypoint.home ? "" : waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
+            title={`${buildWaypointLabel(waypoint.home, waypoint.patrolSegment, waypoint.action)} ${waypoint.home ? "" : waypoint.index + 1}: ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)} · ${
               waypoint.manual ? `${waypoint.displayYawDeg.toFixed(1)} deg manual` : `${waypoint.displayYawDeg.toFixed(1)} deg auto`
             }`}
             disabled={!interactive}
@@ -2775,6 +2858,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 interactive={mapInteractive}
                 goalMode={navigationState?.goalMode === true}
                 waypoints={navigationState?.waypoints ?? []}
+                patrolMissionProfile={
+                  navigationState?.patrolMissionProfile ?? {
+                    loopWaypoints: [],
+                    homeWaypoint: null,
+                    returnWaypoints: [],
+                    departWaypoints: [],
+                    departEntryLoopIndex: -1
+                  }
+                }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
@@ -2839,6 +2931,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 interactive={false}
                 goalMode={false}
                 waypoints={navigationState?.waypoints ?? []}
+                patrolMissionProfile={
+                  navigationState?.patrolMissionProfile ?? {
+                    loopWaypoints: [],
+                    homeWaypoint: null,
+                    returnWaypoints: [],
+                    departWaypoints: [],
+                    departEntryLoopIndex: -1
+                  }
+                }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
