@@ -7878,19 +7878,6 @@ pre {
   color: #92400e;
 }
 
-.nav-sidebar .nav-route-home-hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 6px;
-  background: rgba(248, 250, 252, 0.88);
-  color: #475569;
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .nav-sidebar .nav-route-action-menu {
   display: grid;
   gap: 6px;
@@ -7898,6 +7885,27 @@ pre {
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 7px;
   background: rgba(248, 250, 252, 0.92);
+}
+
+.nav-sidebar .nav-route-action-group {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-sidebar .nav-route-action-group + .nav-route-action-group {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.nav-sidebar .nav-route-action-group-label {
+  min-width: 0;
+  padding: 0 2px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .nav-sidebar .nav-route-action-option {
@@ -7920,6 +7928,16 @@ pre {
 .nav-sidebar .nav-route-action-option:hover {
   border-color: rgba(245, 158, 11, 0.42);
   background: rgba(255, 251, 235, 0.9);
+}
+
+.nav-sidebar .nav-route-action-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.nav-sidebar .nav-route-action-option:disabled:hover {
+  border-color: rgba(148, 163, 184, 0.26);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .nav-sidebar .nav-route-action-option.active {

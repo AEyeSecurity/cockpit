@@ -852,6 +852,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     .filter((entry): entry is NavigationState["waypoints"][number] => Boolean(entry));
   const selectedHomeCount = selectedWaypoints.filter((waypoint) => waypoint.role === "home").length;
   const homeWaypointCount = navState.waypoints.filter((waypoint) => waypoint.role === "home").length;
+  const selectedSingleHome = selectedCount === 1 && selectedHomeCount === 1;
+  const selectedHasHome = selectedHomeCount > 0;
   const selectedBrakeHoldEnabled =
     selectedWaypoints.length > 0 &&
     selectedWaypoints.every((waypoint) => (waypoint.actions ?? []).some((action) => action.type === "brake_hold"));
@@ -1144,56 +1146,21 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
             </button>
           </div>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedCount !== 1 || navState.controlLocked}
-              title={navState.controlLocked ? lockReasonText : "Marcar el waypoint seleccionado como HOME"}
-              onClick={() => {
-                try {
-                  const homeIndex = navService.setHomeForSelected();
-                  emitInfo(`Waypoint ${homeIndex + 1} marked as HOME`);
-                } catch (error) {
-                  emitError(`HOME waypoint failed: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="goal" />} label="MARK HOME" meta={selectedCount === 1 ? "Selected" : "Pick 1"} compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedHomeCount === 0 || navState.controlLocked}
-              title={navState.controlLocked ? lockReasonText : "Quitar HOME del waypoint seleccionado"}
-              onClick={() => {
-                try {
-                  const changed = navService.clearHomeForSelected();
-                  if (changed > 0) emitInfo("HOME removed from selected waypoint");
-                } catch (error) {
-                  emitError(`HOME waypoint failed: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="remove" />} label="CLEAR HOME" meta={`${selectedHomeCount} home`} compact />
-            </button>
-            <div className="nav-route-home-hint">
-              {homeWaypointCount > 0 ? "HOME armed" : "No HOME"}
-            </div>
-          </div>
           <div className="nav-route-programming-row">
             <button
               type="button"
-              className={joinClassNames("ncb-wide sec-btn", actionMenuOpen && "active", selectedHasAnyAction && "programmed")}
-              disabled={selectedCount === 0 || selectedHomeCount > 0 || navState.controlLocked}
+              className={joinClassNames(
+                "ncb-wide sec-btn",
+                actionMenuOpen && "active",
+                (selectedHasAnyAction || selectedHasHome) && "programmed"
+              )}
+              disabled={selectedCount === 0 || navState.controlLocked}
               title={
                 navState.controlLocked
                   ? lockReasonText
                   : selectedCount === 0
                     ? "Seleccioná uno o más waypoints"
-                    : selectedHomeCount > 0
-                      ? "HOME no admite acciones de ruta"
-                    : "Abrir acciones programables para los waypoints seleccionados"
+                    : "Abrir herramientas especiales para los waypoints seleccionados"
               }
               onClick={() => {
                 setActionMenuOpen((current) => !current);
@@ -1201,19 +1168,82 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             >
               <ButtonFace
                 icon={<NavGlyph kind="goal" />}
-                label="ACTION WAYPOINT"
+                label="WAYPOINT TOOLS"
                 meta={
                   selectedCount === 0
-                    ? `${programmedWaypointCount} programmed`
-                    : `${selectedCount} selected · ${programmedWaypointCount} programmed`
+                    ? "Pick waypoint"
+                    : selectedSingleHome
+                      ? "1 selected · HOME"
+                      : `${selectedCount} selected · tools available`
                 }
               />
             </button>
             {actionMenuOpen ? (
               <div className="nav-route-action-menu">
+                <div className="nav-route-action-group">
+                  <div className="nav-route-action-group-label">HOME</div>
+                  <button
+                    type="button"
+                    className={joinClassNames("nav-route-action-option", selectedSingleHome && "active")}
+                    disabled={selectedCount !== 1 || navState.controlLocked}
+                    title={
+                      navState.controlLocked
+                        ? lockReasonText
+                        : selectedCount !== 1
+                          ? "Select exactly one waypoint to mark HOME"
+                          : "Mark selected waypoint as HOME"
+                    }
+                    onClick={() => {
+                      try {
+                        const homeIndex = navService.setHomeForSelected();
+                        setActionMenuOpen(false);
+                        emitInfo(`Waypoint ${homeIndex + 1} marked as HOME`);
+                      } catch (error) {
+                        emitError(`HOME waypoint failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Set HOME</span>
+                    <small>Selected waypoint</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-route-action-option"
+                    disabled={selectedHomeCount === 0 || navState.controlLocked}
+                    title={
+                      navState.controlLocked
+                        ? lockReasonText
+                        : selectedHomeCount === 0
+                          ? "Selected waypoints do not include HOME"
+                          : "Clear HOME from selected waypoint"
+                    }
+                    onClick={() => {
+                      try {
+                        const changed = navService.clearHomeForSelected();
+                        setActionMenuOpen(false);
+                        if (changed > 0) emitInfo("HOME removed from selected waypoint");
+                      } catch (error) {
+                        emitError(`HOME waypoint failed: ${String(error)}`);
+                      }
+                    }}
+                  >
+                    <span>Clear HOME</span>
+                    <small>Selected HOME</small>
+                  </button>
+                </div>
+                <div className="nav-route-action-group">
+                  <div className="nav-route-action-group-label">ACTIONS</div>
                 <button
                   type="button"
                   className={joinClassNames("nav-route-action-option", selectedBrakeHoldEnabled && "active")}
+                  disabled={selectedHasHome || navState.controlLocked}
+                  title={
+                    navState.controlLocked
+                      ? lockReasonText
+                      : selectedHasHome
+                        ? "HOME waypoint cannot have route actions"
+                        : "Set brake action for selected waypoints"
+                  }
                   onClick={async () => {
                     const durationRaw = await dialogService.prompt({
                       title: "Brake action",
@@ -1259,6 +1289,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                     <small>Selected waypoints</small>
                   </button>
                 ) : null}
+                </div>
               </div>
             ) : null}
             {routeMission.actionActive ? (
