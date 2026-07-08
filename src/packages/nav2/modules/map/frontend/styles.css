@@ -280,6 +280,30 @@
   color: #0f766e;
 }
 
+.wp.patrol-return::before {
+  border-bottom-color: #f97316;
+  filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.82));
+}
+
+.wp.patrol-return[data-index]::after {
+  color: #9a3412;
+  background: rgba(255, 237, 213, 0.98);
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.82);
+}
+
+.wp.patrol-depart::before {
+  border-bottom-color: #84cc16;
+  filter: drop-shadow(0 0 4px rgba(132, 204, 22, 0.82));
+}
+
+.wp.patrol-depart[data-index]::after {
+  color: #3f6212;
+  background: rgba(236, 252, 203, 0.98);
+  border-color: #84cc16;
+  box-shadow: 0 0 0 1px rgba(163, 230, 53, 0.82);
+}
+
 .wp.selected {
   cursor: grab;
 }
@@ -323,6 +347,32 @@
   background: rgba(254, 226, 226, 0.98);
   border-color: #dc2626;
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.8);
+}
+
+.wp.patrol-return.action::before,
+.wp.patrol-return.action:hover:not(:disabled)::before {
+  border-bottom-color: #f97316;
+  filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.82));
+}
+
+.wp.patrol-return.action[data-index]::after {
+  color: #9a3412;
+  background: rgba(255, 237, 213, 0.98);
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.82);
+}
+
+.wp.patrol-depart.action::before,
+.wp.patrol-depart.action:hover:not(:disabled)::before {
+  border-bottom-color: #84cc16;
+  filter: drop-shadow(0 0 4px rgba(132, 204, 22, 0.82));
+}
+
+.wp.patrol-depart.action[data-index]::after {
+  color: #3f6212;
+  background: rgba(236, 252, 203, 0.98);
+  border-color: #84cc16;
+  box-shadow: 0 0 0 1px rgba(163, 230, 53, 0.82);
 }
 
 .wp.home::before {
@@ -411,6 +461,30 @@
   color: #0f766e;
 }
 
+.wp-icon.patrol-return .wp-arrow {
+  border-bottom-color: #f97316;
+  filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.82));
+}
+
+.wp-icon.patrol-return .wp-index {
+  color: #9a3412;
+  background: rgba(255, 237, 213, 0.98);
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.82);
+}
+
+.wp-icon.patrol-depart .wp-arrow {
+  border-bottom-color: #84cc16;
+  filter: drop-shadow(0 0 4px rgba(132, 204, 22, 0.82));
+}
+
+.wp-icon.patrol-depart .wp-index {
+  color: #3f6212;
+  background: rgba(236, 252, 203, 0.98);
+  border-color: #84cc16;
+  box-shadow: 0 0 0 1px rgba(163, 230, 53, 0.82);
+}
+
 .wp-icon.selected .wp-arrow {
   border-bottom-color: #2563eb;
   filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.85));
@@ -437,6 +511,30 @@
   background: rgba(254, 226, 226, 0.98);
   border-color: #dc2626;
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.8);
+}
+
+.wp-icon.patrol-return.action .wp-arrow {
+  border-bottom-color: #f97316;
+  filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.82));
+}
+
+.wp-icon.patrol-return.action .wp-index {
+  color: #9a3412;
+  background: rgba(255, 237, 213, 0.98);
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.82);
+}
+
+.wp-icon.patrol-depart.action .wp-arrow {
+  border-bottom-color: #84cc16;
+  filter: drop-shadow(0 0 4px rgba(132, 204, 22, 0.82));
+}
+
+.wp-icon.patrol-depart.action .wp-index {
+  color: #3f6212;
+  background: rgba(236, 252, 203, 0.98);
+  border-color: #84cc16;
+  box-shadow: 0 0 0 1px rgba(163, 230, 53, 0.82);
 }
 
 .wp-icon.home .wp-arrow {
@@ -6971,6 +7069,7 @@ input[type="range"]::-moz-range-track {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22) !important;
 }
 
+.map-html-overlay-cards-inline .map-patrol-card,
 .map-html-overlay-cards-inline .map-battery-card,
 .map-html-overlay-cards-inline .map-assist-alert {
   width: 100% !important;
@@ -6987,6 +7086,100 @@ input[type="range"]::-moz-range-track {
     inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
   backdrop-filter: blur(14px) saturate(0.95) !important;
   -webkit-backdrop-filter: blur(14px) saturate(0.95) !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.map-html-overlay-cards-inline .map-patrol-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.map-html-overlay-cards-inline .map-patrol-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-title {
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+}
+
+.map-html-overlay-cards-inline .map-patrol-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail {
+  display: grid;
+  gap: 3px;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail-primary {
+  color: rgba(255, 255, 255, 0.82) !important;
+  font-size: 12px !important;
+  line-height: 1.25 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-detail-secondary {
+  color: rgba(255, 255, 255, 0.58) !important;
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-idle .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-idle .map-patrol-detail-primary {
+  color: rgba(255, 255, 255, 0.74) !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-ready .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-ready .map-patrol-detail-primary {
+  color: #8dd7ff !important;
+}
+
+.map-html-overlay-cards-inline .map-patrol-card.tone-active .map-patrol-pill,
+.map-html-overlay-cards-inline .map-patrol-card.tone-active .map-patrol-detail-primary {
+  color: #86efac !important;
 }
 
 .map-html-overlay-cards-inline .map-battery-card {

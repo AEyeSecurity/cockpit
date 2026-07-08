@@ -236,7 +236,7 @@ describe("services", () => {
     expect(loaded).toBe(2);
     expect(service.getState().waypoints).toHaveLength(2);
     expect(service.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, yawDeg: 90 });
-    expect(service.getState().waypoints[1]).toEqual({ x: 3, y: 4 });
+    expect(service.getState().waypoints[1]).toMatchObject({ x: 3, y: 4 });
   });
 
   it("saves, lists, loads and deletes named routes via localStorage", () => {
@@ -257,6 +257,12 @@ describe("services", () => {
     expect(() => service.saveNamedRoute("ruta")).toThrowError(/waypoints/i);
     service.queueWaypoint({ x: 1, y: 2, yawDeg: 90 });
     service.queueWaypoint({ x: 3, y: 4 });
+    service.toggleWaypointSelection(0);
+    service.toggleWaypointSelection(1);
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    service.setPatrolDepartEntryFromSelected();
     expect(() => service.saveNamedRoute("   ")).toThrowError(/vacío/i);
 
     const saved = service.saveNamedRoute("Ronda noche");
@@ -272,7 +278,9 @@ describe("services", () => {
     const loaded = reopened.loadNamedRoute("Ronda noche");
     expect(loaded).toBe(2);
     expect(reopened.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, yawDeg: 90 });
-    expect(reopened.getState().waypoints[1]).toEqual({ x: 3, y: 4 });
+    expect(reopened.getState().waypoints[1]).toMatchObject({ x: 3, y: 4 });
+    expect(reopened.getState().patrolMissionProfile.loopWaypoints).toHaveLength(2);
+    expect(reopened.getState().patrolMissionProfile.departEntryLoopIndex).toBe(1);
 
     expect(() => reopened.loadNamedRoute("inexistente")).toThrowError(/No existe/i);
 
@@ -458,6 +466,124 @@ describe("services", () => {
     expect(service.getState().waypoints[0].actions).toBeUndefined();
   });
 
+  it("keeps patrol loop exclusive from return and depart connectors", () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+    service.queueWaypoint({ x: 4, y: 4 });
+    service.toggleWaypointSelection(2);
+    service.useSelectedWaypointsAsPatrolSegment("return");
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(3);
+    service.useSelectedWaypointsAsPatrolSegment("depart");
+    const count = service.useQueuedWaypointsAsPatrolLoop();
+    const profile = service.getState().patrolMissionProfile;
+
+    expect(count).toBe(2);
+    expect(profile.loopWaypoints.map((waypoint) => [waypoint.x, waypoint.y])).toEqual([
+      [1, 1],
+      [2, 2]
+    ]);
+    expect(profile.returnWaypoints.map((waypoint) => [waypoint.x, waypoint.y])).toEqual([[3, 3]]);
+    expect(profile.departWaypoints.map((waypoint) => [waypoint.x, waypoint.y])).toEqual([[4, 4]]);
+  });
+
+  it("tracks patrol HOME from waypoint tools state", () => {
+    const service = new NavigationService({} as never);
+
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.toggleWaypointSelection(1);
+
+    service.setHomeForSelected();
+
+    let profile = service.getState().patrolMissionProfile;
+    expect(profile.homeWaypoint).toMatchObject({ x: 2, y: 2, role: "home" });
+
+    const changed = service.clearHomeForSelected();
+
+    expect(changed).toBe(1);
+    profile = service.getState().patrolMissionProfile;
+    expect(profile.homeWaypoint).toBeNull();
+  });
+
+  it("rejects selecting HOME or connector waypoints as patrol entry", () => {
+    const service = new NavigationService({} as never);
+
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+    service.queueWaypoint({ x: 4, y: 4 });
+    service.toggleWaypointSelection(0);
+    service.toggleWaypointSelection(1);
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(2);
+    service.setPatrolHomeFromSelected();
+
+    expect(() => service.setPatrolDepartEntryFromSelected()).toThrowError(/HOME waypoint/i);
+
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(3);
+    service.useSelectedWaypointsAsPatrolSegment("return");
+
+    expect(() => service.setPatrolDepartEntryFromSelected()).toThrowError(/Connector waypoint/i);
+  });
+
+  it("reconciles patrol segments after moving and deleting queued waypoints", () => {
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn()
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+    service.toggleWaypointSelection(0);
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(2);
+    service.useSelectedWaypointsAsPatrolSegment("depart");
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    service.setPatrolDepartEntryFromSelected();
+    service.moveWaypoint(2, 30, 30);
+
+    let profile = service.getState().patrolMissionProfile;
+    expect(profile.departWaypoints[0]).toMatchObject({ x: 30, y: 30 });
+    expect(profile.departEntryLoopIndex).toBe(1);
+
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    service.removeSelectedWaypoints();
+    profile = service.getState().patrolMissionProfile;
+    expect(profile.loopWaypoints.map((waypoint) => [waypoint.x, waypoint.y])).toEqual([[1, 1]]);
+    expect(profile.departEntryLoopIndex).toBe(-1);
+  });
+
   it("saves and loads file waypoints without yaw for auto mode", async () => {
     const dispatcher = {
       requestGoal: vi.fn(),
@@ -470,6 +596,13 @@ describe("services", () => {
       requestLoadWaypointsFile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
         ok: true,
+        patrol_profile: {
+          home_waypoint_index: 0,
+          loop_waypoint_indices: [1],
+          return_waypoint_indices: [],
+          depart_waypoint_indices: [],
+          depart_entry_waypoint_index: 1
+        },
         waypoints: [
           { lat: 1, lon: 2, role: "home" },
           {
@@ -477,7 +610,8 @@ describe("services", () => {
             lon: 4,
             yaw_deg: 30,
             actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
-          }
+          },
+          { lat: 5, lon: 6 }
         ]
       }),
       requestCancelGoal: vi.fn(),
@@ -497,28 +631,43 @@ describe("services", () => {
       yawDeg: 30,
       actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
     });
+    service.queueWaypoint({ x: 5, y: 6 });
+    service.toggleWaypointSelection(1);
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.setPatrolDepartEntryFromSelected();
 
     await service.saveWaypointsFile();
     await service.loadWaypointsFile();
 
-    expect(dispatcher.requestSaveWaypointsFile).toHaveBeenCalledWith([
-      { lat: 1, lon: 2, role: "home" },
-      {
-        lat: 3,
-        lon: 4,
-        yaw_deg: 30,
-        actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+    expect(dispatcher.requestSaveWaypointsFile).toHaveBeenCalledWith({
+      waypoints: [
+        { lat: 1, lon: 2, role: "home" },
+        {
+          lat: 3,
+          lon: 4,
+          yaw_deg: 30,
+          actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+        },
+        { lat: 5, lon: 6 }
+      ],
+      patrol_profile: {
+        home_waypoint_index: 0,
+        loop_waypoint_indices: [1, 2],
+        return_waypoint_indices: [],
+        depart_waypoint_indices: [],
+        depart_entry_waypoint_index: 1
       }
-    ]);
-    expect(service.getState().waypoints).toEqual([
-      { x: 1, y: 2, role: "home" },
-      {
-        x: 3,
-        y: 4,
-        yawDeg: 30,
-        actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
-      }
-    ]);
+    });
+    expect(service.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, role: "home" });
+    expect(service.getState().waypoints[1]).toMatchObject({
+      x: 3,
+      y: 4,
+      yawDeg: 30,
+      actions: [{ type: "brake_hold", duration_s: 5, brake_pct: 100 }]
+    });
+    expect(service.getState().waypoints[2]).toMatchObject({ x: 5, y: 6 });
+    expect(service.getState().patrolMissionProfile.homeWaypoint).toMatchObject({ x: 1, y: 2, role: "home" });
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(0);
   });
 
   it("applies route mission state from backend messages", () => {
@@ -611,6 +760,66 @@ describe("services", () => {
       y: 10,
       yawDeg: 180,
       role: "home"
+    });
+  });
+
+  it("preserves active route mission state across transient idle telemetry snapshots", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      requestGoal: vi.fn(),
+      requestRouteMission: vi.fn(),
+      requestCancelGoal: vi.fn(),
+      requestCancelRouteMission: vi.fn(),
+      requestManualMode: vi.fn(),
+      requestManualCommand: vi.fn(),
+      requestSnapshot: vi.fn(),
+      requestCameraPan: vi.fn(),
+      requestCameraZoomToggle: vi.fn(),
+      requestCameraStatus: vi.fn(),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      goal_active: true,
+      route_mission: {
+        active: true,
+        paused: false,
+        loop: true,
+        status: "route active (1->4)",
+        input_waypoint_count: 3,
+        expanded_waypoint_count: 7,
+        active_chunk_size: 4,
+        mission_waypoints: [{ lat: 1, lon: 2, yaw_deg: 0 }]
+      }
+    });
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      goal_active: true,
+      route_mission: {
+        active: false,
+        paused: false,
+        loop: false,
+        status: "idle",
+        input_waypoint_count: 0,
+        expanded_waypoint_count: 0,
+        active_chunk_size: 0,
+        mission_waypoints: [],
+        active_chunk_waypoints: []
+      }
+    });
+
+    expect(service.getState().routeMission).toMatchObject({
+      active: true,
+      loop: true,
+      status: "route active (1->4)",
+      expandedWaypointCount: 7,
+      activeChunkSize: 4
     });
   });
 
