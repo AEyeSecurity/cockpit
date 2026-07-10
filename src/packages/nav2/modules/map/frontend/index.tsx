@@ -551,6 +551,7 @@ function buildWaypointIcon(
     className: "",
     html:
       `<div class="${cls}" style="transform: rotate(${cssRotationDeg}deg);">` +
+      (selected ? '<span class="wp-selected-halo" aria-hidden="true"></span><span class="wp-selected-badge" aria-hidden="true">✓</span>' : "") +
       `<div class="wp-arrow">${home ? '<span class="wp-home-glyph">H</span>' : ""}</div>` +
       `<div class="wp-index">${badge}</div>` +
       "</div>",
@@ -2376,7 +2377,10 @@ function CockpitMapCanvas({
             onPointerCancel={() => {
               setDragWaypoint(null);
             }}
-          />
+          >
+            {isSelected ? <span className="wp-selected-halo" aria-hidden="true" /> : null}
+            {isSelected ? <span className="wp-selected-badge" aria-hidden="true">✓</span> : null}
+          </button>
         );
       })}
       {routePolylinePoints.length === 0
