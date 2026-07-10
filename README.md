@@ -42,11 +42,14 @@ npm run test        # Tests
 El módulo Nav2 permite programar acciones sobre waypoints de ruta. Desde la barra
 de ruta, seleccionar uno o más waypoints y usar `ACTION WAYPOINT`.
 
-Acción disponible hoy:
+Acciones disponibles:
 
 - `Brake`: agrega `brake_hold` al waypoint seleccionado.
 - La UI pide `duration_s` para definir cuántos segundos frena antes de continuar.
 - `brake_pct` se envía como `100`.
+- `Rural profile`: activa el perfil rural al alcanzar el waypoint; reduce la
+  inflación del costmap sin desactivar la detección de obstáculos.
+- `Urban profile`: restaura el perfil urbano, que es el valor predeterminado.
 
 Formato enviado al bridge WebSocket de SALUS:
 
@@ -58,6 +61,12 @@ Formato enviado al bridge WebSocket de SALUS:
     {"type": "brake_hold", "duration_s": 5, "brake_pct": 100}
   ]
 }
+```
+
+Para conmutar el perfil de navegación, el formato es:
+
+```json
+{"type": "set_navigation_profile", "profile": "rural"}
 ```
 
 El backend ROS conserva estas acciones al guardar/cargar rutas y las ejecuta en

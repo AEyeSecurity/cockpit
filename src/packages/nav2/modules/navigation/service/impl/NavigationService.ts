@@ -13,12 +13,20 @@ export interface GoalInput {
 
 export type WaypointRole = "normal" | "home";
 
-export interface WaypointAction {
+export interface BrakeHoldWaypointAction {
   type: "brake_hold";
   duration_s: number;
   brake_pct?: number;
   label?: string;
 }
+
+export interface NavigationProfileWaypointAction {
+  type: "set_navigation_profile";
+  profile: "urban" | "rural";
+  label?: string;
+}
+
+export type WaypointAction = BrakeHoldWaypointAction | NavigationProfileWaypointAction;
 
 export interface RouteMissionWaypoint extends GoalInput {}
 
@@ -315,18 +323,29 @@ function parseWaypointActions(raw: unknown): WaypointAction[] {
   raw.forEach((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
     const record = entry as Record<string, unknown>;
-    if (record.type !== "brake_hold") return;
-    const durationS = Number(record.duration_s ?? record.durationS);
-    if (!Number.isFinite(durationS) || durationS <= 0 || durationS > 600) return;
-    const brakePctRaw = Number(record.brake_pct ?? record.brakePct ?? 100);
-    const brakePct = Number.isFinite(brakePctRaw) ? Math.min(100, Math.max(0, Math.round(brakePctRaw))) : 100;
     const label = typeof record.label === "string" ? record.label.trim().slice(0, 80) : "";
-    actions.push({
-      type: "brake_hold",
-      duration_s: durationS,
-      brake_pct: brakePct,
-      ...(label ? { label } : {})
-    });
+    if (record.type === "brake_hold") {
+      const durationS = Number(record.duration_s ?? record.durationS);
+      if (!Number.isFinite(durationS) || durationS <= 0 || durationS > 600) return;
+      const brakePctRaw = Number(record.brake_pct ?? record.brakePct ?? 100);
+      const brakePct = Number.isFinite(brakePctRaw) ? Math.min(100, Math.max(0, Math.round(brakePctRaw))) : 100;
+      actions.push({
+        type: "brake_hold",
+        duration_s: durationS,
+        brake_pct: brakePct,
+        ...(label ? { label } : {})
+      });
+      return;
+    }
+    if (record.type === "set_navigation_profile") {
+      const profile = String(record.profile ?? "").trim().toLowerCase();
+      if (profile !== "urban" && profile !== "rural") return;
+      actions.push({
+        type: "set_navigation_profile",
+        profile,
+        ...(label ? { label } : {})
+      });
+    }
   });
   return actions;
 }
@@ -1499,6 +1518,56 @@ export class NavigationService {
       lastStatus: enabled
         ? `Brake hold set on ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
         : `Brake hold removed from ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
+    };
+    this.emit();
+    return selection.size;
+  }
+
+  setNavigationProfileActionForSelected(profile: "urban" | "rural"): number {
+    const selection = new Set(this.state.selectedWaypointIndexes);
+    if (selection.size === 0) {
+      throw new Error("No waypoint selected");
+    }
+    const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
+      if (!selection.has(index)) return waypoint;
+      const current = cloneGoal(waypoint);
+      if (current.role === "home") {
+        throw new Error("HOME waypoint cannot have route actions");
+      }
+      const otherActions = (current.actions ?? []).filter(
+        (action) => action.type !== "set_navigation_profile"
+      );
+      return {
+        ...current,
+        actions: [...otherActions, { type: "set_navigation_profile" as const, profile }]
+      };
+    });
+    this.state = {
+      ...this.state,
+      waypoints: nextWaypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(nextWaypoints, this.state.patrolMissionProfile),
+      lastStatus: `Navigation profile ${profile} set on ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
+    };
+    this.emit();
+    return selection.size;
+  }
+
+  clearWaypointActionsForSelected(): number {
+    const selection = new Set(this.state.selectedWaypointIndexes);
+    if (selection.size === 0) {
+      throw new Error("No waypoint selected");
+    }
+    const nextWaypoints = this.state.waypoints.map((waypoint, index) => {
+      if (!selection.has(index)) return waypoint;
+      const current = cloneGoal(waypoint);
+      const { actions: _actions, ...withoutActions } = current;
+      return withoutActions;
+    });
+    this.state = {
+      ...this.state,
+      waypoints: nextWaypoints,
+      patrolMissionProfile: reconcilePatrolMissionProfile(nextWaypoints, this.state.patrolMissionProfile),
+      lastStatus: `Actions removed from ${selection.size} waypoint${selection.size > 1 ? "s" : ""}`
     };
     this.emit();
     return selection.size;
