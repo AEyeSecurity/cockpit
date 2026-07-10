@@ -868,6 +868,22 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const selectedBrakeHoldEnabled =
     selectedWaypoints.length > 0 &&
     selectedWaypoints.every((waypoint) => (waypoint.actions ?? []).some((action) => action.type === "brake_hold"));
+  const selectedNavigationProfile =
+    selectedWaypoints.length > 0 &&
+    selectedWaypoints.every((waypoint) =>
+      (waypoint.actions ?? []).some(
+        (action) => action.type === "set_navigation_profile" && action.profile === "rural"
+      )
+    )
+      ? "rural"
+      : selectedWaypoints.length > 0 &&
+          selectedWaypoints.every((waypoint) =>
+            (waypoint.actions ?? []).some(
+              (action) => action.type === "set_navigation_profile" && action.profile === "urban"
+            )
+          )
+        ? "urban"
+        : null;
   const selectedHasAnyAction = selectedWaypoints.some((waypoint) => (waypoint.actions ?? []).length > 0);
   const selectedBrakeHoldDuration =
     selectedWaypoints
@@ -1507,13 +1523,61 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                   <span>Brake</span>
                   <small>{selectedBrakeHoldEnabled ? `${selectedBrakeHoldDuration}s` : "Hold before continue"}</small>
                 </button>
+                <button
+                  type="button"
+                  className={joinClassNames("nav-route-action-option", selectedNavigationProfile === "rural" && "active")}
+                  disabled={selectedHasHome || navState.controlLocked}
+                  title={
+                    navState.controlLocked
+                      ? lockReasonText
+                      : selectedHasHome
+                        ? "HOME waypoint cannot have route actions"
+                        : "Activate rural navigation profile at selected waypoints"
+                  }
+                  onClick={() => {
+                    try {
+                      const changed = navService.setNavigationProfileActionForSelected("rural");
+                      setActionMenuOpen(false);
+                      emitInfo(`Rural profile set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
+                    } catch (error) {
+                      emitError(`Waypoint action failed: ${String(error)}`);
+                    }
+                  }}
+                >
+                  <span>Rural profile</span>
+                  <small>{selectedNavigationProfile === "rural" ? "Enabled" : "Narrow dirt road"}</small>
+                </button>
+                <button
+                  type="button"
+                  className={joinClassNames("nav-route-action-option", selectedNavigationProfile === "urban" && "active")}
+                  disabled={selectedHasHome || navState.controlLocked}
+                  title={
+                    navState.controlLocked
+                      ? lockReasonText
+                      : selectedHasHome
+                        ? "HOME waypoint cannot have route actions"
+                        : "Restore urban navigation profile at selected waypoints"
+                  }
+                  onClick={() => {
+                    try {
+                      const changed = navService.setNavigationProfileActionForSelected("urban");
+                      setActionMenuOpen(false);
+                      emitInfo(`Urban profile set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
+                    } catch (error) {
+                      emitError(`Waypoint action failed: ${String(error)}`);
+                    }
+                  }}
+                >
+                  <span>Urban profile</span>
+                  <small>{selectedNavigationProfile === "urban" ? "Enabled" : "Default margins"}</small>
+                </button>
                 {selectedHasAnyAction ? (
                   <button
                     type="button"
                     className="nav-route-action-option danger"
                     onClick={() => {
                       try {
-                        const changed = navService.setBrakeHoldActionForSelected(false);
+                        const changed = navService.clearWaypointActionsForSelected();
                         setActionMenuOpen(false);
                         emitInfo(`Action removed from ${changed} waypoint${changed > 1 ? "s" : ""}`);
                       } catch (error) {

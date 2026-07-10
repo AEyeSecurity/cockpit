@@ -441,6 +441,38 @@ describe("services", () => {
     );
   });
 
+  it("serializes rural and urban navigation profile waypoint actions", async () => {
+    const dispatcher = {
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 2
+      }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.queueWaypoint({ x: 5, y: 6 });
+    service.toggleWaypointSelection(0);
+    service.setNavigationProfileActionForSelected("rural");
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    service.setNavigationProfileActionForSelected("urban");
+
+    await service.sendRouteMission();
+
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waypoints: [
+          { lat: 3, lon: 4, actions: [{ type: "set_navigation_profile", profile: "rural" }] },
+          { lat: 5, lon: 6, actions: [{ type: "set_navigation_profile", profile: "urban" }] }
+        ]
+      })
+    );
+  });
+
   it("marks a single waypoint as HOME and strips route actions", () => {
     const dispatcher = {
       requestGoal: vi.fn(),
