@@ -319,6 +319,24 @@ describe("services", () => {
     expect(service.getState().selectedWaypointIndexes).toEqual([]);
   });
 
+  it("replaces or adds waypoint selections for map area selection", () => {
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+
+    service.setWaypointSelection([1, 2], "replace");
+    expect(service.getState().selectedWaypointIndexes).toEqual([1, 2]);
+
+    service.setWaypointSelection([0, 2, 99], "add");
+    expect(service.getState().selectedWaypointIndexes).toEqual([0, 1, 2]);
+
+    service.setWaypointSelectionMode(true);
+    expect(service.getState().waypointSelectionMode).toBe(true);
+    service.setWaypointSelectionMode(false);
+    expect(service.getState().waypointSelectionMode).toBe(false);
+  });
+
   it("sends queued goals through NavigationService", async () => {
     const dispatcher = {
       requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({

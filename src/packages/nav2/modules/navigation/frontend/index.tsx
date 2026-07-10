@@ -845,6 +845,29 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
   );
 }
 
+function describeWaypointActions(waypoint: NavigationState["waypoints"][number]): string[] {
+  return (waypoint.actions ?? []).map((action) => {
+    if (action.type === "brake_hold") return `Brake ${action.duration_s}s`;
+    return action.profile === "rural" ? "Rural" : "Urban";
+  });
+}
+
+function describePatrolWaypointTags(
+  waypoint: NavigationState["waypoints"][number],
+  profile: NavigationState["patrolMissionProfile"]
+): string[] {
+  const id = waypoint.localId;
+  if (!id) return waypoint.role === "home" ? ["HOME"] : [];
+  const tags: string[] = [];
+  if (waypoint.role === "home" || profile.homeWaypoint?.localId === id) tags.push("HOME");
+  const loopIndex = profile.loopWaypoints.findIndex((entry) => entry.localId === id);
+  if (loopIndex >= 0) tags.push("LOOP");
+  if (profile.returnWaypoints.some((entry) => entry.localId === id)) tags.push("RETURN");
+  if (profile.departWaypoints.some((entry) => entry.localId === id)) tags.push("DEPART");
+  if (loopIndex >= 0 && profile.departEntryLoopIndex === loopIndex) tags.push("ENTRY");
+  return tags;
+}
+
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const navService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const connService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
@@ -966,6 +989,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         return;
       }
     }
+    navService.setWaypointSelectionMode(false);
     emitInfo("Waypoint placement enabled: click and drag on the map to place it");
   };
 
@@ -1170,11 +1194,54 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               meta={patrolStartMeta}
             />
           </button>
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      <NavSidebarCollapsibleSection
+        title="WAYPOINTS"
+        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
+        className="nav-sidebar-actions-section nav-sidebar-waypoints-section"
+        defaultCollapsed={false}
+      >
+        <div className="nav-route-subsection nav-route-setup">
+          <div className="nav-route-subhead">
+            <span>Waypoints</span>
+            <small>{wps} waypoint{wps === 1 ? "" : "s"} · {homeWaypointCount} HOME</small>
+          </div>
           <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
             <button
               type="button"
               className="ncb sec-btn"
-              disabled={wps < 2}
+              disabled={wps === 0 || navState.controlLocked}
+              title="Seleccionar todos los waypoints"
+              onClick={() => navService.selectAllWaypoints()}
+            >
+              <ButtonFace icon={<NavGlyph kind="route" />} label="SELECT ALL" meta={`${wps} total`} compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={selectedCount === 0 || navState.controlLocked}
+              title="Deseleccionar todos los waypoints (ESC en el mapa)"
+              onClick={() => navService.clearWaypointSelection()}
+            >
+              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR SEL." meta={`${selectedCount} sel.`} compact />
+            </button>
+            <button
+              type="button"
+              className={joinClassNames("ncb sec-btn", navState.waypointSelectionMode && "active")}
+              disabled={wps === 0 || navState.controlLocked}
+              title="Arrastrá un rectángulo en el mapa. Shift suma a la selección actual. ESC sale del modo y limpia la selección."
+              onClick={() => navService.setWaypointSelectionMode(!navState.waypointSelectionMode)}
+            >
+              <ButtonFace icon={<NavGlyph kind="goal" />} label="SELECT AREA" meta={navState.waypointSelectionMode ? "Map active" : "Draw on map"} compact />
+            </button>
+          </div>
+          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={wps < 2 || navState.controlLocked}
               title="Usar los waypoints en cola como loop principal"
               onClick={() => {
                 try {
@@ -1190,7 +1257,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <button
               type="button"
               className="ncb sec-btn"
-              disabled={selectedCount !== 1}
+              disabled={selectedCount !== 1 || navState.controlLocked}
               title="Usar el waypoint seleccionado como HOME de la patrulla"
               onClick={() => {
                 try {
@@ -1206,6 +1273,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <button
               type="button"
               className="ncb danger-btn"
+              disabled={navState.controlLocked}
               title="Limpiar el perfil de misión de patrulla"
               onClick={() => {
                 navService.clearPatrolMissionProfile();
@@ -1215,11 +1283,34 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="Patrol profile" compact />
             </button>
           </div>
-        </div>
-        <div className="nav-route-subsection nav-route-setup">
-          <div className="nav-route-subhead">
-            <span>Waypoints</span>
-            <small>{wps} waypoint{wps === 1 ? "" : "s"} · {homeWaypointCount} HOME</small>
+          <div className="waypoint-manager-list" aria-label="Waypoint manager">
+            {navState.waypoints.map((waypoint, index) => {
+              const selected = navState.selectedWaypointIndexes.includes(index);
+              const patrolTags = describePatrolWaypointTags(waypoint, patrolProfile);
+              const actions = describeWaypointActions(waypoint);
+              const yaw = Number(waypoint.yawDeg);
+              return (
+                <button
+                  key={waypoint.localId ?? `${waypoint.x}-${waypoint.y}-${index}`}
+                  type="button"
+                  className={joinClassNames("waypoint-manager-row", selected && "selected")}
+                  aria-pressed={selected}
+                  title="Alternar selección"
+                  onClick={() => navService.toggleWaypointSelection(index)}
+                >
+                  <span className="waypoint-manager-index">#{index + 1}</span>
+                  <span className="waypoint-manager-coordinates">
+                    {Number(waypoint.x).toFixed(6)}, {Number(waypoint.y).toFixed(6)}
+                  </span>
+                  <span className="waypoint-manager-yaw">{Number.isFinite(yaw) ? `${yaw.toFixed(1)}° manual` : "auto yaw"}</span>
+                  <span className="waypoint-manager-tags">
+                    {patrolTags.map((tag) => <span key={tag} className="waypoint-manager-tag">{tag}</span>)}
+                    {actions.map((action) => <span key={action} className="waypoint-manager-tag action">{action}</span>)}
+                  </span>
+                </button>
+              );
+            })}
+            {wps === 0 ? <p className="muted waypoint-manager-empty">No waypoints queued.</p> : null}
           </div>
           <button
             type="button"
@@ -1230,6 +1321,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               const next = !goalModeSelected;
               try {
                 await navService.setGoalMode(next);
+                if (next) navService.setWaypointSelectionMode(false);
                 emitInfo(next ? "Goal mode enabled" : "Goal mode disabled");
               } catch (error) {
                 emitError(`Goal mode failed: ${String(error)}`);

@@ -47,6 +47,7 @@ function createNavigationState(): NavigationState {
       activeChunkWaypoints: []
     },
     selectedWaypointIndexes: [],
+    waypointSelectionMode: false,
     loopRoute: false,
     routeMission: {
       active: false,

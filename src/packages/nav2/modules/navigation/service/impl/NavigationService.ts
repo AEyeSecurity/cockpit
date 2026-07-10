@@ -175,6 +175,7 @@ export interface NavigationState {
   patrolMissionProfile: PatrolMissionProfile;
   patrolMission: PatrolMissionStateData;
   selectedWaypointIndexes: number[];
+  waypointSelectionMode: boolean;
   loopRoute: boolean;
   routeMission: RouteMissionStateData;
   goalMode: boolean;
@@ -1068,6 +1069,7 @@ export class NavigationService {
     patrolMissionProfile: createDefaultPatrolMissionProfile(),
     patrolMission: createDefaultPatrolMissionState(),
     selectedWaypointIndexes: [],
+    waypointSelectionMode: false,
     loopRoute: true,
     routeMission: createDefaultRouteMission(),
     goalMode: false,
@@ -1347,6 +1349,7 @@ export class NavigationService {
       waypoints: [],
       patrolMissionProfile: createDefaultPatrolMissionProfile(),
       selectedWaypointIndexes: [],
+      waypointSelectionMode: false,
       lastStatus: "Waypoints cleared"
     };
     this.emit();
@@ -1372,6 +1375,27 @@ export class NavigationService {
     this.state = {
       ...this.state,
       selectedWaypointIndexes: selected
+    };
+    this.emit();
+  }
+
+  setWaypointSelection(indexes: number[], mode: "replace" | "add" = "replace"): void {
+    const next = mode === "add"
+      ? [...this.state.selectedWaypointIndexes, ...indexes]
+      : indexes;
+    this.state = {
+      ...this.state,
+      selectedWaypointIndexes: sanitizeSelection(next, this.state.waypoints.length)
+    };
+    this.emit();
+  }
+
+  setWaypointSelectionMode(enabled: boolean): void {
+    const next = Boolean(enabled);
+    if (this.state.waypointSelectionMode === next) return;
+    this.state = {
+      ...this.state,
+      waypointSelectionMode: next
     };
     this.emit();
   }

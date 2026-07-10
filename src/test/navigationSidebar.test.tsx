@@ -16,6 +16,7 @@ describe("navigation sidebar", () => {
 
     expect(screen.getByText("MANUAL CONTROL")).toBeInTheDocument();
     expect(screen.getByText("AUTOMATIC ROUTE")).toBeInTheDocument();
+    expect(screen.getByText("WAYPOINTS")).toBeInTheDocument();
     expect(screen.getByText("Route")).toBeInTheDocument();
     expect(screen.getByText("Waypoints")).toBeInTheDocument();
     expect(screen.getByText("START ROUTE")).toBeInTheDocument();
@@ -32,7 +33,6 @@ describe("navigation sidebar", () => {
     expect(screen.queryByText("ACTION WAYPOINT")).not.toBeInTheDocument();
     expect(screen.queryByText("CONTROL MODE")).not.toBeInTheDocument();
     expect(screen.queryByText("NAVIGATION ACTIONS")).not.toBeInTheDocument();
-    expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();
     expect(screen.queryByText("PATROL")).not.toBeInTheDocument();
 
     const routeHeading = screen.getByText("Route");
@@ -130,6 +130,31 @@ describe("navigation sidebar", () => {
     expect(updatedClearHomeButton).toBeDisabled();
     expect(updatedClearReturnButton).not.toBeDisabled();
     expect(updatedBrakeButton).not.toBeDisabled();
+  });
+
+  it("provides select all, clear selection, and map area selection controls", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+    });
+
+    fireEvent.click(screen.getByText("SELECT ALL").closest("button") as HTMLButtonElement);
+    expect(navigationService.getState().selectedWaypointIndexes).toEqual([0, 1]);
+
+    fireEvent.click(screen.getByText("SELECT AREA").closest("button") as HTMLButtonElement);
+    expect(navigationService.getState().waypointSelectionMode).toBe(true);
+
+    fireEvent.click(screen.getByText("CLEAR SEL.").closest("button") as HTMLButtonElement);
+    expect(navigationService.getState().selectedWaypointIndexes).toEqual([]);
   });
 
   it("blocks simple route start when a structured patrol profile is configured", async () => {
