@@ -7827,8 +7827,91 @@ pre {
 
 /* Final manual/automatic navigation layout. */
 .nav-sidebar .nav-sidebar-manual-section .nav-sidebar-section-content,
-.nav-sidebar .nav-sidebar-automatic-section .nav-sidebar-section-content {
+.nav-sidebar .nav-sidebar-automatic-section .nav-sidebar-section-content,
+.nav-sidebar .nav-sidebar-waypoints-section .nav-sidebar-section-content {
   gap: 10px !important;
+}
+
+.nav-sidebar .waypoint-manager-list {
+  display: grid;
+  gap: 5px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.nav-sidebar .waypoint-manager-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 7px;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.86);
+  color: #334155;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-sidebar .waypoint-manager-row:hover {
+  border-color: rgba(37, 99, 235, 0.56);
+  background: rgba(239, 246, 255, 0.96);
+}
+
+.nav-sidebar .waypoint-manager-row.selected {
+  border-color: rgba(22, 163, 74, 0.72);
+  background: rgba(220, 252, 231, 0.86);
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.nav-sidebar .waypoint-manager-index {
+  grid-row: span 2;
+  align-self: center;
+  color: #1d4ed8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.nav-sidebar .waypoint-manager-coordinates,
+.nav-sidebar .waypoint-manager-yaw {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-sidebar .waypoint-manager-yaw {
+  color: #64748b;
+}
+
+.nav-sidebar .waypoint-manager-tags {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 2px;
+}
+
+.nav-sidebar .waypoint-manager-tag {
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: rgba(30, 64, 175, 0.11);
+  color: #1e40af;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.nav-sidebar .waypoint-manager-tag.action {
+  background: rgba(180, 83, 9, 0.12);
+  color: #92400e;
+}
+
+.nav-sidebar .waypoint-manager-empty {
+  margin: 4px 2px;
 }
 
 .nav-sidebar .nav-route-subsection {

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
@@ -37,5 +37,27 @@ describe("map workspace HUD", () => {
     expect(
       patrolTitle.compareDocumentPosition(batteryTitle) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+
+  it("clears waypoint selection and exits area selection mode with Escape", async () => {
+    const runtime = await bootstrapApp();
+    const workspace = runtime.contributions.get("nav2.workspace.map");
+    if (!workspace || workspace.slot !== "workspace") {
+      throw new Error("Map workspace contribution not registered");
+    }
+
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+      navigationService.setWaypointSelection([0, 1]);
+      navigationService.setWaypointSelectionMode(true);
+    });
+
+    render(<>{workspace.render()}</>);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(navigationService.getState().selectedWaypointIndexes).toEqual([]);
+    expect(navigationService.getState().waypointSelectionMode).toBe(false);
   });
 });

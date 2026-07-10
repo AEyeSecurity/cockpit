@@ -607,6 +607,7 @@ function LeafletMapCanvas({
   runtime,
   interactive,
   goalMode,
+  waypointSelectionMode,
   waypoints,
   patrolMissionProfile,
   selectedWaypointIndexes,
@@ -615,6 +616,7 @@ function LeafletMapCanvas({
   centerRequestKey,
   onQueueWaypoint,
   onToggleWaypointSelection,
+  onSetWaypointSelection,
   onMoveWaypoint,
   onZoneToolSettled,
   loopRoute,
@@ -629,6 +631,7 @@ function LeafletMapCanvas({
   runtime: ModuleContext;
   interactive: boolean;
   goalMode: boolean;
+  waypointSelectionMode: boolean;
   waypoints: NavigationState["waypoints"];
   patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
@@ -637,6 +640,7 @@ function LeafletMapCanvas({
   centerRequestKey: number;
   onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
+  onSetWaypointSelection: (indexes: number[], mode: "replace" | "add") => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
   onZoneToolSettled: () => void;
   loopRoute: boolean;
@@ -651,11 +655,17 @@ function LeafletMapCanvas({
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const waypointLayerRef = useRef<L.LayerGroup | null>(null);
   const draftLayerRef = useRef<L.LayerGroup | null>(null);
+  const selectionLayerRef = useRef<L.LayerGroup | null>(null);
   const robotMarkerRef = useRef<L.Marker | null>(null);
   const datumMarkerRef = useRef<L.Marker | null>(null);
   const draftMarkerRef = useRef<L.Marker | null>(null);
   const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg?: number; dragYaw: boolean } | null>(null);
   const goalCreateSessionRef = useRef<{ active: boolean; hasMoved: boolean }>({ active: false, hasMoved: false });
+  const waypointSelectionSessionRef = useRef<{
+    start: L.LatLng;
+    additive: boolean;
+    rectangle: L.Rectangle;
+  } | null>(null);
   const waypointDragEndMsRef = useRef(0);
   const waypointRenderKeyRef = useRef("");
   const toolDraftLayerRef = useRef<L.LayerGroup | null>(null);
@@ -670,11 +680,14 @@ function LeafletMapCanvas({
   const completedDrawingToolRef = useRef<"ruler" | "area" | "protractor" | null>(null);
   const inspectCopyHandlersRef = useRef<Array<() => void>>([]);
   const goalModeRef = useRef(goalMode);
+  const waypointSelectionModeRef = useRef(waypointSelectionMode);
   const toolModeRef = useRef(state.toolMode);
   const interactiveRef = useRef(interactive);
   const waypointCountRef = useRef(waypoints.length);
+  const waypointsRef = useRef(waypoints);
   const onQueueWaypointRef = useRef(onQueueWaypoint);
   const onToggleWaypointSelectionRef = useRef(onToggleWaypointSelection);
+  const onSetWaypointSelectionRef = useRef(onSetWaypointSelection);
   const onMoveWaypointRef = useRef(onMoveWaypoint);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const appliedMapOriginKeyRef = useRef<string>("");
@@ -682,6 +695,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     goalModeRef.current = goalMode;
   }, [goalMode]);
+  useEffect(() => {
+    waypointSelectionModeRef.current = waypointSelectionMode;
+  }, [waypointSelectionMode]);
   useEffect(() => {
     toolModeRef.current = state.toolMode;
   }, [state.toolMode]);
@@ -692,11 +708,17 @@ function LeafletMapCanvas({
     waypointCountRef.current = waypoints.length;
   }, [waypoints.length]);
   useEffect(() => {
+    waypointsRef.current = waypoints;
+  }, [waypoints]);
+  useEffect(() => {
     onQueueWaypointRef.current = onQueueWaypoint;
   }, [onQueueWaypoint]);
   useEffect(() => {
     onToggleWaypointSelectionRef.current = onToggleWaypointSelection;
   }, [onToggleWaypointSelection]);
+  useEffect(() => {
+    onSetWaypointSelectionRef.current = onSetWaypointSelection;
+  }, [onSetWaypointSelection]);
   useEffect(() => {
     onMoveWaypointRef.current = onMoveWaypoint;
   }, [onMoveWaypoint]);
@@ -709,6 +731,15 @@ function LeafletMapCanvas({
     goalCreateSessionRef.current = { active: false, hasMoved: false };
     draftLayerRef.current?.clearLayers();
     draftMarkerRef.current = null;
+    const map = mapRef.current;
+    if (interactiveRef.current && map && !map.dragging.enabled()) {
+      map.dragging.enable();
+    }
+  };
+
+  const clearWaypointSelectionDraft = (): void => {
+    waypointSelectionSessionRef.current = null;
+    selectionLayerRef.current?.clearLayers();
     const map = mapRef.current;
     if (interactiveRef.current && map && !map.dragging.enabled()) {
       map.dragging.enable();
@@ -1113,11 +1144,13 @@ function LeafletMapCanvas({
     const drawnItems = new L.FeatureGroup();
     const waypointLayer = L.layerGroup();
     const draftLayer = L.layerGroup();
+    const selectionLayer = L.layerGroup();
     const toolDraftLayer = L.layerGroup();
     const toolDrawingsLayer = L.layerGroup();
     map.addLayer(drawnItems);
     map.addLayer(waypointLayer);
     map.addLayer(draftLayer);
+    map.addLayer(selectionLayer);
     map.addLayer(toolDraftLayer);
     map.addLayer(toolDrawingsLayer);
     mapRef.current = map;
@@ -1125,6 +1158,7 @@ function LeafletMapCanvas({
     waypointLayerRef.current = waypointLayer;
     waypointRenderKeyRef.current = "";
     draftLayerRef.current = draftLayer;
+    selectionLayerRef.current = selectionLayer;
     toolDraftLayerRef.current = toolDraftLayer;
     toolDrawingsLayerRef.current = toolDrawingsLayer;
     onZoomChange?.(map.getZoom());
@@ -1359,11 +1393,33 @@ function LeafletMapCanvas({
 
     map.on("mousedown", (evt: L.LeafletMouseEvent) => {
       if (!interactiveRef.current) return;
-      if (!goalModeRef.current || toolModeRef.current !== "idle") return;
+      if (toolModeRef.current !== "idle") return;
       const domEvent = evt.originalEvent as MouseEvent | undefined;
       if (!domEvent) return;
       if (typeof domEvent.button === "number" && domEvent.button !== 0) return;
       if (!isMapBackgroundPointerEvent(domEvent)) return;
+      if (waypointSelectionModeRef.current) {
+        const rectangle = L.rectangle(L.latLngBounds(evt.latlng, evt.latlng), {
+          color: "#55ff7f",
+          weight: 1.5,
+          opacity: 0.95,
+          fillColor: "#55ff7f",
+          fillOpacity: 0.12,
+          interactive: false
+        });
+        selectionLayerRef.current?.clearLayers();
+        rectangle.addTo(selectionLayerRef.current ?? L.layerGroup());
+        waypointSelectionSessionRef.current = {
+          start: evt.latlng,
+          additive: domEvent.shiftKey,
+          rectangle
+        };
+        if (map.dragging.enabled()) {
+          map.dragging.disable();
+        }
+        return;
+      }
+      if (!goalModeRef.current) return;
       goalCreateSessionRef.current = { active: true, hasMoved: false };
       goalDraftRef.current = {
         lat: Number(evt.latlng.lat),
@@ -1377,6 +1433,11 @@ function LeafletMapCanvas({
     });
 
     map.on("mousemove", (evt: L.LeafletMouseEvent) => {
+      const selection = waypointSelectionSessionRef.current;
+      if (selection) {
+        selection.rectangle.setBounds(L.latLngBounds(selection.start, evt.latlng));
+        return;
+      }
       if (goalCreateSessionRef.current.active) {
         const draft = goalDraftRef.current;
         if (!draft) return;
@@ -1411,10 +1472,23 @@ function LeafletMapCanvas({
       }
     });
 
-    map.on("mouseup", () => {
+    map.on("mouseup", (evt: L.LeafletMouseEvent) => {
+      const selection = waypointSelectionSessionRef.current;
+      if (selection) {
+        const bounds = L.latLngBounds(selection.start, evt.latlng);
+        const indexes = waypointsRef.current
+          .map((waypoint, index) => ({ index, lat: Number(waypoint.x), lon: Number(waypoint.y) }))
+          .filter((waypoint) => Number.isFinite(waypoint.lat) && Number.isFinite(waypoint.lon))
+          .filter((waypoint) => bounds.contains([waypoint.lat, waypoint.lon]))
+          .map((waypoint) => waypoint.index);
+        clearWaypointSelectionDraft();
+        onSetWaypointSelectionRef.current(indexes, selection.additive ? "add" : "replace");
+        return;
+      }
       if (!goalCreateSessionRef.current.active) return;
       const draft = goalDraftRef.current;
       clearGoalDraft();
+      clearWaypointSelectionDraft();
       if (!draft) return;
       onQueueWaypointRef.current(draft.lat, draft.lon, draft.dragYaw ? draft.yawDeg : undefined);
     });
@@ -1440,6 +1514,7 @@ function LeafletMapCanvas({
       waypointLayerRef.current = null;
       waypointRenderKeyRef.current = "";
       draftLayerRef.current = null;
+      selectionLayerRef.current = null;
       toolDraftLayerRef.current = null;
       toolDrawingsLayerRef.current = null;
       robotMarkerRef.current = null;
@@ -2898,6 +2973,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     navigationService.toggleWaypointSelection(index);
   };
 
+  const setWaypointSelectionFromMap = (indexes: number[], mode: "replace" | "add"): void => {
+    if (!navigationService) return;
+    navigationService.setWaypointSelection(indexes, mode);
+  };
+
   const moveWaypointFromMap = (index: number, lat: number, lon: number): void => {
     if (!navigationService) return;
     navigationService.moveWaypoint(index, lat, lon);
@@ -2913,6 +2993,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       if (!mainIsMap || !mapToolsEnabled || isEditingTarget(event.target)) return;
       if (event.key === "Escape" && (state.toolMode !== "idle" || leafletZoneToolActive)) {
         closeMapTools();
+        event.preventDefault();
+        return;
+      }
+      if (event.key === "Escape" && navigationService && (navigationState?.waypointSelectionMode || navigationState?.selectedWaypointIndexes.length)) {
+        navigationService.setWaypointSelectionMode(false);
+        navigationService.clearWaypointSelection();
         event.preventDefault();
         return;
       }
@@ -2940,7 +3026,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, selectTool, state.toolMode]);
+  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
 
   return (
     <div className="map-workspace-root map-html-root">
@@ -2954,6 +3040,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 runtime={runtime}
                 interactive={mapInteractive}
                 goalMode={navigationState?.goalMode === true}
+                waypointSelectionMode={navigationState?.waypointSelectionMode === true}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -2970,6 +3057,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 centerRequestKey={centerRequestKey}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
+                onSetWaypointSelection={setWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
@@ -3027,6 +3115,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 runtime={runtime}
                 interactive={false}
                 goalMode={false}
+                waypointSelectionMode={false}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -3043,6 +3132,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 centerRequestKey={centerRequestKey}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
+                onSetWaypointSelection={setWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
