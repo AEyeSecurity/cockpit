@@ -48,6 +48,7 @@ function createNavigationState(): NavigationState {
     },
     selectedWaypointIndexes: [],
     waypointSelectionMode: false,
+    navigationStartProfile: "urban",
     loopRoute: false,
     routeMission: {
       active: false,
