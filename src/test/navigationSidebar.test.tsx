@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
+import { CoverageService } from "../packages/nav2/modules/navigation/service/impl/CoverageService";
+import { ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
 
 describe("navigation sidebar", () => {
   it("groups manual controls and automatic route actions in the sidebar", async () => {
@@ -17,6 +19,8 @@ describe("navigation sidebar", () => {
     expect(screen.getByText("MANUAL CONTROL")).toBeInTheDocument();
     expect(screen.getByText("AUTOMATIC ROUTE")).toBeInTheDocument();
     expect(screen.getByText("WAYPOINTS")).toBeInTheDocument();
+    expect(screen.getByText("CAMPO")).toBeInTheDocument();
+    expect(screen.getByText("GESTIÓN DE RUTAS")).toBeInTheDocument();
     expect(screen.getByText("Route")).toBeInTheDocument();
     expect(screen.getByText("Waypoints")).toBeInTheDocument();
     expect(screen.getByText("START ROUTE")).toBeInTheDocument();
@@ -39,6 +43,16 @@ describe("navigation sidebar", () => {
     const waypointsHeading = screen.getByText("Waypoints");
     expect(routeHeading.compareDocumentPosition(waypointsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
+    const waypointsSectionHeading = screen.getByText("WAYPOINTS");
+    const fieldSectionHeading = screen.getByText("CAMPO");
+    const routesSectionHeading = screen.getByText("GESTIÓN DE RUTAS");
+    expect(
+      waypointsSectionHeading.compareDocumentPosition(fieldSectionHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      fieldSectionHeading.compareDocumentPosition(routesSectionHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
     const linearSpeed = screen.getByLabelText("Linear speed");
     fireEvent.change(linearSpeed, { target: { value: "2.4" } });
 
@@ -48,6 +62,98 @@ describe("navigation sidebar", () => {
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     expect(navigationService.getState().manualLinearSpeed).toBe(2.4);
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
+  });
+
+  it("offers the square field workflow without unlocking movement", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+    fireEvent.click(screen.getByText("CAMPO").closest("button") as HTMLButtonElement);
+
+    const coverageService = runtime.services.getService<CoverageService>("nav2.service.coverage");
+    // El lote es siempre un cuadrado armado desde el vehiculo: no hay dibujo,
+    // ni interruptor de forma, ni campo de ancho.
+    expect(screen.queryByRole("checkbox", { name: /campo cuadrado/i })).toBeNull();
+    expect(screen.queryByText("DIBUJAR CAMPO")).toBeNull();
+
+    act(() => {
+      coverageService.squareFromVehiclePose(
+        { lat: -31.4859, lon: -64.2425, yawDeg: 0 },
+        { sideM: 20 }
+      );
+    });
+
+    const state = coverageService.getState();
+    expect(state.fieldPolygon).toHaveLength(4);
+    expect(state.field?.fieldWidthM).toBeCloseTo(state.field?.fieldLengthM ?? 0, 6);
+    expect(screen.getByLabelText(/lado exacto del campo/i)).toBeInTheDocument();
+    expect(screen.getByText("INVERTIR INICIO")).toBeInTheDocument();
+
+    const previewButton = screen.getByText("GENERAR PREVIEW").closest("button");
+    const startButton = screen.getByText("INICIAR COBERTURA").closest("button");
+    expect(previewButton).not.toBeDisabled();
+    expect(startButton).toBeDisabled();
+
+    expect(screen.queryByLabelText(/ancho exacto del campo/i)).toBeNull();
+    // Escribir el lado mueve los dos lados a la vez.
+    fireEvent.change(screen.getByLabelText(/lado exacto del campo/i), { target: { value: "26" } });
+    expect(coverageService.getState().field?.fieldLengthM).toBeCloseTo(26, 6);
+    expect(coverageService.getState().field?.fieldWidthM).toBeCloseTo(26, 6);
+  });
+
+  it("arma el cuadrado desde el vehiculo y adelanta el trazado antes del preview", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+    fireEvent.click(screen.getByText("CAMPO").closest("button") as HTMLButtonElement);
+
+    const coverageService = runtime.services.getService<CoverageService>("nav2.service.coverage");
+
+    // Sin pose todavia no se puede: el boton queda deshabilitado en vez de
+    // armar un campo en una coordenada inventada.
+    const squareButton = screen.getByText("ARMAR CUADRADO").closest("button") as HTMLButtonElement;
+    expect(squareButton).toBeDisabled();
+
+    act(() => {
+      coverageService.squareFromVehiclePose(
+        { lat: -31.4859, lon: -64.2425, yawDeg: 0 },
+        { sideM: 20 }
+      );
+      coverageService.setParameters({ cutterWidthM: 5, overlapRatio: 0, minTurningRadiusM: 4 });
+    });
+
+    const state = coverageService.getState();
+    expect(state.field?.fieldLengthM).toBeCloseTo(20, 3);
+    expect(state.preview).toBeNull();
+
+    // La estimacion aparece sin haber pedido el preview.
+    const estimate = screen.getByLabelText(/estimación del trazado/i);
+    expect(estimate).toBeInTheDocument();
+    expect(within(estimate).getByText("Pasadas").nextSibling).toHaveTextContent("4");
+    expect(within(estimate).getByText("Giros omega").nextSibling).toHaveTextContent("3");
+    expect(screen.getByText(/necesitan .* libres más allá de cada extremo/i)).toBeInTheDocument();
+
+    // Y sigue siendo el preview el que habilita el inicio.
+    expect(screen.getByText("INICIAR COBERTURA").closest("button")).toBeDisabled();
+  });
+
+  it("invalidates coverage preview state when the connection endpoint changes", async () => {
+    const runtime = await bootstrapApp();
+    const coverageService = runtime.services.getService<CoverageService>("nav2.service.coverage");
+    const connectionService = runtime.services.getService<ConnectionService>("nav2.service.connection");
+    const invalidatePreview = vi.spyOn(coverageService, "invalidatePreview");
+
+    connectionService.setHost("coverage-endpoint.example");
+
+    expect(invalidatePreview).toHaveBeenCalledWith(expect.stringMatching(/conexión|endpoint/i));
   });
 
   it("shows HOME, patrol, and action tools together with correct enablement", async () => {

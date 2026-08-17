@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
 import { PanelCollapsibleSection, PanelSection } from "../../../../core";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
@@ -10,6 +10,13 @@ import { MapService, type DatumProfilesState, type MapWorkspaceState } from "../
 import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInfoService";
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
+import {
+  COVERAGE_SERVICE_ID,
+  CoverageService,
+  estimateCoverageLayout,
+  type CoverageParameters,
+  type CoverageState
+} from "../service/impl/CoverageService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
 import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../routeMissionActivity";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
@@ -364,6 +371,7 @@ type NavGlyphKind =
   | "gpsFix"
   | "pin"
   | "home"
+  | "field"
   | "refresh";
 
 function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
@@ -521,6 +529,13 @@ function NavGlyph({ kind }: { kind: NavGlyphKind }): JSX.Element {
           <path d="M10 20v-5h4v5" />
         </svg>
       );
+    case "field":
+      return (
+        <svg {...baseProps}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M7 8h7a2 2 0 0 1 0 4H9a2 2 0 0 0 0 4h8" />
+        </svg>
+      );
     case "refresh":
       return (
         <svg {...baseProps}>
@@ -599,6 +614,13 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
         <svg {...baseProps}>
           <path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" />
           <circle cx="12" cy="10" r="2" />
+        </svg>
+      );
+    case "CAMPO":
+      return (
+        <svg {...baseProps}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M7 8h7a2 2 0 0 1 0 4H9a2 2 0 0 0 0 4h8" />
         </svg>
       );
     case "NAVIGATION ACTIONS":
@@ -866,6 +888,425 @@ function describePatrolWaypointTags(
   if (profile.departWaypoints.some((entry) => entry.localId === id)) tags.push("DEPART");
   if (loopIndex >= 0 && profile.departEntryLoopIndex === loopIndex) tags.push("ENTRY");
   return tags;
+}
+
+function CoverageSidebarSection({
+  runtime,
+  controlLocked,
+  lockReasonText,
+  emitInfo,
+  emitError
+}: {
+  runtime: ModuleContext;
+  controlLocked: boolean;
+  lockReasonText: string;
+  emitInfo: (text: string) => void;
+  emitError: (text: string) => void;
+}): JSX.Element {
+  const coverageService = runtime.services.getService<CoverageService>(COVERAGE_SERVICE_ID);
+  const dialogService = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
+  const telemetryService = getTelemetryService(runtime);
+  const [coverageState, setCoverageState] = useState<CoverageState>(coverageService.getState());
+  const [robotPose, setRobotPose] = useState<TelemetrySnapshot["robotPose"]>(
+    () => telemetryService?.getSnapshot().robotPose ?? null
+  );
+
+  useEffect(() => coverageService.subscribe((next) => setCoverageState(next)), [coverageService]);
+
+  useEffect(() => {
+    if (!telemetryService) return undefined;
+    return telemetryService.subscribeTelemetry((snapshot) => setRobotPose(snapshot.robotPose ?? null));
+  }, [telemetryService]);
+
+  const preview = coverageState.preview;
+  const metrics = preview?.metrics;
+  const topologySafe = Boolean(preview?.topologySafe);
+  const startDisabled = controlLocked || !coverageService.canStartMission();
+  const coverageBadge = preview
+    ? `${metrics?.rowCount ?? 0}`
+    : coverageState.field
+      ? "✓"
+      : "0";
+
+  const updateParameter = (key: keyof CoverageParameters, rawValue: string): void => {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    try {
+      coverageService.setParameters({ [key]: value });
+    } catch (error) {
+      emitError(`Parámetro de cobertura inválido: ${String(error)}`);
+    }
+  };
+
+  const updateFieldSide = (rawValue: string): void => {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    try {
+      coverageService.setFieldDimensions({ fieldLengthM: value });
+    } catch (error) {
+      emitError(`Dimensión de campo inválida: ${String(error)}`);
+    }
+  };
+
+  const generatePreview = async (): Promise<void> => {
+    try {
+      const result = await coverageService.previewCoverage();
+      if (result.topologySafe) {
+        emitInfo(
+          `Preview listo: ${result.metrics.rowCount} pasadas, sin cruces dentro del campo`
+        );
+      } else {
+        emitError(
+          `Inicio bloqueado (${result.metrics.topologyConflictCount} conflictos dentro del campo)`
+        );
+      }
+    } catch (error) {
+      emitError(`Falló el preview de cobertura: ${String(error)}`);
+    }
+  };
+
+  const startCoverage = async (): Promise<void> => {
+    if (!preview || !coverageService.canStartMission()) return;
+    const approachRequirement = coverageState.runtimeProfile === "sim"
+      ? "en simulación puede estar hasta 50 m de la primera pasada y debe conservar hasta 30° de diferencia de rumbo."
+      : "debe estar a no más de 5 m de la primera pasada y con hasta 30° de diferencia de rumbo.";
+    const accepted = await dialogService.confirm({
+      title: "Iniciar cobertura",
+      message:
+        `El vehículo comenzará a moverse por un trazado de ${metrics?.rowCount ?? 0} pasadas ` +
+        `(${preview.keyWaypoints.length} metas key en el preview). El backend regenerará y revalidará la cobertura: ` +
+        approachRequirement,
+      confirmLabel: "Iniciar cobertura",
+      cancelLabel: "Cancelar",
+      danger: true
+    });
+    if (!accepted) return;
+    try {
+      const result = await coverageService.sendCoverageMission();
+      emitInfo(
+        `Cobertura iniciada (${result.inputCount} metas key, ${result.expandedCount} puntos de ruta)`
+      );
+    } catch (error) {
+      emitError(`No se pudo iniciar la cobertura: ${String(error)}`);
+    }
+  };
+
+  const squareFromVehicle = (): void => {
+    if (!robotPose) {
+      emitError("Todavía no llegó la pose del vehículo");
+      return;
+    }
+    try {
+      const next = coverageService.squareFromVehiclePose({
+        lat: robotPose.lat,
+        lon: robotPose.lon,
+        yawDeg: robotPose.headingDeg
+      });
+      emitInfo(
+        `Cuadrado de ${next.field?.fieldLengthM.toFixed(1) ?? "?"} m desde el vehículo; ` +
+          "ajustá el lado exacto y generá el preview"
+      );
+    } catch (error) {
+      emitError(`No se pudo armar el cuadrado: ${String(error)}`);
+    }
+  };
+
+  // Adelanto local del trazado: se recalcula al tipear, sin ida y vuelta al
+  // backend. El preview sigue siendo el unico que audita cruces y habilita el
+  // inicio, por eso esto se rotula como estimacion.
+  const layoutEstimate = useMemo(
+    () =>
+      coverageState.field
+        ? estimateCoverageLayout({
+            fieldLengthM: coverageState.field.fieldLengthM,
+            fieldWidthM: coverageState.field.fieldWidthM,
+            cutterWidthM: coverageState.parameters.cutterWidthM,
+            overlapRatio: coverageState.parameters.overlapRatio,
+            minTurningRadiusM: coverageState.parameters.minTurningRadiusM
+          })
+        : null,
+    [coverageState.field, coverageState.parameters]
+  );
+
+  return (
+    <NavSidebarCollapsibleSection
+      title="CAMPO"
+      badge={<span className={joinClassNames("waypoint-badge", !coverageState.field && "empty")}>{coverageBadge}</span>}
+      className="nav-sidebar-compact-section nav-sidebar-coverage-section"
+      defaultCollapsed
+    >
+      <div className="coverage-sidebar-stack">
+        <div className="coverage-sidebar-intro">
+          <strong>Cobertura sin cruces dentro del campo</strong>
+          <span>{coverageState.runtimeProfile === "sim" ? "Simulación: se bloquean los cruces dentro del lote y se permiten las maniobras exteriores." : "Perfil real: se conserva la validación global y el radio conservador de 4,0 m."}</span>
+        </div>
+
+        <div className="coverage-sidebar-actions">
+          <button
+            type="button"
+            className="ncb sec-btn"
+            disabled={!robotPose || coverageState.loading || coverageState.sending}
+            title={
+              robotPose
+                ? "Usa la pose actual del vehículo como esquina y su rumbo como dirección de las pasadas"
+                : "Esperando la pose del vehículo"
+            }
+            onClick={squareFromVehicle}
+          >
+            <ButtonFace
+              icon={<NavGlyph kind="field" />}
+              label="ARMAR CUADRADO"
+              meta={robotPose ? "Esquina en el vehículo" : "Sin pose"}
+              compact
+            />
+          </button>
+          <button
+            type="button"
+            className="ncb danger-btn"
+            disabled={
+              coverageState.loading ||
+              coverageState.sending ||
+              (!coverageState.field && !coverageState.preview)
+            }
+            onClick={() => {
+              coverageService.clear();
+              emitInfo("Coverage field cleared");
+            }}
+          >
+            <ButtonFace
+              icon={<NavGlyph kind="clear" />}
+              label="LIMPIAR"
+              meta="Campo y preview"
+              compact
+            />
+          </button>
+        </div>
+
+        <div className="coverage-status" role={coverageState.error ? "alert" : "status"}>
+          <span className={joinClassNames("coverage-status-dot", coverageState.error && "error", topologySafe && "safe")} />
+          <span>{coverageState.error || coverageState.lastStatus}</span>
+        </div>
+
+        {coverageState.field ? (
+          <>
+            <div className="coverage-field-summary">
+              <span><small>Lado</small><strong>{coverageState.field.fieldLengthM.toFixed(1)} m</strong></span>
+              <span><small>Superficie</small><strong>{(coverageState.field.fieldLengthM * coverageState.field.fieldWidthM).toFixed(0)} m²</strong></span>
+              <span><small>Rumbo inicial</small><strong>{coverageState.field.startYawDeg.toFixed(1)}°</strong></span>
+            </div>
+            <p className="coverage-field-hint">
+              En el mapa: arrastrá el tirador del centro para mover el cuadrado y
+              el de la esquina opuesta para cambiar el lado.
+            </p>
+            <div className="coverage-field-editor">
+              <label>
+                <span>Lado exacto</span>
+                <span className="coverage-number-input">
+                  <input
+                    aria-label="Lado exacto del campo"
+                    type="number"
+                    min={Math.max(0.5, coverageState.parameters.cutterWidthM)}
+                    step="0.1"
+                    disabled={coverageState.loading || coverageState.sending}
+                    value={coverageState.field.fieldLengthM}
+                    onChange={(event) => updateFieldSide(event.target.value)}
+                  />
+                  <small>m</small>
+                </span>
+              </label>
+              <button
+                type="button"
+                className="ncb sec-btn coverage-reverse-button"
+                disabled={coverageState.loading || coverageState.sending}
+                onClick={() => {
+                  try {
+                    coverageService.reverseFieldDirection();
+                    emitInfo("Inicio movido a la esquina opuesta; la cobertura recorrerá el largo en sentido inverso");
+                  } catch (error) {
+                    emitError(`No se pudo invertir el inicio: ${String(error)}`);
+                  }
+                }}
+              >
+                <ButtonFace icon={<NavGlyph kind="route" />} label="INVERTIR INICIO" meta="Cambia abajo ↔ arriba" compact />
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        <div className="coverage-parameter-grid">
+          <label>
+            <span>Ancho de corte</span>
+            <span className="coverage-number-input">
+              <input
+                aria-label="Ancho de corte"
+                type="number"
+                disabled={coverageState.loading || coverageState.sending}
+                min="0.1"
+                step="0.1"
+                value={coverageState.parameters.cutterWidthM}
+                onChange={(event) => updateParameter("cutterWidthM", event.target.value)}
+              />
+              <small>m</small>
+            </span>
+          </label>
+          <label>
+            <span>Solape</span>
+            <span className="coverage-number-input">
+              <input
+                aria-label="Solape"
+                type="number"
+                disabled={coverageState.loading || coverageState.sending}
+                min="0"
+                max="99"
+                step="1"
+                value={Math.round(coverageState.parameters.overlapRatio * 100)}
+                onChange={(event) => updateParameter("overlapRatio", Number(event.target.value) / 100 + "")}
+              />
+              <small>%</small>
+            </span>
+          </label>
+          <label>
+            <span>Radio de giro</span>
+            <span className="coverage-number-input">
+              <input
+                aria-label="Radio mínimo de giro"
+                type="number"
+                disabled={coverageState.loading || coverageState.sending}
+                min="4"
+                step="0.1"
+                value={coverageState.parameters.minTurningRadiusM}
+                onChange={(event) => updateParameter("minTurningRadiusM", event.target.value)}
+              />
+              <small>m</small>
+            </span>
+          </label>
+          <label>
+            <span>Detalle preview</span>
+            <span className="coverage-number-input">
+              <input
+                aria-label="Espaciado del preview"
+                type="number"
+                disabled={coverageState.loading || coverageState.sending}
+                min="0.5"
+                step="0.5"
+                value={coverageState.parameters.waypointSpacingM}
+                onChange={(event) => updateParameter("waypointSpacingM", event.target.value)}
+              />
+              <small>m</small>
+            </span>
+          </label>
+        </div>
+
+        {layoutEstimate ? (
+          <div className="coverage-estimate">
+            <span className="coverage-estimate-title">
+              Estimación · el preview la confirma
+            </span>
+            <div className="coverage-metrics" aria-label="Estimación del trazado">
+              <span>
+                <small>Pasadas</small><strong>{layoutEstimate.rowCount}</strong>
+              </span>
+              <span>
+                <small>Separación</small><strong>{layoutEstimate.laneSpacingM.toFixed(2)} m</strong>
+              </span>
+              <span className={layoutEstimate.omegaTurnCount > 0 ? "warning" : "safe"}>
+                <small>Giros omega</small><strong>{layoutEstimate.omegaTurnCount}</strong>
+              </span>
+              <span className={layoutEstimate.omegaTurnCount > 0 ? "warning" : undefined}>
+                <small>Cabecera libre</small>
+                <strong>{layoutEstimate.headlandClearanceM.toFixed(1)} m</strong>
+              </span>
+              <span className={layoutEstimate.lateralClearanceM > 0 ? "warning" : undefined}>
+                <small>Desborde lat.</small>
+                <strong>{layoutEstimate.lateralClearanceM.toFixed(1)} m</strong>
+              </span>
+              <span>
+                <small>Recorrido</small>
+                <strong>{layoutEstimate.estimatedPathLengthM.toFixed(0)} m</strong>
+              </span>
+            </div>
+            <span className="coverage-estimate-note">
+              {layoutEstimate.omegaTurnCount > 0
+                ? `Las pasadas quedan a ${layoutEstimate.laneSpacingM.toFixed(2)} m y el radio es ` +
+                  `${coverageState.parameters.minTurningRadiusM.toFixed(1)} m, así que los ${layoutEstimate.omegaTurnCount} ` +
+                  `giros son omega: necesitan ${layoutEstimate.headlandClearanceM.toFixed(1)} m libres más allá de cada ` +
+                  `extremo y se salen ${layoutEstimate.lateralClearanceM.toFixed(1)} m a los costados.`
+                : `Las pasadas se separan lo suficiente para girar en U limpia dentro de ` +
+                  `${layoutEstimate.headlandClearanceM.toFixed(1)} m de cabecera.`}
+            </span>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="ncb-wide sec-btn coverage-preview-button"
+          disabled={!coverageState.field || coverageState.loading || coverageState.sending}
+          title="Calcular y dibujar la trayectoria antes de iniciar"
+          onClick={() => void generatePreview()}
+        >
+          <ButtonFace
+            icon={<NavGlyph kind="refresh" />}
+            label={coverageState.loading ? "GENERANDO..." : "GENERAR PREVIEW"}
+            meta="Audita el interior del campo"
+          />
+        </button>
+
+        {preview && metrics ? (
+          <>
+            <div className="coverage-metrics" aria-label="Métricas de cobertura">
+              <span><small>Pasadas</small><strong>{metrics.rowCount}</strong></span>
+              <span><small>Separación</small><strong>{metrics.laneSpacingM.toFixed(2)} m</strong></span>
+              <span><small>Metas key</small><strong>{preview.keyWaypoints.length}</strong></span>
+              <span><small>Trayectoria</small><strong>{metrics.estimatedPathLengthM.toFixed(1)} m</strong></span>
+              <span><small>Giros U</small><strong>{metrics.cleanUturnCount}/{metrics.turnCount}</strong></span>
+              <span className={metrics.omegaTurnCount > 0 ? "danger" : "safe"}>
+                <small>Giros omega</small><strong>{metrics.omegaTurnCount}</strong>
+              </span>
+              <span className={metrics.topologyConflictCount > 0 ? "danger" : "safe"}>
+                <small>Dentro campo</small><strong>{metrics.topologyConflictCount}</strong>
+              </span>
+              <span className={metrics.globalTopologyConflictCount > 0 ? "warning" : "safe"}>
+                <small>Todo trazado</small><strong>{metrics.globalTopologyConflictCount}</strong>
+              </span>
+              <span><small>Auditoría</small><strong>{metrics.topologyAuditSpacingM.toFixed(2)} m</strong></span>
+            </div>
+            <div className={joinClassNames("coverage-safety", topologySafe ? "safe" : "unsafe")} role={topologySafe ? "status" : "alert"}>
+              <strong>{topologySafe ? "TRAZADO NOMINAL SEGURO" : "INICIO BLOQUEADO"}</strong>
+              <span>
+                {topologySafe
+                  ? metrics.topologyScope === "field_interior"
+                    ? `Sin cruces dentro del campo. ${metrics.globalTopologyConflictCount > 0 ? `${metrics.globalTopologyConflictCount} conflicto(s) quedan en las cabeceras exteriores y no bloquean. ` : ""}${metrics.omegaTurnCount > 0 ? `${metrics.omegaTurnCount} giro(s) omega fuera del lote. ` : ""}Nav2 conserva autoridad y puede replanificar.`
+                    : "Sin conflictos en todo el trazado nominal. Nav2 conserva autoridad y puede replanificar."
+                  : preview.topologyError ||
+                    `${metrics.topologyConflictCount} conflicto(s) dentro del campo: cambiá el rumbo, ancho de corte, solape o radio.`}
+              </span>
+            </div>
+          </>
+        ) : null}
+
+        {coverageState.error ? (
+          <div className="coverage-safety unsafe coverage-start-error" role="alert">
+            <strong>NO SE INICIÓ LA COBERTURA</strong>
+            <span>{coverageState.error}</span>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className={joinClassNames("ncb-wide send-btn coverage-start-button", topologySafe && !controlLocked && "active")}
+          disabled={startDisabled}
+          title={controlLocked ? lockReasonText : topologySafe ? "Confirmar e iniciar la cobertura" : "Se requiere un preview sin cruces dentro del campo"}
+          onClick={() => void startCoverage()}
+        >
+          <ButtonFace
+            icon={<NavGlyph kind="dispatch" />}
+            label={coverageState.sending ? "ENVIANDO..." : "INICIAR COBERTURA"}
+            meta={preview ? `${preview.keyWaypoints.length} metas key · sin loop` : "Primero generá un preview seguro"}
+          />
+        </button>
+      </div>
+    </NavSidebarCollapsibleSection>
+  );
 }
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
@@ -1703,6 +2144,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           </button>
         </div>
       </NavSidebarCollapsibleSection>
+
+      <CoverageSidebarSection
+        runtime={runtime}
+        controlLocked={navState.controlLocked}
+        lockReasonText={lockReasonText}
+        emitInfo={emitInfo}
+        emitError={emitError}
+      />
 
       {/* ── 4. FILE ───────────────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection
@@ -2752,6 +3201,12 @@ function registerServices(
     service: navigationService
   });
 
+  const coverageService = new CoverageService(dispatcher, navigationService);
+  ctx.services.registerService({
+    id: COVERAGE_SERVICE_ID,
+    service: coverageService
+  });
+
   const connectionService = new ConnectionService(
     ctx.transportManager,
     ctx.env,
@@ -2763,7 +3218,18 @@ function registerServices(
     id: CONNECTION_SERVICE_ID,
     service: connectionService
   });
+  let previousCoverageEndpoint = "";
   connectionService.subscribe((state) => {
+    coverageService.setRuntimeProfile(state.preset === "sim" ? "sim" : "real");
+    const coverageEndpoint = `${state.preset}:${state.host.trim()}:${state.port.trim()}`;
+    const coverageEndpointChanged = previousCoverageEndpoint.length > 0 && coverageEndpoint !== previousCoverageEndpoint;
+    if (!state.connected) {
+      coverageService.invalidatePreview("Conexión cerrada; regenerá el preview en la próxima sesión");
+    } else if (coverageEndpointChanged) {
+      coverageService.invalidatePreview("Cambió el endpoint de conexión; regenerá el preview");
+    }
+    previousCoverageEndpoint = coverageEndpoint;
+
     if (!state.connected) {
       navigationService.applyLocalControlLock(true, "DISCONNECTED");
       return;

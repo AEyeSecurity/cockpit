@@ -25,7 +25,15 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestRouteMission(goal: unknown): Promise<Nav2IncomingMessage> {
-    return this.request("set_route_ll", goal, { timeoutMs: 7000 });
+    return this.request("set_route_ll", goal, { timeoutMs: 15000 });
+  }
+
+  async requestCoveragePreview(field: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("preview_coverage", field, { timeoutMs: 15000 });
+  }
+
+  async requestStartCoverage(field: unknown): Promise<Nav2IncomingMessage> {
+    return this.request("start_coverage", field, { timeoutMs: 25000 });
   }
 
   async requestPatrolMission(goal: unknown): Promise<Nav2IncomingMessage> {

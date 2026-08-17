@@ -8199,3 +8199,292 @@ pre {
   margin-top: -4px;
   text-transform: uppercase;
 }
+
+/* ── CAMPO / coverage planner ───────────────────────────────────────── */
+
+.nav-sidebar .coverage-sidebar-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.nav-sidebar .coverage-sidebar-intro {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.nav-sidebar .coverage-sidebar-intro strong {
+  color: #1e3a8a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.nav-sidebar .coverage-sidebar-intro span {
+  color: #475569;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.nav-sidebar .coverage-sidebar-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nav-sidebar .coverage-sidebar-actions .ncb {
+  min-width: 0;
+  min-height: 48px;
+}
+
+
+.nav-sidebar .coverage-estimate {
+  display: grid;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.nav-sidebar .coverage-estimate-title {
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.nav-sidebar .coverage-estimate-note {
+  color: #475569;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.nav-sidebar .coverage-status {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.nav-sidebar .coverage-status-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.nav-sidebar .coverage-status-dot.safe {
+  background: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.14);
+}
+
+.nav-sidebar .coverage-status-dot.error {
+  background: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.14);
+}
+
+.nav-sidebar .coverage-field-summary,
+.nav-sidebar .coverage-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nav-sidebar .coverage-field-summary > span,
+.nav-sidebar .coverage-metrics > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 7px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.nav-sidebar .coverage-field-summary small,
+.nav-sidebar .coverage-metrics small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.nav-sidebar .coverage-field-summary strong,
+.nav-sidebar .coverage-metrics strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-sidebar .coverage-metrics > span.safe {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+
+.nav-sidebar .coverage-metrics > span.danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.nav-sidebar .coverage-metrics > span.danger strong {
+  color: #b91c1c;
+}
+
+.nav-sidebar .coverage-metrics > span.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.nav-sidebar .coverage-metrics > span.warning strong {
+  color: #c2410c;
+}
+
+.nav-sidebar .coverage-field-hint {
+  margin: 0;
+  color: #475569;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.nav-sidebar .coverage-field-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nav-sidebar .coverage-field-editor > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav-sidebar .coverage-field-editor > label:only-child {
+  grid-column: 1 / -1;
+}
+
+.nav-sidebar .coverage-reverse-button {
+  min-width: 0;
+  min-height: 46px;
+  grid-column: 1 / -1;
+}
+
+.nav-sidebar .coverage-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nav-sidebar .coverage-parameter-grid > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav-sidebar .coverage-number-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.nav-sidebar .coverage-number-input input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 4px 5px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #0f172a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  box-shadow: none;
+}
+
+.nav-sidebar .coverage-number-input input:focus {
+  outline: 0;
+}
+
+.nav-sidebar .coverage-number-input:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.nav-sidebar .coverage-number-input small {
+  padding-right: 7px;
+  color: #64748b;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: none;
+}
+
+.nav-sidebar .coverage-preview-button,
+.nav-sidebar .coverage-start-button {
+  min-height: 48px;
+}
+
+.nav-sidebar .coverage-safety {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid;
+  border-radius: 9px;
+}
+
+.nav-sidebar .coverage-safety strong {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.nav-sidebar .coverage-safety span {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.nav-sidebar .coverage-safety.safe {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.nav-sidebar .coverage-safety.unsafe {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}

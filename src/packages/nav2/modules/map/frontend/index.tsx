@@ -15,6 +15,12 @@ import {
   type NavigationState,
   type PatrolMissionProfile
 } from "../../navigation/service/impl/NavigationService";
+import {
+  COVERAGE_SERVICE_ID,
+  type CoverageGeoPoint,
+  type CoverageService,
+  type CoverageState
+} from "../../navigation/service/impl/CoverageService";
 import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../../navigation/routeMissionActivity";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
@@ -37,6 +43,12 @@ const GPS_DEFAULT_CENTER: L.LatLngTuple = [-31.4201, -64.1888];
 const MAP_WHEEL_PX_PER_ZOOM_LEVEL = 160;
 const MAP_WHEEL_DEBOUNCE_MS = 80;
 const MAP_TOOL_COLOR = "#55ff7f";
+const ROBOT_TRAIL_COLOR = "#ff4d6d";
+const COVERAGE_ROUTE_COLOR = "#ff0f64";
+const COVERAGE_ROUTE_UNSAFE_COLOR = "#ff9f43";
+const COVERAGE_FIELD_COLOR = "#60a5fa";
+const ROBOT_TRAIL_MIN_STEP_M = 0.25;
+const ROBOT_TRAIL_MAX_POINTS = 20000;
 const PROTRACTOR_MIN_ARM_METERS = 0.05;
 const PROTRACTOR_SNAP_THRESHOLD_DEG = 12;
 const VISION_DATA_URL = "http://localhost:8088/data";
@@ -560,6 +572,22 @@ function buildWaypointIcon(
   });
 }
 
+/**
+ * Tirador del cuadrado de cobertura.
+ *
+ * `move` va al centro y `resize` a la esquina opuesta a la de arranque. Son
+ * marcadores porque Leaflet no arrastra poligonos.
+ */
+function buildCoverageHandleIcon(kind: "move" | "resize"): L.DivIcon {
+  const glyph = kind === "move" ? "✥" : "⤢";
+  return L.divIcon({
+    className: "",
+    html: `<div class="coverage-handle ${kind}" aria-hidden="true">${glyph}</div>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13]
+  });
+}
+
 function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
   const hasHeading = headingDeg !== null && headingDeg !== undefined && Number.isFinite(Number(headingDeg));
   const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0;
@@ -609,16 +637,20 @@ function LeafletMapCanvas({
   interactive,
   goalMode,
   waypointSelectionMode,
+  coverageState,
   waypoints,
   patrolMissionProfile,
   selectedWaypointIndexes,
   robotPose,
   datumPose,
   centerRequestKey,
+  showRobotTrail,
   onQueueWaypoint,
   onToggleWaypointSelection,
   onSetWaypointSelection,
   onMoveWaypoint,
+  onCoverageFieldMove,
+  onCoverageFieldResize,
   onZoneToolSettled,
   loopRoute,
   initialCenterLat,
@@ -633,16 +665,20 @@ function LeafletMapCanvas({
   interactive: boolean;
   goalMode: boolean;
   waypointSelectionMode: boolean;
+  coverageState: CoverageState | null;
   waypoints: NavigationState["waypoints"];
   patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
+  showRobotTrail: boolean;
   onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onSetWaypointSelection: (indexes: number[], mode: "replace" | "add") => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
+  onCoverageFieldMove: (lat: number, lon: number) => void;
+  onCoverageFieldResize: (lat: number, lon: number) => void;
   onZoneToolSettled: () => void;
   loopRoute: boolean;
   initialCenterLat: number;
@@ -657,7 +693,10 @@ function LeafletMapCanvas({
   const waypointLayerRef = useRef<L.LayerGroup | null>(null);
   const draftLayerRef = useRef<L.LayerGroup | null>(null);
   const selectionLayerRef = useRef<L.LayerGroup | null>(null);
+  const coverageLayerRef = useRef<L.LayerGroup | null>(null);
   const robotMarkerRef = useRef<L.Marker | null>(null);
+  const robotTrailRef = useRef<L.Polyline | null>(null);
+  const robotTrailPointsRef = useRef<L.LatLng[]>([]);
   const datumMarkerRef = useRef<L.Marker | null>(null);
   const draftMarkerRef = useRef<L.Marker | null>(null);
   const goalDraftRef = useRef<{ lat: number; lon: number; yawDeg?: number; dragYaw: boolean } | null>(null);
@@ -690,6 +729,8 @@ function LeafletMapCanvas({
   const onToggleWaypointSelectionRef = useRef(onToggleWaypointSelection);
   const onSetWaypointSelectionRef = useRef(onSetWaypointSelection);
   const onMoveWaypointRef = useRef(onMoveWaypoint);
+  const onCoverageFieldMoveRef = useRef(onCoverageFieldMove);
+  const onCoverageFieldResizeRef = useRef(onCoverageFieldResize);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const appliedMapOriginKeyRef = useRef<string>("");
 
@@ -723,6 +764,12 @@ function LeafletMapCanvas({
   useEffect(() => {
     onMoveWaypointRef.current = onMoveWaypoint;
   }, [onMoveWaypoint]);
+  useEffect(() => {
+    onCoverageFieldMoveRef.current = onCoverageFieldMove;
+  }, [onCoverageFieldMove]);
+  useEffect(() => {
+    onCoverageFieldResizeRef.current = onCoverageFieldResize;
+  }, [onCoverageFieldResize]);
   useEffect(() => {
     onZoneToolSettledRef.current = onZoneToolSettled;
   }, [onZoneToolSettled]);
@@ -1146,12 +1193,14 @@ function LeafletMapCanvas({
     const waypointLayer = L.layerGroup();
     const draftLayer = L.layerGroup();
     const selectionLayer = L.layerGroup();
+    const coverageLayer = L.layerGroup();
     const toolDraftLayer = L.layerGroup();
     const toolDrawingsLayer = L.layerGroup();
     map.addLayer(drawnItems);
     map.addLayer(waypointLayer);
     map.addLayer(draftLayer);
     map.addLayer(selectionLayer);
+    map.addLayer(coverageLayer);
     map.addLayer(toolDraftLayer);
     map.addLayer(toolDrawingsLayer);
     mapRef.current = map;
@@ -1160,6 +1209,7 @@ function LeafletMapCanvas({
     waypointRenderKeyRef.current = "";
     draftLayerRef.current = draftLayer;
     selectionLayerRef.current = selectionLayer;
+    coverageLayerRef.current = coverageLayer;
     toolDraftLayerRef.current = toolDraftLayer;
     toolDrawingsLayerRef.current = toolDrawingsLayer;
     onZoomChange?.(map.getZoom());
@@ -1516,9 +1566,12 @@ function LeafletMapCanvas({
       waypointRenderKeyRef.current = "";
       draftLayerRef.current = null;
       selectionLayerRef.current = null;
+      coverageLayerRef.current = null;
       toolDraftLayerRef.current = null;
       toolDrawingsLayerRef.current = null;
       robotMarkerRef.current = null;
+      robotTrailRef.current = null;
+      robotTrailPointsRef.current = [];
       datumMarkerRef.current = null;
       draftMarkerRef.current = null;
       measurePointsRef.current = [];
@@ -1598,6 +1651,124 @@ function LeafletMapCanvas({
       drawnItems.addLayer(layer);
     });
   }, [mapService, state.zones]);
+
+  useEffect(() => {
+    const layer = coverageLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!coverageState) return;
+
+    const fieldPoints = coverageState.fieldPolygon.filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
+    );
+    if (fieldPoints.length >= 3) {
+      L.polygon(
+        fieldPoints.map((point) => [point.lat, point.lon] as L.LatLngTuple),
+        {
+          color: COVERAGE_FIELD_COLOR,
+          weight: 2,
+          opacity: 0.95,
+          dashArray: "7 5",
+          fillColor: COVERAGE_FIELD_COLOR,
+          fillOpacity: 0.08,
+          interactive: false
+        }
+      ).addTo(layer);
+    }
+
+    // Tiradores del cuadrado: el del centro lo mueve, el de la esquina opuesta a
+    // la de arranque le cambia el lado. Leaflet no arrastra poligonos, asi que la
+    // manija es un marcador; mientras se arrastra se apaga el paneo del mapa.
+    if (fieldPoints.length === 4 && !coverageState.sending) {
+      const origin = fieldPoints[0]!;
+      const farCorner = fieldPoints[2]!;
+      const centre = {
+        lat: (origin.lat + farCorner.lat) / 2,
+        lon: (origin.lon + farCorner.lon) / 2
+      };
+
+      const holdMapWhileDragging = (marker: L.Marker): void => {
+        marker.on("dragstart", () => {
+          const map = mapRef.current;
+          if (map?.dragging.enabled()) map.dragging.disable();
+        });
+        marker.on("dragend", () => {
+          const map = mapRef.current;
+          if (interactiveRef.current && map && !map.dragging.enabled()) {
+            map.dragging.enable();
+          }
+        });
+      };
+
+      const moveHandle = L.marker([centre.lat, centre.lon], {
+        icon: buildCoverageHandleIcon("move"),
+        draggable: true,
+        interactive: true,
+        zIndexOffset: 500
+      }).bindTooltip("Arrastrar para mover el cuadrado", { direction: "top" });
+      holdMapWhileDragging(moveHandle);
+      moveHandle.on("dragend", () => {
+        const latLng = moveHandle.getLatLng();
+        onCoverageFieldMoveRef.current(Number(latLng.lat), Number(latLng.lng));
+      });
+      moveHandle.addTo(layer);
+
+      const resizeHandle = L.marker([farCorner.lat, farCorner.lon], {
+        icon: buildCoverageHandleIcon("resize"),
+        draggable: true,
+        interactive: true,
+        zIndexOffset: 500
+      }).bindTooltip("Arrastrar para cambiar el lado", { direction: "top" });
+      holdMapWhileDragging(resizeHandle);
+      resizeHandle.on("dragend", () => {
+        const latLng = resizeHandle.getLatLng();
+        onCoverageFieldResizeRef.current(Number(latLng.lat), Number(latLng.lng));
+      });
+      resizeHandle.addTo(layer);
+    }
+
+    const sampledPoints = (coverageState.preview?.sampledWaypoints ?? []).filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
+    );
+    if (sampledPoints.length >= 2) {
+      const routeColor = coverageState.preview?.topologySafe
+        ? COVERAGE_ROUTE_COLOR
+        : COVERAGE_ROUTE_UNSAFE_COLOR;
+      L.polyline(
+        sampledPoints.map((point) => [point.lat, point.lon] as L.LatLngTuple),
+        {
+          color: routeColor,
+          weight: 3,
+          opacity: 0.96,
+          lineCap: "round",
+          lineJoin: "round",
+          interactive: false
+        }
+      ).addTo(layer);
+      const start = sampledPoints[0];
+      const end = sampledPoints[sampledPoints.length - 1];
+      if (start) {
+        L.circleMarker([start.lat, start.lon], {
+          radius: 5,
+          color: "#dbeafe",
+          weight: 2,
+          fillColor: "#f8fafc",
+          fillOpacity: 1,
+          interactive: false
+        }).addTo(layer);
+      }
+      if (end) {
+        L.circleMarker([end.lat, end.lon], {
+          radius: 4,
+          color: routeColor,
+          weight: 2,
+          fillColor: "#111827",
+          fillOpacity: 1,
+          interactive: false
+        }).addTo(layer);
+      }
+    }
+  }, [coverageState]);
 
   useEffect(() => {
     const layer = waypointLayerRef.current;
@@ -1703,6 +1874,28 @@ function LeafletMapCanvas({
       return;
     }
     const latLng = L.latLng(robotPose.lat, robotPose.lon);
+
+    if (showRobotTrail) {
+      const trailPoints = robotTrailPointsRef.current;
+      const lastPoint = trailPoints[trailPoints.length - 1];
+      if (!lastPoint || lastPoint.distanceTo(latLng) >= ROBOT_TRAIL_MIN_STEP_M) {
+        trailPoints.push(latLng);
+        if (trailPoints.length > ROBOT_TRAIL_MAX_POINTS) {
+          trailPoints.splice(0, trailPoints.length - ROBOT_TRAIL_MAX_POINTS);
+        }
+        if (!robotTrailRef.current) {
+          robotTrailRef.current = L.polyline(trailPoints, {
+            color: ROBOT_TRAIL_COLOR,
+            weight: 2,
+            opacity: 0.85,
+            interactive: false
+          }).addTo(map);
+        } else {
+          robotTrailRef.current.setLatLngs(trailPoints);
+        }
+      }
+    }
+
     if (!robotMarkerRef.current) {
       robotMarkerRef.current = L.marker(latLng, {
         icon: buildRobotIcon(robotPose.headingDeg),
@@ -1712,7 +1905,17 @@ function LeafletMapCanvas({
     }
     robotMarkerRef.current.setLatLng(latLng);
     robotMarkerRef.current.setIcon(buildRobotIcon(robotPose.headingDeg));
-  }, [robotPose]);
+  }, [robotPose, showRobotTrail]);
+
+  useEffect(() => {
+    if (showRobotTrail) return;
+    const map = mapRef.current;
+    if (map && robotTrailRef.current) {
+      map.removeLayer(robotTrailRef.current);
+    }
+    robotTrailRef.current = null;
+    robotTrailPointsRef.current = [];
+  }, [showRobotTrail]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2463,6 +2666,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   } catch {
     navigationService = null;
   }
+  let coverageService: CoverageService | null = null;
+  try {
+    coverageService = runtime.services.getService<CoverageService>(COVERAGE_SERVICE_ID);
+  } catch {
+    coverageService = null;
+  }
   let connectionService: ConnectionService | null = null;
   try {
     connectionService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
@@ -2494,9 +2703,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   });
   const [leafletZoneToolActive, setLeafletZoneToolActive] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
+  const [showRobotTrail, setShowRobotTrail] = useState(true);
   const [mapZoom, setMapZoom] = useState(GPS_DEFAULT_ZOOM);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
+  );
+  const [coverageState, setCoverageState] = useState<CoverageState | null>(
+    coverageService ? coverageService.getState() : null
   );
   const [connectionState, setConnectionState] = useState<ConnectionState | null>(
     connectionService ? connectionService.getState() : null
@@ -2539,6 +2752,10 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     if (!navigationService) return;
     return navigationService.subscribe((next) => setNavigationState(next));
   }, [navigationService]);
+  useEffect(() => {
+    if (!coverageService) return;
+    return coverageService.subscribe((next) => setCoverageState(next));
+  }, [coverageService]);
   useEffect(() => {
     if (!connectionService) return;
     return connectionService.subscribe((next) => setConnectionState(next));
@@ -2992,6 +3209,32 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     });
   };
 
+  const moveCoverageFieldFromMap = (lat: number, lon: number): void => {
+    if (!coverageService) return;
+    try {
+      coverageService.moveFieldTo({ lat, lon });
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `No se pudo mover el campo: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    }
+  };
+
+  const resizeCoverageFieldFromMap = (lat: number, lon: number): void => {
+    if (!coverageService) return;
+    try {
+      coverageService.resizeFieldFromCorner({ lat, lon });
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `No se pudo cambiar el lado del campo: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!mainIsMap || !mapToolsEnabled || isEditingTarget(event.target)) return;
@@ -3030,7 +3273,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
+  }, [closeMapTools, coverageService, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
 
   return (
     <div className="map-workspace-root map-html-root">
@@ -3045,6 +3288,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 interactive={mapInteractive}
                 goalMode={navigationState?.goalMode === true}
                 waypointSelectionMode={navigationState?.waypointSelectionMode === true}
+                coverageState={coverageState}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -3059,10 +3303,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                showRobotTrail={showRobotTrail}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
+                onCoverageFieldMove={moveCoverageFieldFromMap}
+                onCoverageFieldResize={resizeCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
@@ -3120,6 +3367,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 interactive={false}
                 goalMode={false}
                 waypointSelectionMode={false}
+                coverageState={coverageState}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -3134,10 +3382,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                showRobotTrail={showRobotTrail}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
                 onMoveWaypoint={moveWaypointFromMap}
+                onCoverageFieldMove={moveCoverageFieldFromMap}
+                onCoverageFieldResize={resizeCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
@@ -3468,6 +3719,30 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   <line x1="8" y1="13" x2="8" y2="15"/>
                   <line x1="1" y1="8" x2="3" y2="8"/>
                   <line x1="13" y1="8" x2="15" y2="8"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`map-btn ${showRobotTrail ? "active" : ""}`}
+                onClick={() => {
+                  setShowRobotTrail((current) => {
+                    const next = !current;
+                    runtime.eventBus.emit("console.event", {
+                      level: "info",
+                      text: next ? "Robot trail enabled" : "Robot trail cleared",
+                      timestamp: Date.now()
+                    });
+                    return next;
+                  });
+                }}
+                title={showRobotTrail ? "Traza del recorrido: apagar y borrar" : "Traza del recorrido: encender"}
+                aria-label="Traza del recorrido"
+                aria-pressed={showRobotTrail}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2 12.5c2.5 0 2.5-4 5-4s2.5 4 5 4"/>
+                  <path d="M3.5 4.5h9"/>
+                  <circle cx="12.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
                 </svg>
               </button>
                 </div>

@@ -447,6 +447,35 @@
   opacity: 0.9;
 }
 
+/* Tiradores del cuadrado de cobertura: mover (centro) y cambiar el lado
+   (esquina opuesta a la de arranque). */
+.coverage-handle {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 2px solid #60a5fa;
+  background: rgba(15, 23, 42, 0.85);
+  color: #dbeafe;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.coverage-handle.resize {
+  border-radius: 50%;
+  border-style: dashed;
+}
+
+.coverage-handle:active {
+  cursor: grabbing;
+  background: rgba(37, 99, 235, 0.9);
+}
+
 .wp-icon {
   width: 30px;
   height: 30px;
