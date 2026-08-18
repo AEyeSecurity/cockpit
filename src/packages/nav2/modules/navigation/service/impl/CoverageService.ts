@@ -1,9 +1,23 @@
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { NavigationService } from "./NavigationService";
+import {
+  NOGO_DETOUR_PHASE,
+  clipPathToNoGo,
+  type NoGoPoint,
+  type NoGoPolygon
+} from "./coverageNoGo";
 
 export const COVERAGE_SERVICE_ID = "service.coverage";
 export const MAX_COVERAGE_ROUTE_WAYPOINTS = 200;
+
+/**
+ * Colchon sobre el medio ancho de corte al inflar una zona no-go. Tiene que ser
+ * igual al parametro `coverage_nogo_extra_margin_m` del route_executor: si los
+ * margenes no coinciden, los dos recortes dan resultados distintos y el de aca
+ * deja de ser un no-op sobre lo que ya recorto el backend.
+ */
+const NOGO_EXTRA_MARGIN_M = 0.5;
 
 const METERS_PER_DEG_LAT = 111_320;
 const MIN_FIELD_EDGE_M = 0.5;
@@ -88,6 +102,21 @@ export interface CoveragePreview {
   topologySafe: boolean;
   topologyError: string;
   legSpacingM: number;
+  /** Cuantas zonas no-go aplico el backend. Cero significa que no recorto. */
+  nogoPolygonCount: number;
+  /** Motivo que dio el backend cuando no pudo leer las zonas. */
+  nogoNote: string;
+  /** El cockpit tuvo que recortar por su cuenta porque el backend no lo hizo. */
+  nogoClippedLocally: boolean;
+}
+
+/**
+ * Lo unico que este servicio necesita del mapa: las zonas dibujadas. Se declara
+ * estructuralmente y no importando `MapService` para no atar el paquete de
+ * navegacion al del mapa por un solo `getState`.
+ */
+export interface NoGoZoneSource {
+  getState(): { zones: Array<{ enabled?: boolean; polygon?: CoverageGeoPoint[] }> };
 }
 
 export interface CoverageState {
@@ -413,6 +442,69 @@ function clonePreview(preview: CoveragePreview): CoveragePreview {
   };
 }
 
+/**
+ * Zonas habilitadas del mapa, proyectadas a metros locales contra el origen.
+ *
+ * Se usa el mismo origen para las zonas y para el trazado, asi que el recorte no
+ * depende de donde esta el lote ni de como esta rotado.
+ */
+function noGoPolygonsFromZones(
+  zoneSource: NoGoZoneSource | undefined,
+  origin: CoverageGeoPoint
+): NoGoPolygon[] {
+  if (!zoneSource) return [];
+  const polygons: NoGoPolygon[] = [];
+  for (const zone of zoneSource.getState().zones) {
+    if (zone.enabled === false) continue;
+    const polygon = zone.polygon;
+    if (!Array.isArray(polygon) || polygon.length < 3) continue;
+    polygons.push(
+      polygon.map((vertex) => {
+        const local = localMeters(origin, vertex);
+        return { x: local.east, y: local.north };
+      })
+    );
+  }
+  return polygons;
+}
+
+/**
+ * Recortar el trazado contra las zonas del mapa.
+ *
+ * Es la misma cuenta que ya hizo el backend. Se repite porque el recorte del
+ * backend depende de que `zones_manager` este vivo y de que el GeoJSON haya
+ * llegado; si algo de eso fallo, sin esto el operador veria un trazado que
+ * atraviesa la zona. Como el recorte es idempotente, cuando el backend si
+ * recorto esta pasada no cambia nada.
+ */
+function clipWaypointsToZones(
+  waypoints: CoverageWaypoint[],
+  polygons: NoGoPolygon[],
+  origin: CoverageGeoPoint,
+  marginM: number
+): { waypoints: CoverageWaypoint[]; dropped: number; detours: number } {
+  const result = clipPathToNoGo<CoverageWaypoint>(waypoints, polygons, {
+    marginM,
+    positionOf: (item) => {
+      const local = localMeters(origin, item);
+      return { x: local.east, y: local.north };
+    },
+    headingOf: (item) => item.yawDeg,
+    makeDetour: (point: NoGoPoint, headingDeg: number, target: CoverageWaypoint) => {
+      const geo = offsetPoint(origin, point.x, point.y);
+      return {
+        ...target,
+        lat: geo.lat,
+        lon: geo.lon,
+        yawDeg: normalizeYawDeg(headingDeg),
+        phase: NOGO_DETOUR_PHASE,
+        key: true
+      };
+    }
+  });
+  return { waypoints: result.items, dropped: result.dropped, detours: result.detours };
+}
+
 function parseCoveragePreview(
   response: Nav2IncomingMessage,
   field: CoverageFieldGeometry,
@@ -537,6 +629,9 @@ function parseCoveragePreview(
     topologySafe,
     topologyError,
     legSpacingM,
+    nogoPolygonCount: nonNegativeInteger(body.nogo_polygon_count ?? plan.nogo_polygon_count),
+    nogoNote: String(body.nogo_note ?? plan.nogo_note ?? "").trim(),
+    nogoClippedLocally: false,
     metrics: {
       topologyScope,
       rowCount: nonNegativeInteger(body.row_count ?? plan.row_count),
@@ -638,7 +733,8 @@ export class CoverageService {
 
   constructor(
     private readonly robotDispatcher: RobotDispatcher,
-    private readonly navigationService?: NavigationSafetyService
+    private readonly navigationService?: NavigationSafetyService,
+    private readonly zoneSource?: NoGoZoneSource
   ) {}
 
   getState(): CoverageState {
@@ -1154,7 +1250,11 @@ export class CoverageService {
       if (response.ok === false) {
         throw new Error(String(response.error ?? "preview_coverage fue rechazado"));
       }
-      const preview = parseCoveragePreview(response, field, requestParameters);
+      const preview = this.applyLocalNoGoClip(
+        parseCoveragePreview(response, field, requestParameters),
+        field,
+        requestParameters
+      );
       this.state = {
         ...this.state,
         loading: false,
@@ -1183,6 +1283,41 @@ export class CoverageService {
     }
   }
 
+  /**
+   * Repetir el recorte de zonas sobre lo que devolvio el backend.
+   *
+   * Si el backend ya recorto, esto es un no-op: el recorte es idempotente. Si no
+   * lo hizo —`zones_manager` caido, push del GeoJSON fallado— el dibujo queda
+   * bien igual y `nogoClippedLocally` marca la divergencia para que
+   * `sendCoverageMission` bloquee el arranque.
+   */
+  private applyLocalNoGoClip(
+    preview: CoveragePreview,
+    field: CoverageFieldGeometry,
+    parameters: CoverageParameters
+  ): CoveragePreview {
+    const origin = { lat: field.startLat, lon: field.startLon };
+    const polygons = noGoPolygonsFromZones(this.zoneSource, origin);
+    if (polygons.length === 0) return preview;
+
+    // Mismo margen que usa el backend: medio ancho de corte mas el colchon por
+    // defecto de `coverage_nogo_extra_margin_m`. Si los dos no coinciden, el
+    // recorte local moveria puntos que el backend dejo donde estaban y la
+    // idempotencia se pierde.
+    const marginM = 0.5 * parameters.cutterWidthM + NOGO_EXTRA_MARGIN_M;
+    const sampled = clipWaypointsToZones(preview.sampledWaypoints, polygons, origin, marginM);
+    const keys = clipWaypointsToZones(preview.keyWaypoints, polygons, origin, marginM);
+    const clippedLocally =
+      preview.nogoPolygonCount === 0 &&
+      (sampled.dropped > 0 || sampled.detours > 0 || keys.dropped > 0 || keys.detours > 0);
+    return {
+      ...preview,
+      sampledWaypoints: sampled.waypoints,
+      keyWaypoints: keys.waypoints,
+      nogoClippedLocally: clippedLocally
+    };
+  }
+
   canStartMission(): boolean {
     const preview = this.state.preview;
     return Boolean(
@@ -1192,6 +1327,7 @@ export class CoverageService {
       !this.state.loading &&
       !this.state.sending &&
       preview.topologySafe &&
+      !preview.nogoClippedLocally &&
       preview.keyWaypoints.length >= 2 &&
       preview.keyWaypoints.length <= MAX_COVERAGE_ROUTE_WAYPOINTS
     );
@@ -1208,6 +1344,16 @@ export class CoverageService {
     }
     if (!preview.topologySafe) {
       throw new Error(preview.topologyError || "La topología de cobertura no es segura");
+    }
+    // El backend replanifica al iniciar: si el no recorto, la ruta que se va a
+    // ejecutar atraviesa la zona aunque el dibujo la esquive. Antes que correr
+    // algo distinto a lo que se ve, no se arranca.
+    if (preview.nogoClippedLocally) {
+      throw new Error(
+        preview.nogoNote
+          ? `El backend no aplicó las zonas no-go (${preview.nogoNote}); revisá que zones_manager esté corriendo`
+          : "El backend no aplicó las zonas no-go; revisá que zones_manager esté corriendo"
+      );
     }
     if (preview.keyWaypoints.length > MAX_COVERAGE_ROUTE_WAYPOINTS) {
       throw new Error(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
@@ -656,6 +656,7 @@ function LeafletMapCanvas({
   onCoverageFieldRotate,
   onCoverageFieldPreview,
   onZoneToolSettled,
+  onZonesChanged,
   loopRoute,
   initialCenterLat,
   initialCenterLon,
@@ -692,6 +693,8 @@ function LeafletMapCanvas({
     cornerIndex?: number
   ) => Array<{ lat: number; lon: number }> | null;
   onZoneToolSettled: () => void;
+  /** Se dibujo, edito o borro una zona: lo que dependa de ellas quedo viejo. */
+  onZonesChanged: () => void;
   loopRoute: boolean;
   initialCenterLat: number;
   initialCenterLon: number;
@@ -746,6 +749,7 @@ function LeafletMapCanvas({
   const onCoverageFieldRotateRef = useRef(onCoverageFieldRotate);
   const onCoverageFieldPreviewRef = useRef(onCoverageFieldPreview);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
+  const onZonesChangedRef = useRef(onZonesChanged);
   const appliedMapOriginKeyRef = useRef<string>("");
 
   useEffect(() => {
@@ -793,6 +797,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     onZoneToolSettledRef.current = onZoneToolSettled;
   }, [onZoneToolSettled]);
+  useEffect(() => {
+    onZonesChangedRef.current = onZonesChanged;
+  }, [onZonesChanged]);
 
   const clearGoalDraft = (): void => {
     goalDraftRef.current = null;
@@ -1245,7 +1252,10 @@ function LeafletMapCanvas({
       },
       draw: {
         polyline: false,
-        rectangle: false,
+        // El rectangulo entra por el mismo camino que el poligono: leaflet-draw
+        // emite CREATED con cuatro vertices y de ahi hereda persistencia,
+        // edicion, borrado y push al backend sin nada nuevo.
+        rectangle: {},
         circle: false,
         marker: false,
         circlemarker: false,
@@ -1333,6 +1343,23 @@ function LeafletMapCanvas({
       };
     }
 
+    // El push ya no se puede tragar en silencio: si el backend no recibe la
+    // zona, planifica sin ella y el trazado que ve el operador miente. Se avisa
+    // en la consola y, pase lo que pase, se marca el preview como viejo.
+    const syncZones = (): void => {
+      onZonesChangedRef.current();
+      if (!mapService.getState().autoSync) return;
+      void mapService.pushZonesToBackend().catch((error: unknown) => {
+        runtime.eventBus.emit("console.event", {
+          level: "warn",
+          text: `No se pudieron enviar las zonas al backend: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          timestamp: Date.now()
+        });
+      });
+    };
+
     map.on(L.Draw.Event.CREATED, (event) => {
       if (toolModeRef.current !== "idle") return;
       const layer = event.layer;
@@ -1341,9 +1368,7 @@ function LeafletMapCanvas({
       const zone = mapService.addZoneFromPolygon(polygon);
       (layer as L.Polygon & { zoneId?: string }).zoneId = zone.id;
       drawnItems.addLayer(layer);
-      if (mapService.getState().autoSync) {
-        void mapService.pushZonesToBackend().catch(() => undefined);
-      }
+      syncZones();
       onZoneToolSettledRef.current();
     });
 
@@ -1356,9 +1381,7 @@ function LeafletMapCanvas({
         if (!zoneId) return;
         mapService.setZonePolygon(zoneId, extractPolygonLatLon(layer));
       });
-      if (mapService.getState().autoSync) {
-        void mapService.pushZonesToBackend().catch(() => undefined);
-      }
+      syncZones();
       onZoneToolSettledRef.current();
     });
 
@@ -1371,9 +1394,7 @@ function LeafletMapCanvas({
         if (!zoneId) return;
         mapService.removeZone(zoneId, { sync: false });
       });
-      if (mapService.getState().autoSync) {
-        void mapService.pushZonesToBackend().catch(() => undefined);
-      }
+      syncZones();
       onZoneToolSettledRef.current();
     });
 
@@ -3246,6 +3267,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const generalSnapshot = (generalPayload?.snapshot ?? {}) as Record<string, unknown>;
   const datumFromSensor = generalSnapshot.datum as Record<string, unknown> | undefined;
   const selectedDatumProfile = datumProfiles?.datums.find((entry) => entry.id === datumProfiles.selectedId);
+  // Las zonas no-go recortan el trazado de cobertura, asi que tocarlas deja el
+  // preview viejo. Se invalida en vez de regenerarlo solo: regenerar dispara un
+  // servicio al backend por cada vertice que se arrastra.
+  const handleZonesChanged = useCallback(() => {
+    coverageService?.invalidatePreview("Cambiaron las zonas no-go; regenera el preview");
+  }, [coverageService]);
+
   const datumLat = Number(datumFromSensor?.datum_lat ?? datumProfiles?.runtime.lat ?? selectedDatumProfile?.lat ?? state.map?.originLat ?? Number.NaN);
   const datumLon = Number(datumFromSensor?.datum_lon ?? datumProfiles?.runtime.lon ?? selectedDatumProfile?.lon ?? state.map?.originLon ?? Number.NaN);
   const datumPose =
@@ -3513,6 +3541,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldRotate={rotateCoverageFieldFromMap}
                 onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                onZonesChanged={handleZonesChanged}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
@@ -3594,6 +3623,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldRotate={rotateCoverageFieldFromMap}
                 onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
+                onZonesChanged={handleZonesChanged}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}

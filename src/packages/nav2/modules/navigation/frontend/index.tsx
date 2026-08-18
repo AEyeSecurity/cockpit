@@ -3202,7 +3202,12 @@ function registerServices(
     service: navigationService
   });
 
-  const coverageService = new CoverageService(dispatcher, navigationService);
+  // El MapService se resuelve en cada consulta y no una sola vez: los modulos se
+  // activan en orden y el del mapa puede no estar registrado todavia cuando se
+  // arma este servicio.
+  const coverageService = new CoverageService(dispatcher, navigationService, {
+    getState: () => getMapService(ctx)?.getState() ?? { zones: [] }
+  });
   ctx.services.registerService({
     id: COVERAGE_SERVICE_ID,
     service: coverageService
