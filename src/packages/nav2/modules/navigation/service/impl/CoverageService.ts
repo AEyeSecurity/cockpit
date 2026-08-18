@@ -12,12 +12,21 @@ export const COVERAGE_SERVICE_ID = "service.coverage";
 export const MAX_COVERAGE_ROUTE_WAYPOINTS = 200;
 
 /**
- * Colchon sobre el medio ancho de corte al inflar una zona no-go. Tiene que ser
- * igual al parametro `coverage_nogo_extra_margin_m` del route_executor: si los
- * margenes no coinciden, los dos recortes dan resultados distintos y el de aca
- * deja de ser un no-op sobre lo que ya recorto el backend.
+ * Colchon fijo sobre el medio ancho de corte al inflar una zona no-go. Tiene que
+ * ser igual al parametro `coverage_nogo_extra_margin_m` del route_executor: si
+ * los margenes no coinciden, los dos recortes dan resultados distintos y el de
+ * aca deja de ser un no-op sobre lo que ya recorto el backend.
  */
 const NOGO_EXTRA_MARGIN_M = 0.5;
+
+/**
+ * Cuanto radio de giro se suma al margen, espejo de
+ * `coverage_nogo_turning_margin_ratio`. El rodeo hace que el vehiculo maniobre
+ * contra el contorno y un Ackermann no puede doblar en escuadra: necesita su
+ * radio de espacio. Sin este termino el trazado se dibuja pegado a la zona y el
+ * robot termina barriendo por adentro.
+ */
+const NOGO_TURNING_MARGIN_RATIO = 1.0;
 
 const METERS_PER_DEG_LAT = 111_320;
 const MIN_FIELD_EDGE_M = 0.5;
@@ -1300,11 +1309,13 @@ export class CoverageService {
     const polygons = noGoPolygonsFromZones(this.zoneSource, origin);
     if (polygons.length === 0) return preview;
 
-    // Mismo margen que usa el backend: medio ancho de corte mas el colchon por
-    // defecto de `coverage_nogo_extra_margin_m`. Si los dos no coinciden, el
-    // recorte local moveria puntos que el backend dejo donde estaban y la
-    // idempotencia se pierde.
-    const marginM = 0.5 * parameters.cutterWidthM + NOGO_EXTRA_MARGIN_M;
+    // Mismo margen que usa el backend. Si los dos no coinciden, el recorte
+    // local moveria puntos que el backend dejo donde estaban y la idempotencia
+    // se pierde.
+    const marginM =
+      0.5 * parameters.cutterWidthM +
+      NOGO_EXTRA_MARGIN_M +
+      NOGO_TURNING_MARGIN_RATIO * parameters.minTurningRadiusM;
     const sampled = clipWaypointsToZones(preview.sampledWaypoints, polygons, origin, marginM);
     const keys = clipWaypointsToZones(preview.keyWaypoints, polygons, origin, marginM);
     const clippedLocally =
