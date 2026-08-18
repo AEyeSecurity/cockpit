@@ -104,6 +104,7 @@ async function main(): Promise<number> {
   const cutterWidthM = Number(process.argv[3] ?? 2);
   const start = process.argv.includes("--start");
   const moveIndex = process.argv.indexOf("--move");
+  const rotateIndex = process.argv.indexOf("--rotate");
   const resizeIndex = process.argv.indexOf("--resize");
 
   const socket = new WebSocket(URL, { maxPayload: 64 * 1024 * 1024 });
@@ -149,6 +150,26 @@ async function main(): Promise<number> {
     });
     console.log(`movido ${eastM} m al este y ${northM} m al norte`);
     console.log(`estado: ${service.getState().lastStatus}`);
+  }
+
+  if (rotateIndex >= 0) {
+    const rumboDeg = Number(process.argv[rotateIndex + 1] ?? 0);
+    const polygon = service.getState().fieldPolygon;
+    const centre = {
+      lat: (polygon[0]!.lat + polygon[2]!.lat) / 2,
+      lon: (polygon[0]!.lon + polygon[2]!.lon) / 2
+    };
+    const metresPerDegLat = 111_320;
+    const radio = 20;
+    const rad = (rumboDeg * Math.PI) / 180;
+    service.rotateFieldTo({
+      lat: centre.lat + (Math.sin(rad) * radio) / metresPerDegLat,
+      lon:
+        centre.lon +
+        (Math.cos(rad) * radio) / (metresPerDegLat * Math.cos((centre.lat * Math.PI) / 180))
+    });
+    console.log(`girado a rumbo ${rumboDeg} grados`);
+    console.log(`campo: rumbo ${service.getState().field!.startYawDeg.toFixed(1)} deg`);
   }
 
   if (resizeIndex >= 0) {

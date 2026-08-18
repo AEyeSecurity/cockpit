@@ -201,6 +201,57 @@ describe("CoverageService", () => {
       .toThrow(/lado debe ser mayor/i);
   });
 
+  it("redimensiona desde cualquier esquina dejando fija la opuesta", () => {
+    // Arrastrar la esquina 1 tiene que dejar quieta la 3, y viceversa. Es lo que
+    // espera cualquiera que haya redimensionado un rectangulo en un editor.
+    for (const arrastrada of [0, 1, 2, 3]) {
+      const service = new CoverageService(makeDispatcher().dispatcher);
+      placeField(service, 20, 0);
+      const antes = service.getState().fieldPolygon;
+      const anclaEsperada = antes[(arrastrada + 2) % 4]!;
+
+      // Se lleva la esquina a 30 m de la opuesta, sobre la diagonal.
+      const hacia = offsetPoint(
+        anclaEsperada,
+        (antes[arrastrada]!.lon - anclaEsperada.lon) > 0 ? 30 : -30,
+        (antes[arrastrada]!.lat - anclaEsperada.lat) > 0 ? 30 : -30
+      );
+      service.resizeFieldFromCorner(hacia, arrastrada);
+
+      const despues = service.getState();
+      expect(despues.field?.fieldLengthM).toBeCloseTo(30, 1);
+      expect(despues.field?.fieldWidthM).toBeCloseTo(30, 1);
+      // La opuesta no se movio.
+      expect(distanceBetween(despues.fieldPolygon[(arrastrada + 2) % 4]!, anclaEsperada))
+        .toBeLessThan(0.05);
+      // Y el rumbo no cambio.
+      expect(despues.field?.startYawDeg).toBeCloseTo(0, 6);
+    }
+  });
+
+  it("gira el cuadrado sobre su centro sin cambiarle el lado", () => {
+    const service = new CoverageService(makeDispatcher().dispatcher);
+    placeField(service, 20, 0);
+    const centroAntes = squareCentre(service.getState().fieldPolygon);
+
+    // El tirador cuelga de la esquina opuesta, que esta sobre la diagonal: a 45
+    // grados del eje de las pasadas. Soltarlo al norte del centro deja rumbo 45,
+    // no 90. Sin ese descuento el cuadrado saltaria apenas se lo toca.
+    service.rotateFieldTo(offsetPoint(centroAntes, 0, 18));
+
+    const despues = service.getState();
+    expect(despues.field?.startYawDeg).toBeCloseTo(45, 0);
+    expect(despues.field?.fieldLengthM).toBeCloseTo(20, 6);
+    // El centro se queda donde estaba: gira sobre si mismo, no camina.
+    expect(distanceBetween(squareCentre(despues.fieldPolygon), centroAntes)).toBeLessThan(0.05);
+    expect(despues.preview).toBeNull();
+
+    // Muy cerca del centro el angulo salta: se ignora en vez de dar un rumbo al azar.
+    const rumboAntes = despues.field!.startYawDeg;
+    service.rotateFieldTo(offsetPoint(squareCentre(despues.fieldPolygon), 0.3, 0));
+    expect(service.getState().field?.startYawDeg).toBeCloseTo(rumboAntes, 6);
+  });
+
   it("uses the ROS yaw convention: east is 0 degrees and north is 90 degrees", () => {
     const eastService = new CoverageService(makeDispatcher().dispatcher);
     placeField(eastService, 500, 0);

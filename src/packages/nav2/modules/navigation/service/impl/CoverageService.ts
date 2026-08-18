@@ -7,6 +7,8 @@ export const MAX_COVERAGE_ROUTE_WAYPOINTS = 200;
 
 const METERS_PER_DEG_LAT = 111_320;
 const MIN_FIELD_EDGE_M = 0.5;
+/** Debajo de este radio el angulo de rotacion salta de forma erratica. */
+const MIN_ROTATION_RADIUS_M = 1.0;
 const DEFAULT_SQUARE_SIDE_M = 40;
 /**
  * Radio minimo que traza el planner de cada perfil.
@@ -277,6 +279,34 @@ function fieldPolygonFromGeometry(field: CoverageFieldGeometry): CoverageGeoPoin
     offsetPoint(origin, forward.east + lateral.east, forward.north + lateral.north),
     offsetPoint(origin, lateral.east, lateral.north)
   ];
+}
+
+function radiansToDegrees(value: number): number {
+  return (value * 180) / Math.PI;
+}
+
+/**
+ * Medio diagonal del cuadrado, del centro hacia la esquina de arranque.
+ *
+ * Sirve para girar sobre el centro: se rota el vector y se recalcula la esquina,
+ * en vez de rotar la esquina y que el lote se vaya caminando.
+ */
+function rotatedHalfDiagonal(
+  sideM: number,
+  yawDeg: number,
+  side: "left" | "right"
+): { east: number; north: number } {
+  const yawRad = degreesToRadians(yawDeg);
+  const lateralSign = side === "left" ? 1 : -1;
+  const forward = { east: Math.cos(yawRad) * sideM, north: Math.sin(yawRad) * sideM };
+  const lateral = {
+    east: -Math.sin(yawRad) * sideM * lateralSign,
+    north: Math.cos(yawRad) * sideM * lateralSign
+  };
+  return {
+    east: (forward.east + lateral.east) / 2,
+    north: (forward.north + lateral.north) / 2
+  };
 }
 
 /** Centro del cuadrado: el punto que el operador arrastra para moverlo. */
@@ -905,13 +935,75 @@ export class CoverageService {
   }
 
   /**
-   * Cambiar el lado arrastrando la esquina opuesta a la de arranque.
+   * Girar el cuadrado alrededor de su centro.
    *
-   * El lado nuevo es la mayor de las dos proyecciones del arrastre sobre los ejes
-   * del campo, igual criterio que el numero que se escribe a mano: el lote sigue
-   * siendo cuadrado y la esquina de arranque no se mueve.
+   * `pointer` es donde esta el tirador de rotacion, que cuelga de la esquina
+   * opuesta a la de arranque. Esa esquina esta sobre la **diagonal**, o sea a 45
+   * grados del eje de las pasadas, asi que hay que descontarlos: sin eso el
+   * cuadrado pega un salto de 45 grados apenas se empieza a arrastrar. El signo
+   * depende de hacia que lado crece el lote.
+   *
+   * El rumbo se redondea a un grado: sin el redondeo queda con diez decimales y
+   * el campo "rumbo inicial" del panel se vuelve ilegible.
+   *
+   * Rotar cambia la direccion de las pasadas sin mover el lote, que es lo que
+   * hace falta para alinearlas con un alambrado o con un surco existente.
    */
-  resizeFieldFromCorner(corner: CoverageGeoPoint): void {
+  rotateFieldTo(pointer: CoverageGeoPoint): void {
+    if (this.state.sending) {
+      throw new Error("No se puede girar el campo mientras se envía la cobertura");
+    }
+    const current = this.state.field;
+    if (!current) {
+      throw new Error("Primero armá el cuadrado");
+    }
+    if (!Number.isFinite(pointer.lat) || !Number.isFinite(pointer.lon)) {
+      throw new Error("Posición inválida para el campo");
+    }
+
+    const centre = fieldCentre(current);
+    const delta = localMeters(centre, pointer);
+    if (Math.hypot(delta.east, delta.north) < MIN_ROTATION_RADIUS_M) {
+      // Demasiado cerca del centro: el angulo salta de forma erratica.
+      return;
+    }
+    const lateralSign = current.side === "left" ? 1 : -1;
+    const diagonalDeg = radiansToDegrees(Math.atan2(delta.north, delta.east));
+    const yawDeg = normalizeYawDeg(Math.round(diagonalDeg - 45 * lateralSign));
+
+    // El centro se mantiene: se recalcula la esquina de arranque desde el centro
+    // nuevo, no al reves, para que el cuadrado gire sobre si mismo.
+    const halfDiagonal = rotatedHalfDiagonal(current.fieldLengthM, yawDeg, current.side);
+    const origin = offsetPoint(centre, -halfDiagonal.east, -halfDiagonal.north);
+    const geometry = buildSquareGeometry({
+      origin,
+      yawDeg,
+      sideM: current.fieldLengthM,
+      side: current.side
+    });
+    this.planGeneration += 1;
+    this.state = {
+      ...this.state,
+      fieldPolygon: geometry.polygon,
+      field: geometry.field,
+      preview: null,
+      vehicleAnchor: null,
+      loading: false,
+      error: "",
+      lastStatus: `Rumbo ${geometry.field.startYawDeg.toFixed(0)}°; regenerá el preview`
+    };
+    this.emit();
+  }
+
+  /**
+   * Cambiar el lado arrastrando cualquiera de las cuatro esquinas.
+   *
+   * La esquina diagonalmente opuesta queda fija, que es lo que espera cualquiera
+   * que haya redimensionado un rectangulo en un editor. El lado nuevo es la mayor
+   * de las dos proyecciones del arrastre sobre los ejes del campo, igual criterio
+   * que el numero que se escribe a mano.
+   */
+  resizeFieldFromCorner(corner: CoverageGeoPoint, cornerIndex = 2): void {
     if (this.state.sending) {
       throw new Error("No se puede redimensionar el campo mientras se envía la cobertura");
     }
@@ -922,20 +1014,49 @@ export class CoverageService {
     if (!Number.isFinite(corner.lat) || !Number.isFinite(corner.lon)) {
       throw new Error("Posición inválida para el campo");
     }
-    const origin = { lat: current.startLat, lon: current.startLon };
+    // El ancla es la esquina diagonalmente opuesta a la que se arrastra: es lo
+    // que espera cualquiera que haya redimensionado un rectangulo en un editor.
+    const polygon = fieldPolygonFromGeometry(current);
+    const dragged = ((Math.round(cornerIndex) % 4) + 4) % 4;
+    const anchor = polygon[(dragged + 2) % 4]!;
+
     const yawRad = degreesToRadians(current.startYawDeg);
     const lateralSign = current.side === "left" ? 1 : -1;
-    const drag = localMeters(origin, corner);
+    const drag = localMeters(anchor, corner);
     const forwardM = drag.east * Math.cos(yawRad) + drag.north * Math.sin(yawRad);
     const lateralM =
       (-drag.east * Math.sin(yawRad) + drag.north * Math.cos(yawRad)) * lateralSign;
     // Redondeado a 0.1 m: el arrastre da un flotante de diez decimales y ese
     // numero termina en el campo "lado exacto", donde no hay nada que corregir.
-    const sideM = Math.round(Math.max(forwardM, lateralM) * 10) / 10;
+    const sideM = Math.round(Math.max(Math.abs(forwardM), Math.abs(lateralM)) * 10) / 10;
     const minimumPhysicalEdgeM = Math.max(MIN_FIELD_EDGE_M, this.state.parameters.cutterWidthM);
     if (!Number.isFinite(sideM) || sideM <= minimumPhysicalEdgeM) {
       throw new Error(`El lado debe ser mayor que ${minimumPhysicalEdgeM.toFixed(1)} m`);
     }
+
+    // El ancla se queda quieta, asi que la esquina de arranque se recalcula desde
+    // ella. Cada esquina del poligono esta a una combinacion conocida de avance y
+    // costado respecto del arranque, en unidades de lado:
+    //   0 = (0,0)   1 = (1,0)   2 = (1,1)   3 = (0,1)
+    // asi que el arranque es el ancla menos su propia combinacion.
+    const COMBINACION: ReadonlyArray<readonly [number, number]> = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1]
+    ];
+    const [avance, costado] = COMBINACION[(dragged + 2) % 4]!;
+    const forwardUnit = { east: Math.cos(yawRad), north: Math.sin(yawRad) };
+    const lateralUnit = {
+      east: -Math.sin(yawRad) * lateralSign,
+      north: Math.cos(yawRad) * lateralSign
+    };
+    const origin = offsetPoint(
+      anchor,
+      -(forwardUnit.east * avance + lateralUnit.east * costado) * sideM,
+      -(forwardUnit.north * avance + lateralUnit.north * costado) * sideM
+    );
+
     const geometry = buildSquareGeometry({
       origin,
       yawDeg: current.startYawDeg,

@@ -573,18 +573,20 @@ function buildWaypointIcon(
 }
 
 /**
- * Tirador del cuadrado de cobertura.
+ * Tiradores del cuadrado de cobertura.
  *
- * `move` va al centro y `resize` a la esquina opuesta a la de arranque. Son
- * marcadores porque Leaflet no arrastra poligonos.
+ * `resize` va en cada esquina, `inicio` marca ademas la esquina de arranque de
+ * las pasadas, y `rotar` cuelga fuera del lote. Son marcadores porque Leaflet no
+ * arrastra poligonos; mover el lote se hace agarrando el poligono en si.
  */
-function buildCoverageHandleIcon(kind: "move" | "resize"): L.DivIcon {
-  const glyph = kind === "move" ? "✥" : "⤢";
+function buildCoverageHandleIcon(kind: "resize" | "inicio" | "rotar"): L.DivIcon {
+  const glyph = kind === "rotar" ? "⟳" : "";
+  const size = kind === "rotar" ? 26 : 16;
   return L.divIcon({
     className: "",
     html: `<div class="coverage-handle ${kind}" aria-hidden="true">${glyph}</div>`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13]
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
   });
 }
 
@@ -651,6 +653,7 @@ function LeafletMapCanvas({
   onMoveWaypoint,
   onCoverageFieldMove,
   onCoverageFieldResize,
+  onCoverageFieldRotate,
   onZoneToolSettled,
   loopRoute,
   initialCenterLat,
@@ -678,7 +681,8 @@ function LeafletMapCanvas({
   onSetWaypointSelection: (indexes: number[], mode: "replace" | "add") => void;
   onMoveWaypoint: (index: number, lat: number, lon: number) => void;
   onCoverageFieldMove: (lat: number, lon: number) => void;
-  onCoverageFieldResize: (lat: number, lon: number) => void;
+  onCoverageFieldResize: (lat: number, lon: number, cornerIndex: number) => void;
+  onCoverageFieldRotate: (lat: number, lon: number) => void;
   onZoneToolSettled: () => void;
   loopRoute: boolean;
   initialCenterLat: number;
@@ -731,6 +735,7 @@ function LeafletMapCanvas({
   const onMoveWaypointRef = useRef(onMoveWaypoint);
   const onCoverageFieldMoveRef = useRef(onCoverageFieldMove);
   const onCoverageFieldResizeRef = useRef(onCoverageFieldResize);
+  const onCoverageFieldRotateRef = useRef(onCoverageFieldRotate);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const appliedMapOriginKeyRef = useRef<string>("");
 
@@ -770,6 +775,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     onCoverageFieldResizeRef.current = onCoverageFieldResize;
   }, [onCoverageFieldResize]);
+  useEffect(() => {
+    onCoverageFieldRotateRef.current = onCoverageFieldRotate;
+  }, [onCoverageFieldRotate]);
   useEffect(() => {
     onZoneToolSettledRef.current = onZoneToolSettled;
   }, [onZoneToolSettled]);
@@ -1662,69 +1670,155 @@ function LeafletMapCanvas({
       (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
     );
     if (fieldPoints.length >= 3) {
-      L.polygon(
+      // El lote se dibuja firme, no punteado: es una figura que se manipula, no
+      // una guia. El relleno es lo que lo hace agarrable en toda su superficie.
+      const campo = L.polygon(
         fieldPoints.map((point) => [point.lat, point.lon] as L.LatLngTuple),
         {
           color: COVERAGE_FIELD_COLOR,
-          weight: 2,
-          opacity: 0.95,
-          dashArray: "7 5",
+          weight: 2.5,
+          opacity: 1,
           fillColor: COVERAGE_FIELD_COLOR,
-          fillOpacity: 0.08,
-          interactive: false
+          fillOpacity: 0.12,
+          interactive: fieldPoints.length === 4 && !coverageState.sending,
+          className: "coverage-field-shape"
         }
-      ).addTo(layer);
-    }
+      );
+      campo.addTo(layer);
 
-    // Tiradores del cuadrado: el del centro lo mueve, el de la esquina opuesta a
-    // la de arranque le cambia el lado. Leaflet no arrastra poligonos, asi que la
-    // manija es un marcador; mientras se arrastra se apaga el paneo del mapa.
-    if (fieldPoints.length === 4 && !coverageState.sending) {
-      const origin = fieldPoints[0]!;
-      const farCorner = fieldPoints[2]!;
-      const centre = {
-        lat: (origin.lat + farCorner.lat) / 2,
-        lon: (origin.lon + farCorner.lon) / 2
-      };
+      if (fieldPoints.length === 4 && !coverageState.sending) {
+        const origen = fieldPoints[0]!;
+        const opuesta = fieldPoints[2]!;
+        const centro = {
+          lat: (origen.lat + opuesta.lat) / 2,
+          lon: (origen.lon + opuesta.lon) / 2
+        };
 
-      const holdMapWhileDragging = (marker: L.Marker): void => {
-        marker.on("dragstart", () => {
-          const map = mapRef.current;
-          if (map?.dragging.enabled()) map.dragging.disable();
+        campo.bindTooltip("Arrastrar para mover · esquinas para el lado", {
+          direction: "center",
+          className: "coverage-field-hintbox",
+          opacity: 0.9
         });
-        marker.on("dragend", () => {
+
+        // Arrastre desde cualquier punto del cuadrado. Leaflet no mueve poligonos,
+        // asi que se hace a mano: al apretar se apaga el paneo del mapa y se
+        // siguen los movimientos sobre el mapa —no sobre el poligono, que se
+        // vuelve a dibujar en cada actualizacion y perderia el evento—.
+        campo.on("mousedown", (evento: L.LeafletMouseEvent) => {
           const map = mapRef.current;
-          if (interactiveRef.current && map && !map.dragging.enabled()) {
-            map.dragging.enable();
+          if (!map || !interactiveRef.current) return;
+          L.DomEvent.stopPropagation(evento.originalEvent);
+          map.dragging.disable();
+          campo.closeTooltip();
+
+          const apriete = evento.latlng;
+          const centroInicial = { lat: centro.lat, lon: centro.lon };
+
+          const alMover = (paso: L.LeafletMouseEvent): void => {
+            onCoverageFieldMoveRef.current(
+              centroInicial.lat + (paso.latlng.lat - apriete.lat),
+              centroInicial.lon + (paso.latlng.lng - apriete.lng)
+            );
+          };
+          const alSoltar = (): void => {
+            map.off("mousemove", alMover);
+            map.off("mouseup", alSoltar);
+            if (interactiveRef.current) map.dragging.enable();
+          };
+          map.on("mousemove", alMover);
+          map.on("mouseup", alSoltar);
+        });
+
+        // Arrastre en vivo para los tiradores. No se usa el arrastre propio de
+        // Leaflet porque cada actualizacion vuelve a dibujar la capa y destruye
+        // el marcador a mitad del gesto: el cuadrado solo se movia al soltar. Con
+        // los eventos sobre el mapa el gesto sobrevive a los redibujados.
+        const arrastrarEnVivo = (
+          marcador: L.Marker,
+          alMover: (latlng: L.LatLng) => void
+        ): void => {
+          marcador.on("mousedown", (evento: L.LeafletMouseEvent) => {
+            const map = mapRef.current;
+            if (!map || !interactiveRef.current) return;
+            L.DomEvent.stopPropagation(evento.originalEvent);
+            L.DomEvent.preventDefault(evento.originalEvent);
+            map.dragging.disable();
+            marcador.closeTooltip();
+
+            const paso = (movimiento: L.LeafletMouseEvent): void => {
+              alMover(movimiento.latlng);
+            };
+            const soltar = (): void => {
+              map.off("mousemove", paso);
+              map.off("mouseup", soltar);
+              if (interactiveRef.current) map.dragging.enable();
+            };
+            map.on("mousemove", paso);
+            map.on("mouseup", soltar);
+          });
+        };
+
+        // Las cuatro esquinas cambian el lado. La diagonalmente opuesta queda
+        // fija, que es lo que espera cualquiera que haya redimensionado un
+        // rectangulo en un editor.
+        fieldPoints.forEach((esquina, indice) => {
+          const tirador = L.marker([esquina.lat, esquina.lon], {
+            icon: buildCoverageHandleIcon(indice === 0 ? "inicio" : "resize"),
+            interactive: true,
+            zIndexOffset: 600
+          }).bindTooltip(
+            indice === 0
+              ? "Esquina de arranque · arrastrar para cambiar el lado"
+              : "Arrastrar para cambiar el lado",
+            { direction: "top" }
+          );
+          arrastrarEnVivo(tirador, (latlng) => {
+            onCoverageFieldResizeRef.current(Number(latlng.lat), Number(latlng.lng), indice);
+          });
+          tirador.addTo(layer);
+        });
+
+        // El tirador de giro cuelga de la esquina superior derecha del lote —la
+        // opuesta a la de arranque— y gira con el cuadrado, asi que nunca salta
+        // de una esquina a otra mientras se lo arrastra.
+        const giroLat = centro.lat + (opuesta.lat - centro.lat) * 1.22;
+        const giroLon = centro.lon + (opuesta.lon - centro.lon) * 1.22;
+
+        L.polyline(
+          [
+            [opuesta.lat, opuesta.lon] as L.LatLngTuple,
+            [giroLat, giroLon] as L.LatLngTuple
+          ],
+          {
+            color: COVERAGE_FIELD_COLOR,
+            weight: 1.5,
+            opacity: 0.8,
+            dashArray: "3 3",
+            interactive: false
           }
+        ).addTo(layer);
+
+        const giro = L.marker([giroLat, giroLon], {
+          icon: buildCoverageHandleIcon("rotar"),
+          interactive: true,
+          zIndexOffset: 700
+        }).bindTooltip("Arrastrar para girar el cuadrado", { direction: "top" });
+        arrastrarEnVivo(giro, (latlng) => {
+          onCoverageFieldRotateRef.current(Number(latlng.lat), Number(latlng.lng));
         });
-      };
+        giro.addTo(layer);
 
-      const moveHandle = L.marker([centre.lat, centre.lon], {
-        icon: buildCoverageHandleIcon("move"),
-        draggable: true,
-        interactive: true,
-        zIndexOffset: 500
-      }).bindTooltip("Arrastrar para mover el cuadrado", { direction: "top" });
-      holdMapWhileDragging(moveHandle);
-      moveHandle.on("dragend", () => {
-        const latLng = moveHandle.getLatLng();
-        onCoverageFieldMoveRef.current(Number(latLng.lat), Number(latLng.lng));
-      });
-      moveHandle.addTo(layer);
-
-      const resizeHandle = L.marker([farCorner.lat, farCorner.lon], {
-        icon: buildCoverageHandleIcon("resize"),
-        draggable: true,
-        interactive: true,
-        zIndexOffset: 500
-      }).bindTooltip("Arrastrar para cambiar el lado", { direction: "top" });
-      holdMapWhileDragging(resizeHandle);
-      resizeHandle.on("dragend", () => {
-        const latLng = resizeHandle.getLatLng();
-        onCoverageFieldResizeRef.current(Number(latLng.lat), Number(latLng.lng));
-      });
-      resizeHandle.addTo(layer);
+        // El centro deja de ser una manija y pasa a ser una marca de referencia:
+        // mover ya se hace agarrando el cuadrado entero.
+        L.circleMarker([centro.lat, centro.lon], {
+          radius: 3,
+          color: COVERAGE_FIELD_COLOR,
+          weight: 2,
+          fillColor: COVERAGE_FIELD_COLOR,
+          fillOpacity: 1,
+          interactive: false
+        }).addTo(layer);
+      }
     }
 
     const sampledPoints = (coverageState.preview?.sampledWaypoints ?? []).filter(
@@ -3222,14 +3316,27 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     }
   };
 
-  const resizeCoverageFieldFromMap = (lat: number, lon: number): void => {
+  const resizeCoverageFieldFromMap = (lat: number, lon: number, cornerIndex: number): void => {
     if (!coverageService) return;
     try {
-      coverageService.resizeFieldFromCorner({ lat, lon });
+      coverageService.resizeFieldFromCorner({ lat, lon }, cornerIndex);
     } catch (error) {
       runtime.eventBus.emit("console.event", {
         level: "warn",
         text: `No se pudo cambiar el lado del campo: ${String(error)}`,
+        timestamp: Date.now()
+      });
+    }
+  };
+
+  const rotateCoverageFieldFromMap = (lat: number, lon: number): void => {
+    if (!coverageService) return;
+    try {
+      coverageService.rotateFieldTo({ lat, lon });
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `No se pudo girar el campo: ${String(error)}`,
         timestamp: Date.now()
       });
     }
@@ -3310,6 +3417,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onMoveWaypoint={moveWaypointFromMap}
                 onCoverageFieldMove={moveCoverageFieldFromMap}
                 onCoverageFieldResize={resizeCoverageFieldFromMap}
+                onCoverageFieldRotate={rotateCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
@@ -3389,6 +3497,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onMoveWaypoint={moveWaypointFromMap}
                 onCoverageFieldMove={moveCoverageFieldFromMap}
                 onCoverageFieldResize={resizeCoverageFieldFromMap}
+                onCoverageFieldRotate={rotateCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}

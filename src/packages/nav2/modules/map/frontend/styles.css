@@ -447,34 +447,61 @@
   opacity: 0.9;
 }
 
-/* Tiradores del cuadrado de cobertura: mover (centro) y cambiar el lado
-   (esquina opuesta a la de arranque). */
+/* Tiradores del cuadrado de cobertura. Las esquinas cambian el lado, el de giro
+   cuelga fuera del lote y mover se hace agarrando el poligono entero. */
 .coverage-handle {
-  width: 26px;
-  height: 26px;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
-  border: 2px solid #60a5fa;
-  background: rgba(15, 23, 42, 0.85);
-  color: #dbeafe;
-  font-size: 14px;
+  border: 2px solid #ffffff;
+  background: #2563eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+  cursor: grab;
+  transition: transform .1s ease, background .1s ease;
+}
+
+.coverage-handle:hover { transform: scale(1.25); background: #1d4ed8; }
+.coverage-handle:active { cursor: grabbing; transform: scale(1.1); }
+
+/* Esquina de arranque: la que marca por donde empiezan las pasadas. */
+.coverage-handle.inicio {
+  background: #f8fafc;
+  border-color: #2563eb;
+  border-width: 3px;
+}
+
+.coverage-handle.rotar {
+  border-radius: 50%;
+  background: rgba(15, 23, 42, .9);
+  border-color: #93c5fd;
+  color: #f8fafc;
+  font-size: 15px;
   line-height: 1;
   font-weight: 700;
-  cursor: grab;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  /* Anillo claro por fuera: el tirador cae sobre la foto satelital, que puede ser
+     de cualquier color, y sin el se pierde sobre el pasto oscuro. */
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .75), 0 1px 4px rgba(0, 0, 0, .5);
 }
 
-.coverage-handle.resize {
-  border-radius: 50%;
-  border-style: dashed;
+.coverage-handle.rotar:hover { background: #1d4ed8; border-color: #ffffff; }
+
+.coverage-field-shape { cursor: grab; }
+.coverage-field-shape:active { cursor: grabbing; }
+
+.leaflet-tooltip.coverage-field-hintbox {
+  background: rgba(15, 23, 42, .82);
+  border: 0;
+  color: #e2e8f0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: .02em;
+  padding: 3px 7px;
+  box-shadow: none;
 }
 
-.coverage-handle:active {
-  cursor: grabbing;
-  background: rgba(37, 99, 235, 0.9);
-}
+.leaflet-tooltip.coverage-field-hintbox::before { display: none; }
 
 .wp-icon {
   width: 30px;
