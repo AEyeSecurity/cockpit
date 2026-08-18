@@ -39,6 +39,22 @@ describe("map workspace HUD", () => {
     ).toBeTruthy();
   });
 
+  it("ofrece el cuadro no-go en la barra de zonas", async () => {
+    // La barra de zonas es propia del cockpit y hace de proxy sobre los botones
+    // de leaflet-draw. Habilitar el rectangulo en las opciones del control no
+    // alcanza: sin este boton la herramienta existe pero no se puede tocar.
+    const runtime = await bootstrapApp();
+    const workspace = runtime.contributions.get("nav2.workspace.map");
+    if (!workspace || workspace.slot !== "workspace") {
+      throw new Error("Map workspace contribution not registered");
+    }
+
+    render(<>{workspace.render()}</>);
+
+    expect(screen.getByLabelText("Dibujar zona rectangular")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dibujar zona")).toBeInTheDocument();
+  });
+
   it("clears waypoint selection and exits area selection mode with Escape", async () => {
     const runtime = await bootstrapApp();
     const workspace = runtime.contributions.get("nav2.workspace.map");

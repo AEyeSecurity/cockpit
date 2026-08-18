@@ -3813,6 +3813,20 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               <button
                 type="button"
                 className="map-btn"
+                onClick={() => clickLeafletTool(".leaflet-draw-draw-rectangle", "draw zone rectangle")}
+                title="Dibujar zona rectangular"
+                aria-label="Dibujar zona rectangular"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="10" height="8"/>
+                  <circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="13" cy="12" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn"
                 onClick={() => clickLeafletTool(".leaflet-draw-edit-edit", "edit zones")}
                 title="Editar zonas"
                 aria-label="Editar zonas"
