@@ -252,6 +252,55 @@ describe("CoverageService", () => {
     expect(service.getState().field?.startYawDeg).toBeCloseTo(rumboAntes, 6);
   });
 
+  it("previsualiza el arrastre sin tocar el estado y termina en la misma figura", () => {
+    // El mapa dibuja el cuadrado durante el gesto con `geometryFor*` y recien
+    // guarda al soltar. Si las dos cuentas no dieran igual, el cuadrado saltaria
+    // al soltarlo; y si la previsualizacion escribiera estado, volveria el
+    // problema que la motivo: rearmar la capa entera en cada movimiento del mouse.
+    const service = new CoverageService(makeDispatcher().dispatcher);
+    placeField(service, 20, 0);
+    const antes = service.getState();
+    const centro = squareCentre(antes.fieldPolygon);
+    const origen = { lat: antes.field!.startLat, lon: antes.field!.startLon };
+
+    const casos: Array<[string, () => CoverageGeoPoint[] | null, () => void]> = [
+      [
+        "mover",
+        () => service.geometryForMove(offsetPoint(centro, 25, -8)).polygon,
+        () => service.moveFieldTo(offsetPoint(centro, 25, -8))
+      ],
+      [
+        "girar",
+        () => service.geometryForRotate(offsetPoint(centro, 0, 18))?.polygon ?? null,
+        () => service.rotateFieldTo(offsetPoint(centro, 0, 18))
+      ],
+      [
+        "redimensionar",
+        () => service.geometryForResize(offsetPoint(origen, 28, 28), 2).polygon,
+        () => service.resizeFieldFromCorner(offsetPoint(origen, 28, 28), 2)
+      ]
+    ];
+
+    for (const [nombre, previsualizar, guardar] of casos) {
+      const estadoPrevio = service.getState();
+      const previsto = previsualizar();
+      expect(previsto, nombre).not.toBeNull();
+      // Previsualizar no movio nada.
+      expect(service.getState().field, nombre).toEqual(estadoPrevio.field);
+      expect(service.getState().fieldPolygon, nombre).toEqual(estadoPrevio.fieldPolygon);
+
+      guardar();
+      const guardado = service.getState().fieldPolygon;
+      previsto!.forEach((esquina, indice) => {
+        expect(distanceBetween(esquina, guardado[indice]!), nombre).toBeLessThan(0.01);
+      });
+      // Y el estado vuelve al de partida para el caso siguiente.
+      service.moveFieldTo(centro);
+      service.rotateFieldTo(offsetPoint(centro, 18, 18));
+      service.resizeFieldFromCorner(offsetPoint(origen, 20, 20), 2);
+    }
+  });
+
   it("uses the ROS yaw convention: east is 0 degrees and north is 90 degrees", () => {
     const eastService = new CoverageService(makeDispatcher().dispatcher);
     placeField(eastService, 500, 0);

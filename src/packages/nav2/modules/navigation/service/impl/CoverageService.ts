@@ -325,12 +325,15 @@ function fieldCentre(field: CoverageFieldGeometry): CoverageGeoPoint {
  * libre que interpretar. El poligono sale del propio registro de campo, asi que
  * lo que se dibuja en el mapa y lo que viaja al backend no pueden separarse.
  */
+/** Lote calculado: el registro que viaja al backend y el poligono que se dibuja. */
+type SquareGeometry = { field: CoverageFieldGeometry; polygon: CoverageGeoPoint[] };
+
 function buildSquareGeometry(input: {
   origin: CoverageGeoPoint;
   yawDeg: number;
   sideM: number;
   side: "left" | "right";
-}): { field: CoverageFieldGeometry; polygon: CoverageGeoPoint[] } {
+}): SquareGeometry {
   const sideM = Number(input.sideM);
   if (!Number.isFinite(sideM) || sideM < MIN_FIELD_EDGE_M) {
     throw new Error(`El lado del campo debe ser de al menos ${MIN_FIELD_EDGE_M.toFixed(1)} m`);
@@ -897,6 +900,13 @@ export class CoverageService {
    * pose del vehiculo: a partir de aca el campo es donde el operador lo puso.
    */
   moveFieldTo(centre: CoverageGeoPoint): void {
+    this.commitFieldGeometry(this.geometryForMove(centre), (field) =>
+      `Cuadrado movido: lado ${field.fieldLengthM.toFixed(1)} m; regenerá el preview`
+    );
+  }
+
+  /** Geometria que tendria el lote si se soltara el arrastre acá. No guarda nada. */
+  geometryForMove(centre: CoverageGeoPoint): SquareGeometry {
     if (this.state.sending) {
       throw new Error("No se puede mover el campo mientras se envía la cobertura");
     }
@@ -919,19 +929,7 @@ export class CoverageService {
       sideM: current.fieldLengthM,
       side: current.side
     });
-    this.planGeneration += 1;
-    this.state = {
-      ...this.state,
-      fieldPolygon: geometry.polygon,
-      field: geometry.field,
-      preview: null,
-      vehicleAnchor: null,
-      loading: false,
-      error: "",
-      lastStatus:
-        `Cuadrado movido: lado ${geometry.field.fieldLengthM.toFixed(1)} m; regenerá el preview`
-    };
-    this.emit();
+    return geometry;
   }
 
   /**
@@ -950,6 +948,13 @@ export class CoverageService {
    * hace falta para alinearlas con un alambrado o con un surco existente.
    */
   rotateFieldTo(pointer: CoverageGeoPoint): void {
+    this.commitFieldGeometry(this.geometryForRotate(pointer), (field) =>
+      `Rumbo ${field.startYawDeg.toFixed(0)}°; regenerá el preview`
+    );
+  }
+
+  /** Geometria que tendria el lote con ese rumbo. No guarda nada. */
+  geometryForRotate(pointer: CoverageGeoPoint): SquareGeometry | null {
     if (this.state.sending) {
       throw new Error("No se puede girar el campo mientras se envía la cobertura");
     }
@@ -965,7 +970,7 @@ export class CoverageService {
     const delta = localMeters(centre, pointer);
     if (Math.hypot(delta.east, delta.north) < MIN_ROTATION_RADIUS_M) {
       // Demasiado cerca del centro: el angulo salta de forma erratica.
-      return;
+      return null;
     }
     const lateralSign = current.side === "left" ? 1 : -1;
     const diagonalDeg = radiansToDegrees(Math.atan2(delta.north, delta.east));
@@ -981,18 +986,7 @@ export class CoverageService {
       sideM: current.fieldLengthM,
       side: current.side
     });
-    this.planGeneration += 1;
-    this.state = {
-      ...this.state,
-      fieldPolygon: geometry.polygon,
-      field: geometry.field,
-      preview: null,
-      vehicleAnchor: null,
-      loading: false,
-      error: "",
-      lastStatus: `Rumbo ${geometry.field.startYawDeg.toFixed(0)}°; regenerá el preview`
-    };
-    this.emit();
+    return geometry;
   }
 
   /**
@@ -1004,6 +998,13 @@ export class CoverageService {
    * que el numero que se escribe a mano.
    */
   resizeFieldFromCorner(corner: CoverageGeoPoint, cornerIndex = 2): void {
+    this.commitFieldGeometry(this.geometryForResize(corner, cornerIndex), (field) =>
+      `Lado ${field.fieldLengthM.toFixed(1)} m; regenerá el preview`
+    );
+  }
+
+  /** Geometria que tendria el lote con esa esquina ahí. No guarda nada. */
+  geometryForResize(corner: CoverageGeoPoint, cornerIndex = 2): SquareGeometry {
     if (this.state.sending) {
       throw new Error("No se puede redimensionar el campo mientras se envía la cobertura");
     }
@@ -1063,6 +1064,23 @@ export class CoverageService {
       sideM,
       side: current.side
     });
+    return geometry;
+  }
+
+  /**
+   * Guardar una geometria calculada por los `geometryFor*`.
+   *
+   * Los tres tiradores terminan igual: invalidan el preview viejo (el trazado ya
+   * no corresponde al lote nuevo) y sueltan el ancla del vehiculo. Lo unico que
+   * cambia es el cartel de estado, asi que va como funcion.
+   */
+  private commitFieldGeometry(
+    geometry: SquareGeometry | null,
+    status: (field: CoverageFieldGeometry) => string
+  ): void {
+    if (!geometry) {
+      return;
+    }
     this.planGeneration += 1;
     this.state = {
       ...this.state,
@@ -1072,7 +1090,7 @@ export class CoverageService {
       vehicleAnchor: null,
       loading: false,
       error: "",
-      lastStatus: `Lado ${sideM.toFixed(1)} m; regenerá el preview`
+      lastStatus: status(geometry.field)
     };
     this.emit();
   }

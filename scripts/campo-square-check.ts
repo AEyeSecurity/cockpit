@@ -173,20 +173,49 @@ async function main(): Promise<number> {
   }
 
   if (resizeIndex >= 0) {
+    // `--resize <lado> [esquina]`: se arrastra la esquina indicada hasta donde
+    // deberia quedar para ese lado, igual que lo haria el tirador del mapa.
     const targetSideM = Number(process.argv[resizeIndex + 1] ?? 0);
+    const esquina = Number(process.argv[resizeIndex + 2] ?? 2);
     const current = service.getState().field!;
+    const metresPerDegLat = 111_320;
     const yawRad = (current.startYawDeg * Math.PI) / 180;
     const lateralSign = current.side === "left" ? 1 : -1;
-    const metresPerDegLat = 111_320;
-    const eastM = Math.cos(yawRad) * targetSideM - Math.sin(yawRad) * targetSideM * lateralSign;
-    const northM = Math.sin(yawRad) * targetSideM + Math.cos(yawRad) * targetSideM * lateralSign;
-    service.resizeFieldFromCorner({
-      lat: current.startLat + northM / metresPerDegLat,
-      lon:
-        current.startLon +
-        eastM / (metresPerDegLat * Math.cos((current.startLat * Math.PI) / 180))
-    });
-    console.log(`lado cambiado arrastrando la esquina: ${targetSideM} m pedidos`);
+    const avanceUnit = { east: Math.cos(yawRad), north: Math.sin(yawRad) };
+    const costadoUnit = {
+      east: -Math.sin(yawRad) * lateralSign,
+      north: Math.cos(yawRad) * lateralSign
+    };
+    // Combinacion de avance y costado de cada esquina, en unidades de lado.
+    const COMBINACION: ReadonlyArray<readonly [number, number]> = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1]
+    ];
+    const [avanceFijo, costadoFijo] = COMBINACION[(esquina + 2) % 4]!;
+    const [avanceMovil, costadoMovil] = COMBINACION[esquina % 4]!;
+    // El ancla no se mueve: se calcula desde el arranque actual y desde ahi se
+    // ubica la esquina arrastrada al lado pedido.
+    const anclaEste = (avanceUnit.east * avanceFijo + costadoUnit.east * costadoFijo)
+      * current.fieldLengthM;
+    const anclaNorte = (avanceUnit.north * avanceFijo + costadoUnit.north * costadoFijo)
+      * current.fieldLengthM;
+    const deltaEste = (avanceUnit.east * (avanceMovil - avanceFijo)
+      + costadoUnit.east * (costadoMovil - costadoFijo)) * targetSideM;
+    const deltaNorte = (avanceUnit.north * (avanceMovil - avanceFijo)
+      + costadoUnit.north * (costadoMovil - costadoFijo)) * targetSideM;
+    service.resizeFieldFromCorner(
+      {
+        lat: current.startLat + (anclaNorte + deltaNorte) / metresPerDegLat,
+        lon:
+          current.startLon +
+          (anclaEste + deltaEste) /
+            (metresPerDegLat * Math.cos((current.startLat * Math.PI) / 180))
+      },
+      esquina
+    );
+    console.log(`lado cambiado arrastrando la esquina ${esquina}: ${targetSideM} m pedidos`);
     console.log(`estado: ${service.getState().lastStatus}`);
   }
 
@@ -222,6 +251,40 @@ async function main(): Promise<number> {
       "utf-8"
     );
     console.log(`  preview guardado : ${dumpPath}`);
+  }
+
+
+  // Chequeo geometrico: cada meta key se pasa a coordenadas del propio lote
+  // —avance y costado desde la esquina de arranque— para ver si el trazado cae
+  // adentro del cuadrado y corre paralelo a sus lados.
+  {
+    const campo = service.getState().field!;
+    const metrosPorGradoLat = 111_320;
+    const yaw = (campo.startYawDeg * Math.PI) / 180;
+    const signo = campo.side === "left" ? 1 : -1;
+    const cosLat = Math.cos((campo.startLat * Math.PI) / 180);
+    let minAvance = Infinity;
+    let maxAvance = -Infinity;
+    let minCostado = Infinity;
+    let maxCostado = -Infinity;
+    for (const meta of preview.keyWaypoints) {
+      const este = (meta.lon - campo.startLon) * metrosPorGradoLat * cosLat;
+      const norte = (meta.lat - campo.startLat) * metrosPorGradoLat;
+      const avance = este * Math.cos(yaw) + norte * Math.sin(yaw);
+      const costado = (-este * Math.sin(yaw) + norte * Math.cos(yaw)) * signo;
+      minAvance = Math.min(minAvance, avance);
+      maxAvance = Math.max(maxAvance, avance);
+      minCostado = Math.min(minCostado, costado);
+      maxCostado = Math.max(maxCostado, costado);
+    }
+    console.log("");
+    console.log(`chequeo: lado ${campo.fieldLengthM.toFixed(2)} m, rumbo ${campo.startYawDeg.toFixed(1)}, lado ${campo.side}`);
+    console.log(`  avance de las metas : ${minAvance.toFixed(2)} .. ${maxAvance.toFixed(2)} m`);
+    console.log(`  costado de las metas: ${minCostado.toFixed(2)} .. ${maxCostado.toFixed(2)} m`);
+    const dentro =
+      minAvance > -0.01 && maxAvance < campo.fieldLengthM + 0.01 &&
+      minCostado > -0.01 && maxCostado < campo.fieldWidthM + 0.01;
+    console.log(`  trazado dentro del cuadrado: ${dentro ? "SI" : "NO"}`);
   }
 
   if (start) {

@@ -654,6 +654,7 @@ function LeafletMapCanvas({
   onCoverageFieldMove,
   onCoverageFieldResize,
   onCoverageFieldRotate,
+  onCoverageFieldPreview,
   onZoneToolSettled,
   loopRoute,
   initialCenterLat,
@@ -683,6 +684,13 @@ function LeafletMapCanvas({
   onCoverageFieldMove: (lat: number, lon: number) => void;
   onCoverageFieldResize: (lat: number, lon: number, cornerIndex: number) => void;
   onCoverageFieldRotate: (lat: number, lon: number) => void;
+  /** Poligono que tendria el lote con ese arrastre, sin guardarlo. */
+  onCoverageFieldPreview: (
+    kind: "move" | "resize" | "rotate",
+    lat: number,
+    lon: number,
+    cornerIndex?: number
+  ) => Array<{ lat: number; lon: number }> | null;
   onZoneToolSettled: () => void;
   loopRoute: boolean;
   initialCenterLat: number;
@@ -736,6 +744,7 @@ function LeafletMapCanvas({
   const onCoverageFieldMoveRef = useRef(onCoverageFieldMove);
   const onCoverageFieldResizeRef = useRef(onCoverageFieldResize);
   const onCoverageFieldRotateRef = useRef(onCoverageFieldRotate);
+  const onCoverageFieldPreviewRef = useRef(onCoverageFieldPreview);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const appliedMapOriginKeyRef = useRef<string>("");
 
@@ -778,6 +787,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     onCoverageFieldRotateRef.current = onCoverageFieldRotate;
   }, [onCoverageFieldRotate]);
+  useEffect(() => {
+    onCoverageFieldPreviewRef.current = onCoverageFieldPreview;
+  }, [onCoverageFieldPreview]);
   useEffect(() => {
     onZoneToolSettledRef.current = onZoneToolSettled;
   }, [onZoneToolSettled]);
@@ -1700,63 +1712,101 @@ function LeafletMapCanvas({
           opacity: 0.9
         });
 
-        // Arrastre desde cualquier punto del cuadrado. Leaflet no mueve poligonos,
-        // asi que se hace a mano: al apretar se apaga el paneo del mapa y se
-        // siguen los movimientos sobre el mapa —no sobre el poligono, que se
-        // vuelve a dibujar en cada actualizacion y perderia el evento—.
-        campo.on("mousedown", (evento: L.LeafletMouseEvent) => {
-          const map = mapRef.current;
-          if (!map || !interactiveRef.current) return;
-          L.DomEvent.stopPropagation(evento.originalEvent);
-          map.dragging.disable();
-          campo.closeTooltip();
+        // Formas que se mueven durante el gesto. Se guardan aca porque el
+        // arrastre las corre a mano, sin volver a construir la capa.
+        const tiradores: L.Marker[] = [];
+        let lineaGiro: L.Polyline | null = null;
+        let tiradorGiro: L.Marker | null = null;
+        let marcaCentro: L.CircleMarker | null = null;
 
-          const apriete = evento.latlng;
-          const centroInicial = { lat: centro.lat, lon: centro.lon };
+        /**
+         * Dibujar un lote que todavia no se guardo.
+         *
+         * Mientras dura el arrastre no se toca el estado: se corren las formas de
+         * Leaflet directamente. Guardar en cada `mousemove` obligaba a rearmar la
+         * capa entera —poligono, cuatro tiradores, giro y trazado— decenas de
+         * veces por segundo, y el cuadrado quedaba atras del mouse. Asi sigue al
+         * puntero y el estado se escribe una sola vez, al soltar.
+         */
+        const redibujar = (poligono: Array<{ lat: number; lon: number }> | null): void => {
+          if (!poligono || poligono.length !== 4) return;
+          const [p0, , p2] = poligono as [
+            { lat: number; lon: number },
+            { lat: number; lon: number },
+            { lat: number; lon: number },
+            { lat: number; lon: number }
+          ];
+          campo.setLatLngs(poligono.map((punto) => [punto.lat, punto.lon] as L.LatLngTuple));
+          poligono.forEach((esquina, indice) => {
+            tiradores[indice]?.setLatLng([esquina.lat, esquina.lon]);
+          });
+          const centroNuevo = { lat: (p0.lat + p2.lat) / 2, lon: (p0.lon + p2.lon) / 2 };
+          const giroLatNuevo = centroNuevo.lat + (p2.lat - centroNuevo.lat) * 1.22;
+          const giroLonNuevo = centroNuevo.lon + (p2.lon - centroNuevo.lon) * 1.22;
+          lineaGiro?.setLatLngs([
+            [p2.lat, p2.lon] as L.LatLngTuple,
+            [giroLatNuevo, giroLonNuevo] as L.LatLngTuple
+          ]);
+          tiradorGiro?.setLatLng([giroLatNuevo, giroLonNuevo]);
+          marcaCentro?.setLatLng([centroNuevo.lat, centroNuevo.lon]);
+        };
 
-          const alMover = (paso: L.LeafletMouseEvent): void => {
-            onCoverageFieldMoveRef.current(
-              centroInicial.lat + (paso.latlng.lat - apriete.lat),
-              centroInicial.lon + (paso.latlng.lng - apriete.lng)
-            );
-          };
-          const alSoltar = (): void => {
-            map.off("mousemove", alMover);
-            map.off("mouseup", alSoltar);
-            if (interactiveRef.current) map.dragging.enable();
-          };
-          map.on("mousemove", alMover);
-          map.on("mouseup", alSoltar);
-        });
-
-        // Arrastre en vivo para los tiradores. No se usa el arrastre propio de
-        // Leaflet porque cada actualizacion vuelve a dibujar la capa y destruye
-        // el marcador a mitad del gesto: el cuadrado solo se movia al soltar. Con
-        // los eventos sobre el mapa el gesto sobrevive a los redibujados.
-        const arrastrarEnVivo = (
-          marcador: L.Marker,
-          alMover: (latlng: L.LatLng) => void
+        /**
+         * Arrastre de una forma del lote.
+         *
+         * Los movimientos se escuchan sobre el mapa y no sobre la forma: al soltar
+         * se guarda y la capa se reconstruye, asi que la forma original ya no
+         * existe para recibir el `mouseup`. `aPunto` traduce la posicion del mouse
+         * a la coordenada que espera el servicio —para el poligono es el centro
+         * corrido, para los tiradores el puntero mismo—. Si no hubo movimiento no
+         * se guarda nada: un click suelto no tiene por que invalidar el preview.
+         */
+        const arrastrar = (
+          objetivo: L.Marker | L.Polygon,
+          aPunto: (latlng: L.LatLng, apriete: L.LatLng) => { lat: number; lon: number },
+          previsualizar: (punto: { lat: number; lon: number }) => void,
+          confirmar: (punto: { lat: number; lon: number }) => void
         ): void => {
-          marcador.on("mousedown", (evento: L.LeafletMouseEvent) => {
+          objetivo.on("mousedown", (evento: L.LeafletMouseEvent) => {
             const map = mapRef.current;
             if (!map || !interactiveRef.current) return;
             L.DomEvent.stopPropagation(evento.originalEvent);
             L.DomEvent.preventDefault(evento.originalEvent);
             map.dragging.disable();
-            marcador.closeTooltip();
+            objetivo.closeTooltip();
+
+            const apriete = evento.latlng;
+            let ultimo = aPunto(apriete, apriete);
+            let huboMovimiento = false;
 
             const paso = (movimiento: L.LeafletMouseEvent): void => {
-              alMover(movimiento.latlng);
+              huboMovimiento = true;
+              ultimo = aPunto(movimiento.latlng, apriete);
+              previsualizar(ultimo);
             };
             const soltar = (): void => {
               map.off("mousemove", paso);
               map.off("mouseup", soltar);
               if (interactiveRef.current) map.dragging.enable();
+              if (huboMovimiento) confirmar(ultimo);
             };
             map.on("mousemove", paso);
             map.on("mouseup", soltar);
           });
         };
+
+        // Mover: se agarra el cuadrado en cualquier punto y el centro se corre lo
+        // mismo que el mouse, para que no pegue un salto al apretar.
+        arrastrar(
+          campo,
+          (latlng, apriete) => ({
+            lat: centro.lat + (latlng.lat - apriete.lat),
+            lon: centro.lon + (latlng.lng - apriete.lng)
+          }),
+          (punto) =>
+            redibujar(onCoverageFieldPreviewRef.current("move", punto.lat, punto.lon)),
+          (punto) => onCoverageFieldMoveRef.current(punto.lat, punto.lon)
+        );
 
         // Las cuatro esquinas cambian el lado. La diagonalmente opuesta queda
         // fija, que es lo que espera cualquiera que haya redimensionado un
@@ -1772,10 +1822,17 @@ function LeafletMapCanvas({
               : "Arrastrar para cambiar el lado",
             { direction: "top" }
           );
-          arrastrarEnVivo(tirador, (latlng) => {
-            onCoverageFieldResizeRef.current(Number(latlng.lat), Number(latlng.lng), indice);
-          });
+          arrastrar(
+            tirador,
+            (latlng) => ({ lat: latlng.lat, lon: latlng.lng }),
+            (punto) =>
+              redibujar(
+                onCoverageFieldPreviewRef.current("resize", punto.lat, punto.lon, indice)
+              ),
+            (punto) => onCoverageFieldResizeRef.current(punto.lat, punto.lon, indice)
+          );
           tirador.addTo(layer);
+          tiradores.push(tirador);
         });
 
         // El tirador de giro cuelga de la esquina superior derecha del lote —la
@@ -1784,7 +1841,7 @@ function LeafletMapCanvas({
         const giroLat = centro.lat + (opuesta.lat - centro.lat) * 1.22;
         const giroLon = centro.lon + (opuesta.lon - centro.lon) * 1.22;
 
-        L.polyline(
+        lineaGiro = L.polyline(
           [
             [opuesta.lat, opuesta.lon] as L.LatLngTuple,
             [giroLat, giroLon] as L.LatLngTuple
@@ -1796,28 +1853,35 @@ function LeafletMapCanvas({
             dashArray: "3 3",
             interactive: false
           }
-        ).addTo(layer);
+        );
+        lineaGiro.addTo(layer);
 
         const giro = L.marker([giroLat, giroLon], {
           icon: buildCoverageHandleIcon("rotar"),
           interactive: true,
           zIndexOffset: 700
         }).bindTooltip("Arrastrar para girar el cuadrado", { direction: "top" });
-        arrastrarEnVivo(giro, (latlng) => {
-          onCoverageFieldRotateRef.current(Number(latlng.lat), Number(latlng.lng));
-        });
+        arrastrar(
+          giro,
+          (latlng) => ({ lat: latlng.lat, lon: latlng.lng }),
+          (punto) =>
+            redibujar(onCoverageFieldPreviewRef.current("rotate", punto.lat, punto.lon)),
+          (punto) => onCoverageFieldRotateRef.current(punto.lat, punto.lon)
+        );
         giro.addTo(layer);
+        tiradorGiro = giro;
 
         // El centro deja de ser una manija y pasa a ser una marca de referencia:
         // mover ya se hace agarrando el cuadrado entero.
-        L.circleMarker([centro.lat, centro.lon], {
+        marcaCentro = L.circleMarker([centro.lat, centro.lon], {
           radius: 3,
           color: COVERAGE_FIELD_COLOR,
           weight: 2,
           fillColor: COVERAGE_FIELD_COLOR,
           fillOpacity: 1,
           interactive: false
-        }).addTo(layer);
+        });
+        marcaCentro.addTo(layer);
       }
     }
 
@@ -3329,6 +3393,35 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     }
   };
 
+  /**
+   * Poligono que tendria el lote con ese arrastre, sin guardarlo.
+   *
+   * El mapa lo usa para dibujar mientras dura el gesto. El calculo sale del mismo
+   * servicio que despues guarda, asi que lo que se ve arrastrando es exactamente
+   * lo que queda al soltar. Un arrastre invalido —lado por debajo del minimo,
+   * tirador de giro pegado al centro— devuelve null y el cuadrado se queda donde
+   * estaba, sin llenar la consola de avisos.
+   */
+  const previewCoverageFieldFromMap = (
+    kind: "move" | "resize" | "rotate",
+    lat: number,
+    lon: number,
+    cornerIndex?: number
+  ): Array<{ lat: number; lon: number }> | null => {
+    if (!coverageService) return null;
+    try {
+      if (kind === "move") {
+        return coverageService.geometryForMove({ lat, lon }).polygon;
+      }
+      if (kind === "rotate") {
+        return coverageService.geometryForRotate({ lat, lon })?.polygon ?? null;
+      }
+      return coverageService.geometryForResize({ lat, lon }, cornerIndex ?? 2).polygon;
+    } catch {
+      return null;
+    }
+  };
+
   const rotateCoverageFieldFromMap = (lat: number, lon: number): void => {
     if (!coverageService) return;
     try {
@@ -3418,6 +3511,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldMove={moveCoverageFieldFromMap}
                 onCoverageFieldResize={resizeCoverageFieldFromMap}
                 onCoverageFieldRotate={rotateCoverageFieldFromMap}
+                onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
@@ -3498,6 +3592,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldMove={moveCoverageFieldFromMap}
                 onCoverageFieldResize={resizeCoverageFieldFromMap}
                 onCoverageFieldRotate={rotateCoverageFieldFromMap}
+                onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}

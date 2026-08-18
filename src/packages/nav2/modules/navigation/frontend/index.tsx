@@ -1095,8 +1095,9 @@ function CoverageSidebarSection({
               <span><small>Rumbo inicial</small><strong>{coverageState.field.startYawDeg.toFixed(1)}°</strong></span>
             </div>
             <p className="coverage-field-hint">
-              En el mapa: arrastrá el tirador del centro para mover el cuadrado y
-              el de la esquina opuesta para cambiar el lado.
+              En el mapa: arrastrá el cuadrado para moverlo, cualquiera de las
+              cuatro esquinas para cambiar el lado y el círculo de arriba a la
+              derecha para girarlo.
             </p>
             <div className="coverage-field-editor">
               <label>
