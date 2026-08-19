@@ -34,6 +34,10 @@ const MIN_FIELD_EDGE_M = 0.5;
 /** Debajo de este radio el angulo de rotacion salta de forma erratica. */
 const MIN_ROTATION_RADIUS_M = 1.0;
 const DEFAULT_SQUARE_SIDE_M = 40;
+// Tope del lote. No es una limitacion del planner: es que un factor de escala
+// aplicado dos veces por error convierte un lote de 40 m en uno de kilometros, y
+// eso se descubre recien cuando el preview tarda una eternidad.
+const MAX_FIELD_EDGE_M = 2000;
 /**
  * Radio minimo que traza el planner de cada perfil.
  *
@@ -768,6 +772,73 @@ function cloneDraft(draft: CoverageDraft): CoverageDraft {
     outline: cloneRing(draft.outline),
     exclusions: draft.exclusions.map(cloneRing),
     activeExclusionId: draft.activeExclusionId
+  };
+}
+
+/** Centro del anillo: promedio de sus vertices. Alcanza para escalar. */
+function ringCentre(ring: CoverageRing): CoverageGeoPoint | null {
+  if (ring.vertices.length === 0) return null;
+  const lat = ring.vertices.reduce((acc, v) => acc + v.lat, 0) / ring.vertices.length;
+  const lon = ring.vertices.reduce((acc, v) => acc + v.lon, 0) / ring.vertices.length;
+  return { lat, lon };
+}
+
+/**
+ * Tamano del anillo: el lado mayor de su caja, en metros.
+ *
+ * Es la medida que el operador ve en el mapa y la que tiene sentido escribir a
+ * mano. Se calcula, no se guarda: el anillo es la unica fuente de verdad.
+ */
+export function ringSizeM(ring: CoverageRing): number {
+  const centre = ringCentre(ring);
+  if (!centre || ring.vertices.length < 2) return 0;
+  const locales = ring.vertices.map((vertex) => localMeters(centre, vertex));
+  const ancho = Math.max(...locales.map((p) => p.east)) - Math.min(...locales.map((p) => p.east));
+  const alto = Math.max(...locales.map((p) => p.north)) - Math.min(...locales.map((p) => p.north));
+  return Math.max(ancho, alto);
+}
+
+/** Correr el anillo entero. Traslacion pura: la forma no cambia. */
+function translateRing(ring: CoverageRing, deltaLat: number, deltaLon: number): CoverageRing {
+  return {
+    id: ring.id,
+    vertices: ring.vertices.map((vertex) => ({
+      lat: vertex.lat + deltaLat,
+      lon: vertex.lon + deltaLon
+    }))
+  };
+}
+
+/** Girar el anillo alrededor de `centre`, en grados antihorarios. */
+function rotateRing(ring: CoverageRing, centre: CoverageGeoPoint, deltaDeg: number): CoverageRing {
+  const rad = degreesToRadians(deltaDeg);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    id: ring.id,
+    vertices: ring.vertices.map((vertex) => {
+      // En metros locales, si no el giro sale ovalado: un grado de longitud mide
+      // menos que uno de latitud en cualquier latitud que no sea el ecuador.
+      const local = localMeters(centre, vertex);
+      return offsetPoint(
+        centre,
+        local.east * cos - local.north * sin,
+        local.east * sin + local.north * cos
+      );
+    })
+  };
+}
+
+/** Escalar el anillo respecto de su centro, conservando la forma. */
+function scaleRing(ring: CoverageRing, factor: number): CoverageRing {
+  const centre = ringCentre(ring);
+  if (!centre) return cloneRing(ring);
+  return {
+    id: ring.id,
+    vertices: ring.vertices.map((vertex) => {
+      const local = localMeters(centre, vertex);
+      return offsetPoint(centre, local.east * factor, local.north * factor);
+    })
   };
 }
 
@@ -1560,6 +1631,96 @@ export class CoverageService {
     };
     this.emit();
     return this.getState();
+  }
+
+  /**
+   * Tamano actual del lote dibujado, en metros. Derivado del anillo.
+   */
+  draftOutlineSizeM(): number {
+    return ringSizeM(this.state.draft.outline);
+  }
+
+  /**
+   * Agrandar o achicar el lote entero, sin tocar los vertices de a uno.
+   *
+   * El poligono sembrado casi nunca sale del tamano justo, y corregirlo
+   * arrastrando ocho tiradores deforma la figura: cada tiron cambia la forma
+   * ademas del tamano. Esto escala respecto del centro, asi que la figura es la
+   * misma y solo cambia cuanto abarca.
+   *
+   * Las exclusiones no se escalan: marcan cosas que estan en el terreno y no se
+   * mueven porque el lote crezca.
+   */
+  scaleDraftOutline(factor: number): void {
+    const escala = Number(factor);
+    if (!Number.isFinite(escala) || escala <= 0) {
+      throw new Error("La escala del lote tiene que ser un número mayor que cero");
+    }
+    const outline = this.state.draft.outline;
+    if (outline.vertices.length < MIN_RING_VERTICES) {
+      throw new Error("Todavía no hay un polígono para agrandar");
+    }
+    const destino = ringSizeM(outline) * escala;
+    if (destino < MIN_FIELD_EDGE_M) {
+      throw new Error(`El lote no puede achicarse a menos de ${MIN_FIELD_EDGE_M.toFixed(1)} m`);
+    }
+    if (destino > MAX_FIELD_EDGE_M) {
+      throw new Error(`El lote no puede pasar de ${MAX_FIELD_EDGE_M.toFixed(0)} m de lado`);
+    }
+    const draft = cloneDraft(this.state.draft);
+    draft.outline = scaleRing(outline, escala);
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Llevar el lado mayor del lote a `targetM`, conservando la forma. */
+  resizeDraftOutline(targetM: number): void {
+    const destino = Number(targetM);
+    if (!Number.isFinite(destino) || destino <= 0) {
+      throw new Error("El tamaño del lote tiene que ser un número mayor que cero");
+    }
+    const actual = ringSizeM(this.state.draft.outline);
+    if (actual <= 0) {
+      throw new Error("Todavía no hay un polígono para redimensionar");
+    }
+    this.scaleDraftOutline(destino / actual);
+  }
+
+  /**
+   * Correr el lote entero, con sus exclusiones.
+   *
+   * Las exclusiones acompanan: se dibujaron relativas al lote, y si el lote se
+   * reubica es porque estaba en el lugar equivocado, no porque el operador
+   * quiera separarlo de sus exclusiones.
+   */
+  moveDraftOutline(deltaLat: number, deltaLon: number): void {
+    if (!Number.isFinite(deltaLat) || !Number.isFinite(deltaLon)) {
+      throw new Error("El desplazamiento del lote no es un número");
+    }
+    if (this.state.draft.outline.vertices.length === 0) {
+      throw new Error("Todavía no hay un polígono para mover");
+    }
+    const draft = cloneDraft(this.state.draft);
+    draft.outline = translateRing(draft.outline, deltaLat, deltaLon);
+    draft.exclusions = draft.exclusions.map((ring) =>
+      translateRing(ring, deltaLat, deltaLon)
+    );
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Girar el lote entero alrededor de su centro, en grados antihorarios. */
+  rotateDraftOutline(deltaDeg: number): void {
+    const giro = Number(deltaDeg);
+    if (!Number.isFinite(giro)) {
+      throw new Error("El giro del lote no es un número");
+    }
+    const centre = ringCentre(this.state.draft.outline);
+    if (!centre) {
+      throw new Error("Todavía no hay un polígono para girar");
+    }
+    const draft = cloneDraft(this.state.draft);
+    draft.outline = rotateRing(draft.outline, centre, giro);
+    draft.exclusions = draft.exclusions.map((ring) => rotateRing(ring, centre, giro));
+    this.setDraft(draft, "polygon");
   }
 
   /** Empezar a dibujar el contorno del lote, descartando el borrador previo. */

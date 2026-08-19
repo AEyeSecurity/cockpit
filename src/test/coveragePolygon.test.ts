@@ -4,6 +4,7 @@ import type { RobotDispatcher } from "../packages/nav2/modules/navigation/dispat
 import {
   CoverageService,
   isCoverageDraftPlannable,
+  ringSizeM,
   type CoverageDraft,
   type CoverageGeoPoint
 } from "../packages/nav2/modules/navigation/service/impl/CoverageService";
@@ -261,5 +262,162 @@ describe("armar lote desde el vehiculo", () => {
     const state = service.getState();
     expect(state.fieldSource).toBe("rectangle");
     expect(state.fieldPolygon).toHaveLength(4);
+  });
+});
+
+
+describe("manipular el lote entero", () => {
+  const POSE = { lat: ORIGEN.lat, lon: ORIGEN.lon, yawDeg: 0 };
+
+  /** Vertices en metros locales respecto del primero, para comparar formas. */
+  function forma(vertices: CoverageGeoPoint[]): Array<[number, number]> {
+    const base = vertices[0]!;
+    return vertices.map((v) => [
+      (v.lat - base.lat) * 111_320,
+      (v.lon - base.lon) * 111_320 * 0.853
+    ]);
+  }
+
+  it("agranda el lote sin deformarlo", () => {
+    // Es la queja concreta: corregir el tamano arrastrando ocho tiradores
+    // cambia la forma ademas del tamano.
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const antes = service.getState().draft.outline.vertices;
+    const tamanoAntes = ringSizeM({ id: "x", vertices: antes });
+
+    service.scaleDraftOutline(2);
+    const despues = service.getState().draft.outline.vertices;
+
+    expect(ringSizeM({ id: "x", vertices: despues })).toBeCloseTo(tamanoAntes * 2, 6);
+    // Misma figura: cada distancia relativa se duplico, ninguna se torcio.
+    const a = forma(antes);
+    const b = forma(despues);
+    for (let i = 0; i < a.length; i += 1) {
+      expect(b[i]![0]).toBeCloseTo(a[i]![0] * 2, 3);
+      expect(b[i]![1]).toBeCloseTo(a[i]![1] * 2, 3);
+    }
+  });
+
+  it("escalar conserva el centro del lote", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const centro = (vs: CoverageGeoPoint[]) => ({
+      lat: vs.reduce((acc, v) => acc + v.lat, 0) / vs.length,
+      lon: vs.reduce((acc, v) => acc + v.lon, 0) / vs.length
+    });
+    const antes = centro(service.getState().draft.outline.vertices);
+    service.scaleDraftOutline(1.5);
+    const despues = centro(service.getState().draft.outline.vertices);
+    expect(despues.lat).toBeCloseTo(antes.lat, 10);
+    expect(despues.lon).toBeCloseTo(antes.lon, 10);
+  });
+
+  it("resizeDraftOutline lleva el lote al tamano pedido", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    service.resizeDraftOutline(120);
+    expect(service.draftOutlineSizeM()).toBeCloseTo(120, 3);
+  });
+
+  it("no deja achicar a la nada ni agrandar a kilometros", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    expect(() => service.scaleDraftOutline(0.001)).toThrow();
+    expect(() => service.scaleDraftOutline(1000)).toThrow();
+    expect(() => service.scaleDraftOutline(0)).toThrow();
+    // Y el lote quedo como estaba: un tope que deja la figura rota no sirve.
+    expect(service.draftOutlineSizeM()).toBeCloseTo(40, 3);
+  });
+
+  it("mueve el lote entero con sus exclusiones", () => {
+    // Mover el lote y dejar las exclusiones atras las sacaria del lote, y el
+    // backend rechaza una exclusion que no esta adentro.
+    const { service } = servicio();
+    dibujar(service, EN_L);
+    service.startExclusionDraft();
+    for (const vertex of EXCLUSION) service.appendDraftVertex(vertex);
+    service.finishDraftRing();
+    const antes = service.getState().draft;
+
+    service.moveDraftOutline(DLAT, DLON);
+    const despues = service.getState().draft;
+
+    despues.outline.vertices.forEach((v, i) => {
+      expect(v.lat).toBeCloseTo(antes.outline.vertices[i]!.lat + DLAT, 12);
+      expect(v.lon).toBeCloseTo(antes.outline.vertices[i]!.lon + DLON, 12);
+    });
+    despues.exclusions[0]!.vertices.forEach((v, i) => {
+      expect(v.lat).toBeCloseTo(antes.exclusions[0]!.vertices[i]!.lat + DLAT, 12);
+      expect(v.lon).toBeCloseTo(antes.exclusions[0]!.vertices[i]!.lon + DLON, 12);
+    });
+    expect(service.draftOutlineSizeM()).toBeCloseTo(
+      ringSizeM(antes.outline),
+      6
+    );
+  });
+
+  it("gira el lote conservando tamano y centro", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    // El diametro y no la caja: la caja de un octogono crece al girarlo 22.5°
+    // sin que la figura cambie de tamano.
+    const diametro = (vs: CoverageGeoPoint[]): number => {
+      let peor = 0;
+      for (const a of vs) {
+        for (const b of vs) {
+          peor = Math.max(
+            peor,
+            Math.hypot((a.lat - b.lat) * 111_320, (a.lon - b.lon) * 111_320 * 0.853)
+          );
+        }
+      }
+      return peor;
+    };
+    const tamanoAntes = diametro(service.getState().draft.outline.vertices);
+    const centroAntes = service.getState().draft.outline.vertices.reduce(
+      (acc, v) => ({ lat: acc.lat + v.lat / 8, lon: acc.lon + v.lon / 8 }),
+      { lat: 0, lon: 0 }
+    );
+
+    service.rotateDraftOutline(360 / 8);
+    const centroDespues = service.getState().draft.outline.vertices.reduce(
+      (acc, v) => ({ lat: acc.lat + v.lat / 8, lon: acc.lon + v.lon / 8 }),
+      { lat: 0, lon: 0 }
+    );
+
+    // Milimetros: el giro es exacto en metros locales y el test mide con un
+    // coseno de latitud constante.
+    expect(diametro(service.getState().draft.outline.vertices)).toBeCloseTo(
+      tamanoAntes,
+      2
+    );
+    expect(centroDespues.lat).toBeCloseTo(centroAntes.lat, 10);
+    expect(centroDespues.lon).toBeCloseTo(centroAntes.lon, 10);
+  });
+
+  it("mover, girar y escalar invalidan el preview", async () => {
+    for (const accion of [
+      (s: CoverageService) => s.moveDraftOutline(DLAT / 10, 0),
+      (s: CoverageService) => s.rotateDraftOutline(10),
+      (s: CoverageService) => s.scaleDraftOutline(1.1)
+    ]) {
+      const { service } = servicio({
+        op: "coverage_plan",
+        ok: true,
+        coverage_plan: {
+          sampled_lats: [ORIGEN.lat, ORIGEN.lat + DLAT],
+          sampled_lons: [ORIGEN.lon, ORIGEN.lon],
+          key_lats: [ORIGEN.lat, ORIGEN.lat + DLAT],
+          key_lons: [ORIGEN.lon, ORIGEN.lon],
+          topology_safe: true
+        }
+      } as unknown as Nav2IncomingMessage);
+      service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+      await service.previewCoverage().catch(() => undefined);
+      accion(service);
+      expect(service.getState().preview).toBeNull();
+      expect(service.canStartMission()).toBe(false);
+    }
   });
 });

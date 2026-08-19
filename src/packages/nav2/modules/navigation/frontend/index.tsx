@@ -937,6 +937,15 @@ function CoverageSidebarSection({
    * exclusion sin contorno—. Tragarse eso dejaria botones que no hacen nada sin
    * explicar por que.
    */
+  // Tamano del lote: se escribe libre y se aplica al confirmar. Aplicarlo en
+  // cada tecla escalaria el poligono con los numeros a medio escribir —"4"
+  // camino a "45" achicaria el lote a 4 m— y esa deformacion no se deshace.
+  const tamanoLote = coverageService.draftOutlineSizeM();
+  const [tamanoTipeado, setTamanoTipeado] = useState<string>("");
+  useEffect(() => {
+    setTamanoTipeado(tamanoLote > 0 ? tamanoLote.toFixed(1) : "");
+  }, [tamanoLote]);
+
   const runCoverageAction = (accion: () => void): void => {
     try {
       accion();
@@ -1156,6 +1165,50 @@ function CoverageSidebarSection({
               LIMPIAR POLÍGONO
             </button>
           </div>
+          {coverageState.fieldSource === "polygon" &&
+          coverageState.draft.outline.vertices.length >= 3 ? (
+            <div className="coverage-polygon-size">
+              <span>Tamaño</span>
+              <button
+                type="button"
+                className="ncb sec-btn"
+                disabled={coverageState.loading || coverageState.sending}
+                title="Achicar el lote entero un 10%"
+                onClick={() => runCoverageAction(() => coverageService.scaleDraftOutline(1 / 1.1))}
+              >
+                −
+              </button>
+              <span className="coverage-number-input">
+                <input
+                  aria-label="Tamaño del lote"
+                  type="number"
+                  min="1"
+                  step="1"
+                  disabled={coverageState.loading || coverageState.sending}
+                  value={tamanoTipeado}
+                  onChange={(event) => setTamanoTipeado(event.target.value)}
+                  onBlur={() =>
+                    runCoverageAction(() =>
+                      coverageService.resizeDraftOutline(Number(tamanoTipeado))
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+                <small>m</small>
+              </span>
+              <button
+                type="button"
+                className="ncb sec-btn"
+                disabled={coverageState.loading || coverageState.sending}
+                title="Agrandar el lote entero un 10%"
+                onClick={() => runCoverageAction(() => coverageService.scaleDraftOutline(1.1))}
+              >
+                +
+              </button>
+            </div>
+          ) : null}
           {coverageState.fieldSource === "polygon" ? (
             <p className="coverage-field-hint">
               {coverageState.draft.outline.vertices.length} vértice(s)
@@ -1165,7 +1218,8 @@ function CoverageSidebarSection({
               {coverageState.draft.outline.vertices.length < 3
                 ? " — hacen falta al menos 3"
                 : ""}
-              . En el mapa: click para agregar, arrastrá un vértice para moverlo,
+              . Con «Tamaño» se agranda o achica todo el lote sin deformarlo. En
+              el mapa: click para agregar, arrastrá un vértice para moverlo,
               click derecho para borrarlo.
             </p>
           ) : null}
