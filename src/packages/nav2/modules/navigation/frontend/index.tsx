@@ -1036,7 +1036,7 @@ function CoverageSidebarSection({
       });
       emitInfo(
         `Lote de ${next.draft.outline.vertices.length} vértices desde el vehículo; ` +
-          "movelos en el mapa o agregá más, y generá el preview"
+          "arrastralo para moverlo, un tirador para agrandarlo, y generá el preview"
       );
     } catch (error) {
       emitError(`No se pudo armar el lote: ${String(error)}`);
@@ -1088,7 +1088,7 @@ function CoverageSidebarSection({
             <ButtonFace
               icon={<NavGlyph kind="field" />}
               label="ARMAR POLÍGONO"
-              meta={robotPose ? "8 vértices" : "Sin pose"}
+              meta={robotPose ? "Figura fija" : "Sin pose"}
               compact
             />
           </button>
@@ -1124,7 +1124,7 @@ function CoverageSidebarSection({
               )}
               disabled={coverageState.loading || coverageState.sending}
               onClick={() => runCoverageAction(() => coverageService?.startOutlineDraft())}
-              title="Marcá los vértices del lote haciendo click en el mapa"
+              title="Marcá los vértices del lote haciendo click en el mapa; ese lote sí se edita vértice por vértice"
             >
               {coverageState.draft.mode === "outline" ? "MARCANDO LOTE…" : "DIBUJAR LOTE"}
             </button>
@@ -1218,9 +1218,10 @@ function CoverageSidebarSection({
               {coverageState.draft.outline.vertices.length < 3
                 ? " — hacen falta al menos 3"
                 : ""}
-              . Con «Tamaño» se agranda o achica todo el lote sin deformarlo. En
-              el mapa: click para agregar, arrastrá un vértice para moverlo,
-              click derecho para borrarlo.
+              .{" "}
+              {coverageState.draft.rigid
+                ? "Figura fija: se mueve, gira y se agranda entera. En el mapa arrastrala para moverla, un tirador para agrandarla y el círculo de arriba para girarla."
+                : "Con «Tamaño» se agranda o achica todo el lote sin deformarlo. En el mapa: click para agregar, arrastrá un vértice para moverlo, click derecho para borrarlo."}
             </p>
           ) : null}
         </div>

@@ -38,6 +38,9 @@ const DEFAULT_SQUARE_SIDE_M = 40;
 // aplicado dos veces por error convierte un lote de 40 m en uno de kilometros, y
 // eso se descubre recien cuando el preview tarda una eternidad.
 const MAX_FIELD_EDGE_M = 2000;
+// Vertices de la figura del lote sembrado. Ocho: se lee como un lote y no como
+// un cuadrado, y con la figura rigida no hay ninguno de mas que acomodar.
+const RIGID_FIELD_VERTICES = 8;
 /**
  * Radio minimo que traza el planner de cada perfil.
  *
@@ -158,6 +161,16 @@ export interface CoverageDraft {
   exclusions: CoverageRing[];
   /** Que anillo recibe los clicks; null mientras se dibuja el contorno. */
   activeExclusionId: string | null;
+  /**
+   * Figura rigida: se mueve, gira y escala entera, y no se edita por vertices.
+   *
+   * Es la que siembra el atajo del vehiculo. Un poligono con ocho tiradores
+   * sueltos se deforma con cada tiron y termina en una figura que se cruza a si
+   * misma y que el backend rechaza. Con la figura rigida eso no puede pasar: la
+   * forma es la que es y lo unico que cambia es donde esta, cuanto abarca y como
+   * esta orientada.
+   */
+  rigid: boolean;
 }
 
 /** Minimo de vertices para que un anillo sea un poligono. */
@@ -758,7 +771,8 @@ function emptyDraft(): CoverageDraft {
     mode: "idle",
     outline: { id: newRingId(), vertices: [] },
     exclusions: [],
-    activeExclusionId: null
+    activeExclusionId: null,
+    rigid: false
   };
 }
 
@@ -771,7 +785,8 @@ function cloneDraft(draft: CoverageDraft): CoverageDraft {
     mode: draft.mode,
     outline: cloneRing(draft.outline),
     exclusions: draft.exclusions.map(cloneRing),
-    activeExclusionId: draft.activeExclusionId
+    activeExclusionId: draft.activeExclusionId,
+    rigid: draft.rigid === true
   };
 }
 
@@ -1587,25 +1602,27 @@ export class CoverageService {
     };
     const conCuadrado = this.squareFromVehiclePose(pose, options);
     const esquinas = conCuadrado.fieldPolygon.map(clonePoint);
-    // Octogono: se cortan las cuatro esquinas poniendo dos vertices sobre cada
-    // lado, a un cuarto y a tres cuartos.
-    //
-    // Con los vertices EN las esquinas la figura que aparece es un cuadrado, y
-    // un cuadrado no se lee como algo que haya que deformar: el operador lo
-    // toma como el lote y lo deja asi. Un octogono se lee como lo que es —un
-    // poligono con tiradores— e invita a arrastrarlos hasta el borde real del
-    // campo, que es para lo que esta.
-    const CHAFLAN = 0.25;
+    // Octogono regular inscripto en el cuadrado, con el centro y el rumbo del
+    // cuadrado. Es una figura fija: ocho vertices calculados de una vez, no
+    // ocho puntos que el operador tenga que acomodar. Lo unico que se hace con
+    // ella es moverla, girarla y agrandarla, siempre entera.
+    const centro = {
+      lat: (esquinas[0]!.lat + esquinas[2]!.lat) / 2,
+      lon: (esquinas[0]!.lon + esquinas[2]!.lon) / 2
+    };
+    const radio = 0.5 * Number(
+      options.sideM ?? this.state.field?.fieldLengthM ?? DEFAULT_SQUARE_SIDE_M
+    ) / Math.cos(Math.PI / RIGID_FIELD_VERTICES);
+    // El rumbo del vehiculo, para que la figura salga alineada con el como
+    // salia el cuadrado.
+    const rumbo = degreesToRadians(90 - pose.yawDeg);
     const vertices: CoverageGeoPoint[] = [];
-    for (let index = 0; index < esquinas.length; index += 1) {
-      const actual = esquinas[index];
-      const siguiente = esquinas[(index + 1) % esquinas.length];
-      for (const t of [CHAFLAN, 1 - CHAFLAN]) {
-        vertices.push({
-          lat: actual.lat + (siguiente.lat - actual.lat) * t,
-          lon: actual.lon + (siguiente.lon - actual.lon) * t
-        });
-      }
+    for (let index = 0; index < RIGID_FIELD_VERTICES; index += 1) {
+      const angulo =
+        rumbo + (Math.PI / RIGID_FIELD_VERTICES) + (2 * Math.PI * index) / RIGID_FIELD_VERTICES;
+      vertices.push(
+        offsetPoint(centro, radio * Math.cos(angulo), radio * Math.sin(angulo))
+      );
     }
     if (vertices.length < MIN_RING_VERTICES) {
       this.state = { ...this.state, ...previo };
@@ -1623,11 +1640,13 @@ export class CoverageService {
         mode: "idle",
         outline: { id: newRingId(), vertices },
         exclusions: [],
-        activeExclusionId: null
+        activeExclusionId: null,
+        rigid: true
       },
       preview: null,
       error: "",
-      lastStatus: "Lote armado desde el vehículo; movés los vértices en el mapa"
+      lastStatus:
+        "Lote armado desde el vehículo: arrastralo para moverlo, un vértice para agrandarlo"
     };
     this.emit();
     return this.getState();
@@ -1670,6 +1689,29 @@ export class CoverageService {
     const draft = cloneDraft(this.state.draft);
     draft.outline = scaleRing(outline, escala);
     this.setDraft(draft, "polygon");
+  }
+
+  /**
+   * Escalar el lote llevando uno de sus vertices hasta `point`.
+   *
+   * Es el gesto que el operador ya hace: agarra un tirador y tira. Sobre la
+   * figura rigida eso agranda o achica todo, en vez de mover ese vertice solo y
+   * deformarla.
+   */
+  scaleDraftOutlineToVertex(index: number, point: CoverageGeoPoint): void {
+    const outline = this.state.draft.outline;
+    const centre = ringCentre(outline);
+    const vertex = outline.vertices[index];
+    if (!centre || !vertex) {
+      throw new Error("Ese vértice ya no existe");
+    }
+    const actual = localMeters(centre, vertex);
+    const pedido = localMeters(centre, point);
+    const radioActual = Math.hypot(actual.east, actual.north);
+    if (radioActual <= 0) {
+      throw new Error("No se puede escalar desde el centro del lote");
+    }
+    this.scaleDraftOutline(Math.hypot(pedido.east, pedido.north) / radioActual);
   }
 
   /** Llevar el lado mayor del lote a `targetM`, conservando la forma. */
@@ -1742,10 +1784,26 @@ export class CoverageService {
     this.setDraft(draft, "polygon");
   }
 
+  /**
+   * Frenar cualquier edicion por vertices sobre una figura rigida.
+   *
+   * Solo el contorno: las exclusiones se dibujan a mano igual, esten sobre la
+   * figura rigida o sobre un lote dibujado.
+   */
+  private assertContornoEditable(ringId: string | null): void {
+    if (ringId === null && this.state.draft.rigid) {
+      throw new Error(
+        "El lote del vehículo se mueve, gira y se agranda entero. " +
+          "Para editar vértices sueltos, dibujalo a mano con DIBUJAR LOTE"
+      );
+    }
+  }
+
   /** Agregar un vertice al anillo que este activo. */
   appendDraftVertex(point: CoverageGeoPoint): void {
     const draft = cloneDraft(this.state.draft);
     if (draft.mode === "idle") return;
+    if (draft.mode === "outline") this.assertContornoEditable(null);
     const vertex = clonePoint(point);
     if (draft.mode === "outline") {
       draft.outline.vertices = [...draft.outline.vertices, vertex];
@@ -1761,6 +1819,7 @@ export class CoverageService {
 
   /** Mover un vertice ya puesto. `ringId` null es el contorno. */
   moveDraftVertex(ringId: string | null, index: number, point: CoverageGeoPoint): void {
+    this.assertContornoEditable(ringId);
     const draft = cloneDraft(this.state.draft);
     const mover = (ring: CoverageRing): CoverageRing => ({
       ...ring,
@@ -1780,6 +1839,7 @@ export class CoverageService {
 
   /** Sacar un vertice. `ringId` null es el contorno. */
   removeDraftVertex(ringId: string | null, index: number): void {
+    this.assertContornoEditable(ringId);
     const draft = cloneDraft(this.state.draft);
     const sacar = (ring: CoverageRing): CoverageRing => ({
       ...ring,

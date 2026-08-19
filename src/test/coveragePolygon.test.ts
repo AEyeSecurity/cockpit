@@ -233,16 +233,66 @@ describe("armar lote desde el vehiculo", () => {
     expect(Math.max(...largos) / Math.min(...largos)).toBeLessThan(1.6);
   });
 
-  it("el lote sembrado se puede editar como cualquier poligono", () => {
+  it("el lote sembrado es una figura rigida: no se edita por vertices", () => {
+    // Es la queja: tocar un tirador movia un vertice solo y la figura se
+    // deformaba hasta cruzarse a si misma, y ahi el backend la rechaza.
     const { service } = servicio();
     service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
     const movido = { lat: ORIGEN.lat + DLAT, lon: ORIGEN.lon + DLON };
-    service.moveDraftVertex(null, 0, movido);
-    expect(service.getState().draft.outline.vertices[0]).toEqual(movido);
-    service.appendDraftVertex(movido);
+    expect(service.getState().draft.rigid).toBe(true);
+    expect(() => service.moveDraftVertex(null, 0, movido)).toThrow();
+    expect(() => service.removeDraftVertex(null, 0)).toThrow();
+    // Y quedo intacta.
     expect(service.getState().draft.outline.vertices).toHaveLength(8);
+    // Dibujado a mano si se edita: es la salida cuando el lote real no es esta
+    // figura.
     service.startOutlineDraft();
+    expect(service.getState().draft.rigid).toBe(false);
     expect(service.getState().draft.outline.vertices).toEqual([]);
+  });
+
+  it("la figura rigida es un octogono regular", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const v = service.getState().draft.outline.vertices;
+    const largos = v.map((p, i) => {
+      const q = v[(i + 1) % v.length]!;
+      return Math.hypot((p.lat - q.lat) * 111_320, (p.lon - q.lon) * 111_320 * 0.853);
+    });
+    // Todos los lados iguales: regular, no un cuadrado con las puntas cortadas.
+    expect(Math.max(...largos) / Math.min(...largos)).toBeLessThan(1.02);
+  });
+
+  it("un tirador de la figura rigida escala todo el lote", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const antes = service.getState().draft.outline.vertices;
+    const centro = {
+      lat: antes.reduce((acc, v) => acc + v.lat, 0) / antes.length,
+      lon: antes.reduce((acc, v) => acc + v.lon, 0) / antes.length
+    };
+    // Se tira del vertice 0 hasta el doble de su distancia al centro.
+    const objetivo = {
+      lat: centro.lat + (antes[0]!.lat - centro.lat) * 2,
+      lon: centro.lon + (antes[0]!.lon - centro.lon) * 2
+    };
+    service.scaleDraftOutlineToVertex(0, objetivo);
+    const despues = service.getState().draft.outline.vertices;
+    expect(despues).toHaveLength(8);
+    despues.forEach((v, i) => {
+      expect(v.lat).toBeCloseTo(centro.lat + (antes[i]!.lat - centro.lat) * 2, 9);
+      expect(v.lon).toBeCloseTo(centro.lon + (antes[i]!.lon - centro.lon) * 2, 9);
+    });
+  });
+
+  it("las exclusiones se siguen dibujando sobre la figura rigida", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 200 });
+    service.startExclusionDraft();
+    for (const vertex of EXCLUSION) service.appendDraftVertex(vertex);
+    service.finishDraftRing();
+    expect(service.getState().draft.exclusions[0]!.vertices).toHaveLength(4);
+    expect(service.getState().draft.rigid).toBe(true);
   });
 
   it("el lote sembrado viaja como poligono, no como rectangulo", async () => {

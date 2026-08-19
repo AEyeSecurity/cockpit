@@ -596,10 +596,14 @@ function dibujarBorradorDeLote(
     onRemove: (ringId: string | null, index: number) => void;
     onTranslate: (deltaLat: number, deltaLon: number) => void;
     onRotate: (deltaDeg: number) => void;
+    onScaleFromVertex: (index: number, lat: number, lon: number) => void;
   }
 ): void {
   const draft = coverageState.draft;
   const bloqueado = coverageState.sending;
+  // Figura rigida: los tiradores agrandan el lote entero en vez de mover un
+  // vertice. Es el mismo gesto de siempre, pero no deforma la figura.
+  const rigida = draft.rigid === true;
   // El lote se manipula entero solo cuando no se esta marcando vertices: si no,
   // el poligono se come los clicks que tienen que agregar puntos.
   const manipulable =
@@ -610,12 +614,23 @@ function dibujarBorradorDeLote(
   // una transformacion sobre estas posiciones sin tocar el estado: guardar en
   // cada mousemove obligaria a rearmar la capa entera decenas de veces por
   // segundo y la figura quedaria atras del mouse.
-  const formas: Array<{ forma: L.Polygon | L.Polyline; base: Punto[] }> = [];
-  const marcas: Array<{ marca: L.Marker; base: Punto }> = [];
+  const formas: Array<{ forma: L.Polygon | L.Polyline; base: Punto[]; contorno: boolean }> = [];
+  const marcas: Array<{ marca: L.Marker; base: Punto; contorno: boolean }> = [];
 
-  const aplicar = (transformar: ((punto: Punto) => Punto) | null): void => {
+  /**
+   * Aplicar una transformacion a lo dibujado.
+   *
+   * `soloContorno` existe porque escalar toca el contorno y deja las exclusiones
+   * donde estan —marcan cosas del terreno—, y la vista previa del gesto tiene
+   * que mostrar exactamente lo que se va a guardar.
+   */
+  const aplicar = (
+    transformar: ((punto: Punto) => Punto) | null,
+    soloContorno = false
+  ): void => {
     const t = transformar ?? ((punto: Punto) => punto);
     for (const item of formas) {
+      if (soloContorno && !item.contorno) continue;
       item.forma.setLatLngs(
         item.base.map((punto) => {
           const movido = t(punto);
@@ -624,10 +639,29 @@ function dibujarBorradorDeLote(
       );
     }
     for (const item of marcas) {
+      if (soloContorno && !item.contorno) continue;
       const movido = t(item.base);
       item.marca.setLatLng([movido.lat, movido.lon]);
     }
   };
+
+  // Centro del contorno: lo usan el giro y la escala. Se calcula antes de
+  // dibujar para que los dos gestos giren y escalen alrededor del mismo punto.
+  const centro =
+    draft.outline.vertices.length > 0
+      ? {
+          lat:
+            draft.outline.vertices.reduce((acc, v) => acc + v.lat, 0) /
+            draft.outline.vertices.length,
+          lon:
+            draft.outline.vertices.reduce((acc, v) => acc + v.lon, 0) /
+            draft.outline.vertices.length
+        }
+      : { lat: 0, lon: 0 };
+  const cosLat = Math.cos((centro.lat * Math.PI) / 180) || 1;
+  /** Distancia al centro en un plano donde lat y lon miden lo mismo. */
+  const radioDesde = (punto: { lat: number; lon: number }): number =>
+    Math.hypot(punto.lat - centro.lat, (punto.lon - centro.lon) * cosLat);
 
   /**
    * Gesto de arrastre sobre el lote entero.
@@ -639,7 +673,8 @@ function dibujarBorradorDeLote(
   const gesto = (
     objetivo: L.Polygon | L.Marker,
     transformar: (inicio: L.LatLng, actual: L.LatLng) => (punto: Punto) => Punto,
-    confirmar: (inicio: L.LatLng, actual: L.LatLng) => void
+    confirmar: (inicio: L.LatLng, actual: L.LatLng) => void,
+    soloContorno = false
   ): void => {
     objetivo.on("mousedown", (evento: L.LeafletMouseEvent) => {
       L.DomEvent.stopPropagation(evento.originalEvent);
@@ -654,7 +689,7 @@ function dibujarBorradorDeLote(
       const paso = (movimiento: L.LeafletMouseEvent): void => {
         hubo = true;
         ultimo = movimiento.latlng;
-        aplicar(transformar(inicio, ultimo));
+        aplicar(transformar(inicio, ultimo), soloContorno);
       };
       const soltar = (): void => {
         map.off("mousemove", paso);
@@ -690,7 +725,7 @@ function dibujarBorradorDeLote(
         // exclusiones no, para no tapar al contorno que esta debajo.
         interactive: manipulable && !esExclusion
       }).addTo(layer);
-      formas.push({ forma: poligono, base });
+      formas.push({ forma: poligono, base, contorno: !esExclusion });
     } else if (vertices.length === 2) {
       // Con dos puntos todavia no hay poligono; se muestra el tramo para que el
       // operador vea que el click entro.
@@ -700,29 +735,56 @@ function dibujarBorradorDeLote(
         dashArray: "5 5",
         interactive: false
       }).addTo(layer);
-      formas.push({ forma: linea, base });
+      formas.push({ forma: linea, base, contorno: !esExclusion });
     }
 
+    // Sobre el contorno rigido los tiradores no mueven vertices: escalan.
+    const escalaRigida = rigida && ringId === null;
     vertices.forEach((vertex, index) => {
       const tirador = L.marker([vertex.lat, vertex.lon], {
         icon: buildCoverageHandleIcon("resize"),
-        draggable: !bloqueado,
+        draggable: !bloqueado && !escalaRigida,
+        interactive: true,
         keyboard: false,
         zIndexOffset: 600
       }).addTo(layer);
       tirador.bindTooltip(
-        `Vértice ${index + 1}: arrastrá para mover, click derecho para borrarlo`,
+        escalaRigida
+          ? "Arrastrar para agrandar o achicar todo el lote"
+          : `Vértice ${index + 1}: arrastrá para mover, click derecho para borrarlo`,
         { direction: "top", offset: [0, -10] }
       );
-      tirador.on("dragend", () => {
-        const posicion = tirador.getLatLng();
-        handlers.onMove(ringId, index, posicion.lat, posicion.lng);
+      if (escalaRigida) {
+        if (manipulable) {
+          const radioVertice = Math.max(1e-12, radioDesde(vertex));
+          gesto(
+            tirador,
+            (_inicio, actual) => {
+              const factor = radioDesde({ lat: actual.lat, lon: actual.lng }) / radioVertice;
+              return (punto) => ({
+                lat: centro.lat + (punto.lat - centro.lat) * factor,
+                lon: centro.lon + (punto.lon - centro.lon) * factor
+              });
+            },
+            (_inicio, actual) => handlers.onScaleFromVertex(index, actual.lat, actual.lng),
+            true
+          );
+        }
+      } else {
+        tirador.on("dragend", () => {
+          const posicion = tirador.getLatLng();
+          handlers.onMove(ringId, index, posicion.lat, posicion.lng);
+        });
+        tirador.on("contextmenu", (evt: L.LeafletMouseEvent) => {
+          L.DomEvent.stop(evt);
+          handlers.onRemove(ringId, index);
+        });
+      }
+      marcas.push({
+        marca: tirador,
+        base: { lat: vertex.lat, lon: vertex.lon },
+        contorno: ringId === null
       });
-      tirador.on("contextmenu", (evt: L.LeafletMouseEvent) => {
-        L.DomEvent.stop(evt);
-        handlers.onRemove(ringId, index);
-      });
-      marcas.push({ marca: tirador, base: { lat: vertex.lat, lon: vertex.lon } });
     });
     return poligono;
   };
@@ -752,27 +814,17 @@ function dibujarBorradorDeLote(
 
   // Girar: el tirador cuelga por encima del lote y gira con el, asi que no salta
   // de un lado a otro mientras se lo arrastra.
-  const centro = {
-    lat:
-      draft.outline.vertices.reduce((acc, v) => acc + v.lat, 0) /
-      draft.outline.vertices.length,
-    lon:
-      draft.outline.vertices.reduce((acc, v) => acc + v.lon, 0) /
-      draft.outline.vertices.length
-  };
   const alcanceLat = Math.max(
     ...draft.outline.vertices.map((v) => Math.abs(v.lat - centro.lat))
   );
   const giroLat = centro.lat + alcanceLat * 1.22;
 
-  const anguloDesde = (punto: L.LatLng): number => {
-    // El coseno de la latitud pone la longitud en la misma escala que la latitud;
-    // sin eso el angulo medido no es el angulo que se ve en pantalla.
-    const cos = Math.cos((centro.lat * Math.PI) / 180) || 1;
-    return Math.atan2(punto.lat - centro.lat, (punto.lng - centro.lon) * cos);
-  };
+  const anguloDesde = (punto: L.LatLng): number =>
+    // El coseno de la latitud pone la longitud en la misma escala que la
+    // latitud; sin eso el angulo medido no es el angulo que se ve en pantalla.
+    Math.atan2(punto.lat - centro.lat, (punto.lng - centro.lon) * cosLat);
   const rotarPunto = (rad: number) => (punto: Punto): Punto => {
-    const cos = Math.cos((centro.lat * Math.PI) / 180) || 1;
+    const cos = cosLat;
     const x = (punto.lon - centro.lon) * cos;
     const y = punto.lat - centro.lat;
     return {
@@ -804,10 +856,15 @@ function dibujarBorradorDeLote(
     base: [
       { lat: centro.lat, lon: centro.lon },
       { lat: giroLat, lon: centro.lon }
-    ]
+    ],
+    contorno: true
   });
   tiradorGiro.addTo(layer);
-  marcas.push({ marca: tiradorGiro, base: { lat: giroLat, lon: centro.lon } });
+  marcas.push({
+    marca: tiradorGiro,
+    base: { lat: giroLat, lon: centro.lon },
+    contorno: true
+  });
 
   gesto(
     tiradorGiro,
@@ -900,6 +957,7 @@ function LeafletMapCanvas({
   onCoverageDraftRemoveVertex,
   onCoverageDraftTranslate,
   onCoverageDraftRotate,
+  onCoverageDraftScale,
   onZoneToolSettled,
   onZonesChanged,
   loopRoute,
@@ -952,6 +1010,8 @@ function LeafletMapCanvas({
   onCoverageDraftTranslate: (deltaLat: number, deltaLon: number) => void;
   /** Se giro el lote entero alrededor de su centro, en grados antihorarios. */
   onCoverageDraftRotate: (deltaDeg: number) => void;
+  /** Se arrastro un vertice de la figura rigida: escala todo el lote. */
+  onCoverageDraftScale: (index: number, lat: number, lon: number) => void;
   onZoneToolSettled: () => void;
   /** Se dibujo, edito o borro una zona: lo que dependa de ellas quedo viejo. */
   onZonesChanged: () => void;
@@ -1016,6 +1076,7 @@ function LeafletMapCanvas({
   const onCoverageDraftRemoveVertexRef = useRef(onCoverageDraftRemoveVertex);
   const onCoverageDraftTranslateRef = useRef(onCoverageDraftTranslate);
   const onCoverageDraftRotateRef = useRef(onCoverageDraftRotate);
+  const onCoverageDraftScaleRef = useRef(onCoverageDraftScale);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const onZonesChangedRef = useRef(onZonesChanged);
   const appliedMapOriginKeyRef = useRef<string>("");
@@ -1074,6 +1135,9 @@ function LeafletMapCanvas({
   useEffect(() => {
     onCoverageDraftRotateRef.current = onCoverageDraftRotate;
   }, [onCoverageDraftRotate]);
+  useEffect(() => {
+    onCoverageDraftScaleRef.current = onCoverageDraftScale;
+  }, [onCoverageDraftScale]);
   useEffect(() => {
     onCoverageDraftRemoveVertexRef.current = onCoverageDraftRemoveVertex;
   }, [onCoverageDraftRemoveVertex]);
@@ -2001,7 +2065,9 @@ function LeafletMapCanvas({
           onCoverageDraftRemoveVertexRef.current(ringId, index),
         onTranslate: (deltaLat, deltaLon) =>
           onCoverageDraftTranslateRef.current(deltaLat, deltaLon),
-        onRotate: (deltaDeg) => onCoverageDraftRotateRef.current(deltaDeg)
+        onRotate: (deltaDeg) => onCoverageDraftRotateRef.current(deltaDeg),
+        onScaleFromVertex: (index, lat, lon) =>
+          onCoverageDraftScaleRef.current(index, lat, lon)
       });
     }
 
@@ -3636,6 +3702,17 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     [coverageService, reportarErrorDeLote]
   );
 
+  const scaleCoverageDraft = useCallback(
+    (index: number, lat: number, lon: number) => {
+      try {
+        coverageService?.scaleDraftOutlineToVertex(index, { lat, lon });
+      } catch (error) {
+        reportarErrorDeLote(error);
+      }
+    },
+    [coverageService, reportarErrorDeLote]
+  );
+
   const removeCoverageDraftVertex = useCallback(
     (ringId: string | null, index: number) => {
       try {
@@ -3924,6 +4001,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageDraftRemoveVertex={removeCoverageDraftVertex}
                 onCoverageDraftTranslate={translateCoverageDraft}
                 onCoverageDraftRotate={rotateCoverageDraft}
+                onCoverageDraftScale={scaleCoverageDraft}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
@@ -4011,6 +4089,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageDraftRemoveVertex={removeCoverageDraftVertex}
                 onCoverageDraftTranslate={translateCoverageDraft}
                 onCoverageDraftRotate={rotateCoverageDraft}
+                onCoverageDraftScale={scaleCoverageDraft}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
