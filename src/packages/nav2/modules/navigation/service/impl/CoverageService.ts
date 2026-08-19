@@ -1516,20 +1516,25 @@ export class CoverageService {
     };
     const conCuadrado = this.squareFromVehiclePose(pose, options);
     const esquinas = conCuadrado.fieldPolygon.map(clonePoint);
-    // Se agregan los puntos medios de cada lado. Con solo las cuatro esquinas
-    // lo que aparece es un cuadrado, y un cuadrado invita a dejarlo cuadrado:
-    // para seguir el borde real del campo habria que ir agregando vertices de a
-    // uno. Con ocho tiradores el lote ya nace como poligono y se le da forma
-    // arrastrando, que es lo que se hace en la practica.
+    // Octogono: se cortan las cuatro esquinas poniendo dos vertices sobre cada
+    // lado, a un cuarto y a tres cuartos.
+    //
+    // Con los vertices EN las esquinas la figura que aparece es un cuadrado, y
+    // un cuadrado no se lee como algo que haya que deformar: el operador lo
+    // toma como el lote y lo deja asi. Un octogono se lee como lo que es —un
+    // poligono con tiradores— e invita a arrastrarlos hasta el borde real del
+    // campo, que es para lo que esta.
+    const CHAFLAN = 0.25;
     const vertices: CoverageGeoPoint[] = [];
     for (let index = 0; index < esquinas.length; index += 1) {
       const actual = esquinas[index];
       const siguiente = esquinas[(index + 1) % esquinas.length];
-      vertices.push(actual);
-      vertices.push({
-        lat: (actual.lat + siguiente.lat) / 2,
-        lon: (actual.lon + siguiente.lon) / 2
-      });
+      for (const t of [CHAFLAN, 1 - CHAFLAN]) {
+        vertices.push({
+          lat: actual.lat + (siguiente.lat - actual.lat) * t,
+          lon: actual.lon + (siguiente.lon - actual.lon) * t
+        });
+      }
     }
     if (vertices.length < MIN_RING_VERTICES) {
       this.state = { ...this.state, ...previo };

@@ -203,17 +203,33 @@ describe("armar lote desde el vehiculo", () => {
     expect(state.fieldPolygon).toEqual([]);
   });
 
-  it("los puntos medios caen sobre los lados, no adentro ni afuera", () => {
+  it("la figura es un octogono, no un cuadrado", () => {
+    // Ningun vertice cae en una esquina del cuadrado envolvente: las esquinas
+    // estan cortadas. Es lo que hace que la figura se lea como un poligono
+    // editable y no como el lote ya definido.
     const { service } = servicio();
     service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
     const v = service.getState().draft.outline.vertices;
-    // Cada vertice impar es el medio entre sus dos vecinos.
-    for (let i = 1; i < v.length; i += 2) {
-      const previo = v[i - 1];
-      const siguiente = v[(i + 1) % v.length];
-      expect(v[i].lat).toBeCloseTo((previo.lat + siguiente.lat) / 2, 9);
-      expect(v[i].lon).toBeCloseTo((previo.lon + siguiente.lon) / 2, 9);
+    const lats = v.map((p) => p.lat);
+    const lons = v.map((p) => p.lon);
+    const esquinas = [
+      [Math.min(...lats), Math.min(...lons)],
+      [Math.min(...lats), Math.max(...lons)],
+      [Math.max(...lats), Math.min(...lons)],
+      [Math.max(...lats), Math.max(...lons)]
+    ];
+    for (const [lat, lon] of esquinas) {
+      const enEsquina = v.some(
+        (p) => Math.abs(p.lat - lat) < 1e-12 && Math.abs(p.lon - lon) < 1e-12
+      );
+      expect(enEsquina).toBe(false);
     }
+    // Ocho lados de largo parecido: es un octogono, no una figura degenerada.
+    const largos = v.map((p, i) => {
+      const q = v[(i + 1) % v.length];
+      return Math.hypot(p.lat - q.lat, (p.lon - q.lon) * 0.853);
+    });
+    expect(Math.max(...largos) / Math.min(...largos)).toBeLessThan(1.6);
   });
 
   it("el lote sembrado se puede editar como cualquier poligono", () => {
