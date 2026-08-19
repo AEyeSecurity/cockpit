@@ -105,7 +105,7 @@ describe("navigation sidebar", () => {
     expect(coverageService.getState().field?.fieldWidthM).toBeCloseTo(26, 6);
   });
 
-  it("arma el cuadrado desde el vehiculo y adelanta el trazado antes del preview", async () => {
+  it("arma el lote desde el vehiculo y adelanta el trazado antes del preview", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
     if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
@@ -119,7 +119,7 @@ describe("navigation sidebar", () => {
 
     // Sin pose todavia no se puede: el boton queda deshabilitado en vez de
     // armar un campo en una coordenada inventada.
-    const squareButton = screen.getByText("ARMAR CUADRADO").closest("button") as HTMLButtonElement;
+    const squareButton = screen.getByText("ARMAR LOTE").closest("button") as HTMLButtonElement;
     expect(squareButton).toBeDisabled();
 
     act(() => {

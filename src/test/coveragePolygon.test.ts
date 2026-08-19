@@ -185,3 +185,52 @@ describe("editor de poligono de CAMPO", () => {
     expect(service.getState().draft.outline.vertices).toHaveLength(6);
   });
 });
+
+
+describe("armar lote desde el vehiculo", () => {
+  const POSE = { lat: ORIGEN.lat, lon: ORIGEN.lon, yawDeg: 0 };
+
+  it("siembra un poligono de 4 vertices, no el cuadrado legacy", () => {
+    // Tener las dos representaciones vivas al mismo tiempo confunde: el
+    // operador arma un cuadrado, dibuja un poligono encima, y despues no sabe
+    // cual se va a trabajar.
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const state = service.getState();
+    expect(state.fieldSource).toBe("polygon");
+    expect(state.draft.outline.vertices).toHaveLength(4);
+    expect(state.field).toBeNull();
+    expect(state.fieldPolygon).toEqual([]);
+  });
+
+  it("el lote sembrado se puede editar como cualquier poligono", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const movido = { lat: ORIGEN.lat + DLAT, lon: ORIGEN.lon + DLON };
+    service.moveDraftVertex(null, 0, movido);
+    expect(service.getState().draft.outline.vertices[0]).toEqual(movido);
+    service.appendDraftVertex(movido);
+    expect(service.getState().draft.outline.vertices).toHaveLength(4);
+    service.startOutlineDraft();
+    expect(service.getState().draft.outline.vertices).toEqual([]);
+  });
+
+  it("el lote sembrado viaja como poligono, no como rectangulo", async () => {
+    const { service, previewRequest } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    expect(service.canPreview()).toBe(true);
+    await service.previewCoverage().catch(() => undefined);
+    const payload = previewRequest.mock.calls[0][0] as Record<string, unknown>;
+    const poly = payload.coverage_polygon as { vertices: CoverageGeoPoint[] };
+    expect(poly.vertices).toHaveLength(4);
+  });
+
+  it("squareFromVehiclePose sigue existiendo para el modo legacy", () => {
+    // No se rompe: el backend mantiene el rectangulo para llamadas viejas.
+    const { service } = servicio();
+    service.squareFromVehiclePose(POSE, { sideM: 40 });
+    const state = service.getState();
+    expect(state.fieldSource).toBe("rectangle");
+    expect(state.fieldPolygon).toHaveLength(4);
+  });
+});

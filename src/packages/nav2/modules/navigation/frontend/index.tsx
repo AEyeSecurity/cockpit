@@ -1018,17 +1018,19 @@ function CoverageSidebarSection({
       return;
     }
     try {
-      const next = coverageService.squareFromVehiclePose({
+      // Siembra un poligono de 4 vertices, no la figura rectangular legacy: el
+      // lote de CAMPO tiene una sola representacion y es el poligono.
+      const next = coverageService.seedPolygonFromVehiclePose({
         lat: robotPose.lat,
         lon: robotPose.lon,
         yawDeg: robotPose.headingDeg
       });
       emitInfo(
-        `Cuadrado de ${next.field?.fieldLengthM.toFixed(1) ?? "?"} m desde el vehículo; ` +
-          "ajustá el lado exacto y generá el preview"
+        `Lote de ${next.draft.outline.vertices.length} vértices desde el vehículo; ` +
+          "movelos en el mapa o agregá más, y generá el preview"
       );
     } catch (error) {
-      emitError(`No se pudo armar el cuadrado: ${String(error)}`);
+      emitError(`No se pudo armar el lote: ${String(error)}`);
     }
   };
 
@@ -1069,15 +1071,15 @@ function CoverageSidebarSection({
             disabled={!robotPose || coverageState.loading || coverageState.sending}
             title={
               robotPose
-                ? "Usa la pose actual del vehículo como esquina y su rumbo como dirección de las pasadas"
+                ? "Arma un lote cuadrado desde el vehículo como punto de partida; después movés los vértices"
                 : "Esperando la pose del vehículo"
             }
             onClick={squareFromVehicle}
           >
             <ButtonFace
               icon={<NavGlyph kind="field" />}
-              label="ARMAR CUADRADO"
-              meta={robotPose ? "Esquina en el vehículo" : "Sin pose"}
+              label="ARMAR LOTE"
+              meta={robotPose ? "4 vértices editables" : "Sin pose"}
               compact
             />
           </button>
