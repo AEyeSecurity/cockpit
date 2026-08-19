@@ -12,6 +12,7 @@ import {
   inflatePolygon,
   pointInPolygon,
   segmentPolygonIntersections,
+  type NoGoBounds,
   type NoGoPoint,
   type NoGoPolygon
 } from "../packages/nav2/modules/navigation/service/impl/coverageNoGo";
@@ -357,5 +358,69 @@ describe("CoverageService con zonas no-go", () => {
     const preview = await service.previewCoverage();
     expect(preview.nogoClippedLocally).toBe(false);
     expect(preview.sampledWaypoints).toHaveLength(7);
+  });
+});
+
+
+// Lote de prueba, compartido con `src/navegacion_gps/test/test_coverage_nogo.py`.
+const LOTE: NoGoBounds = { xMin: 0, xMax: 38, yMin: 0, yMax: 40 };
+
+function zonaCentrada(xc: number, yc: number): NoGoPolygon {
+  return [
+    { x: xc - 2.6, y: yc - 1.6 },
+    { x: xc + 2.6, y: yc - 1.6 },
+    { x: xc + 2.6, y: yc + 1.6 },
+    { x: xc - 2.6, y: yc + 1.6 }
+  ];
+}
+
+function clipConLote(puntos: Punto[], zona: NoGoPolygon, bounds?: NoGoBounds) {
+  return clipPathToNoGo<Punto>(puntos, [zona], {
+    marginM: 4.4,
+    bounds,
+    positionOf: (item) => ({ x: item.x, y: item.y }),
+    headingOf: (item) => item.yawDeg,
+    makeDetour: (point, headingDeg) => ({
+      x: point.x, y: point.y, phase: NOGO_DETOUR_PHASE, yawDeg: headingDeg
+    })
+  });
+}
+
+describe("coverageNoGo dentro del lote", () => {
+  it.each([1, 2.5, 4, 6])(
+    "no saca el rodeo del lote con la zona a %s m del borde",
+    (yc) => {
+      // Sin el rectangulo del lote el lado corto del contorno cae afuera y el
+      // rodeo se dibuja saliendo del campo.
+      const r = clipConLote(
+        fila([0, 10, 21.4, 30, 38].map((x) => ({ x, y: yc }))),
+        zonaCentrada(21.4, yc),
+        LOTE
+      );
+      expect(r.detours).toBeGreaterThanOrEqual(1);
+      for (const item of r.items) {
+        expect(item.x).toBeGreaterThanOrEqual(-0.5);
+        expect(item.x).toBeLessThanOrEqual(38.5);
+        expect(item.y).toBeGreaterThanOrEqual(-0.5);
+        expect(item.y).toBeLessThanOrEqual(40.5);
+      }
+    }
+  );
+
+  it("sin lote el rodeo puede salirse", () => {
+    // El comportamiento de antes, documentado para dejar claro que el
+    // rectangulo es lo unico que lo impide.
+    const r = clipConLote(
+      fila([{ x: 0, y: 2.5 }, { x: 38, y: 2.5 }]),
+      zonaCentrada(21.4, 2.5)
+    );
+    expect(Math.min(...r.items.map((i) => i.y))).toBeLessThan(-0.5);
+  });
+
+  it("el lote no cambia el rodeo cuando la zona esta en el medio", () => {
+    const puntos = fila([{ x: 0, y: 20 }, { x: 38, y: 20 }]);
+    const con = clipConLote(puntos, zonaCentrada(21.4, 20), LOTE);
+    const sin = clipConLote(puntos, zonaCentrada(21.4, 20));
+    expect(posiciones(con.items)).toEqual(posiciones(sin.items));
   });
 });

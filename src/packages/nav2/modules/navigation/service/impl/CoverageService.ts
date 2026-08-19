@@ -4,6 +4,7 @@ import type { NavigationService } from "./NavigationService";
 import {
   NOGO_DETOUR_PHASE,
   clipPathToNoGo,
+  type NoGoBounds,
   type NoGoPoint,
   type NoGoPolygon
 } from "./coverageNoGo";
@@ -490,10 +491,12 @@ function clipWaypointsToZones(
   waypoints: CoverageWaypoint[],
   polygons: NoGoPolygon[],
   origin: CoverageGeoPoint,
-  marginM: number
+  marginM: number,
+  bounds: NoGoBounds
 ): { waypoints: CoverageWaypoint[]; dropped: number; detours: number } {
   const result = clipPathToNoGo<CoverageWaypoint>(waypoints, polygons, {
     marginM,
+    bounds,
     positionOf: (item) => {
       const local = localMeters(origin, item);
       return { x: local.east, y: local.north };
@@ -1316,8 +1319,24 @@ export class CoverageService {
       0.5 * parameters.cutterWidthM +
       NOGO_EXTRA_MARGIN_M +
       NOGO_TURNING_MARGIN_RATIO * parameters.minTurningRadiusM;
-    const sampled = clipWaypointsToZones(preview.sampledWaypoints, polygons, origin, marginM);
-    const keys = clipWaypointsToZones(preview.keyWaypoints, polygons, origin, marginM);
+    // Rectangulo del lote en los mismos metros locales que las zonas: sin esto,
+    // una zona pegada al borde hace que el rodeo se dibuje fuera del lote.
+    const corners = fieldPolygonFromGeometry(field).map((corner) => {
+      const local = localMeters(origin, corner);
+      return { x: local.east, y: local.north };
+    });
+    const bounds: NoGoBounds = {
+      xMin: Math.min(...corners.map((c) => c.x)),
+      xMax: Math.max(...corners.map((c) => c.x)),
+      yMin: Math.min(...corners.map((c) => c.y)),
+      yMax: Math.max(...corners.map((c) => c.y))
+    };
+    const sampled = clipWaypointsToZones(
+      preview.sampledWaypoints, polygons, origin, marginM, bounds
+    );
+    const keys = clipWaypointsToZones(
+      preview.keyWaypoints, polygons, origin, marginM, bounds
+    );
     const clippedLocally =
       preview.nogoPolygonCount === 0 &&
       (sampled.dropped > 0 || sampled.detours > 0 || keys.dropped > 0 || keys.detours > 0);

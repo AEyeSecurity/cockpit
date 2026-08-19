@@ -24,6 +24,14 @@ export interface NoGoPoint {
 
 export type NoGoPolygon = NoGoPoint[];
 
+/** Rectangulo del lote en metros locales. El rodeo no puede salirse de ahi. */
+export interface NoGoBounds {
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+}
+
 /** Fase con la que se marcan los puntos que agrega un rodeo. */
 export const NOGO_DETOUR_PHASE = "nogo_detour";
 
@@ -41,6 +49,13 @@ const MAX_DETOUR_PASSES = 8;
 const MAX_MITER_RATIO = 4.0;
 
 const EPSILON_M = 1.0e-9;
+
+/**
+ * Holgura al chequear si un punto del rodeo cae dentro del lote. Las cabeceras
+ * ya sobresalen por diseno, asi que un rodeo que roza el borde no es el problema
+ * que se busca evitar: lo que no puede pasar es que salga metros afuera.
+ */
+const BOUNDS_TOLERANCE_M = 0.5;
 
 /**
  * Tolerancia para decidir si un punto cae sobre el contorno. Es mas floja que
@@ -253,13 +268,16 @@ function pathLength(points: NoGoPoint[]): number {
  * Camino que bordea la zona en vez de atravesarla.
  *
  * Devuelve los puntos intermedios que hay que meter entre `start` y `end`. Se
- * prueban los dos sentidos del perimetro y gana el mas corto. Si el segmento no
- * corta la zona devuelve una lista vacia.
+ * prueban los dos sentidos del perimetro y gana el mas corto **de los que se
+ * quedan dentro del lote**: una zona pegada al borde tiene un lado cuyo contorno
+ * cae afuera, y salir del lote para rodearla es peor que dar la vuelta larga por
+ * adentro. Si el segmento no corta la zona devuelve una lista vacia.
  */
 export function detourAlongContour(
   start: NoGoPoint,
   end: NoGoPoint,
-  polygon: NoGoPolygon
+  polygon: NoGoPolygon,
+  bounds?: NoGoBounds
 ): NoGoPoint[] {
   const crossings = segmentPolygonIntersections(start, end, polygon);
   if (crossings.length < 2) {
@@ -279,9 +297,27 @@ export function detourAlongContour(
   };
   if (!strictlyInside(midpoint, polygon)) return [];
 
-  const forwardPath = [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, true), exit.point];
-  const backwardPath = [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, false), exit.point];
-  return pathLength(forwardPath) <= pathLength(backwardPath) ? forwardPath : backwardPath;
+  const candidates = [
+    [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, true), exit.point],
+    [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, false), exit.point]
+  ];
+  // Si los dos lados se salen del lote, la zona lo cruza de lado a lado: no hay
+  // por donde bordear y se devuelve el mas corto igual.
+  const inside = candidates.filter((path) => withinBounds(path, bounds));
+  const elegibles = inside.length > 0 ? inside : candidates;
+  return elegibles.reduce((a, b) => (pathLength(a) <= pathLength(b) ? a : b));
+}
+
+/** Decir si todos los puntos caen dentro del rectangulo del lote. */
+function withinBounds(points: NoGoPoint[], bounds?: NoGoBounds): boolean {
+  if (!bounds) return true;
+  return points.every(
+    (p) =>
+      p.x >= bounds.xMin - BOUNDS_TOLERANCE_M &&
+      p.x <= bounds.xMax + BOUNDS_TOLERANCE_M &&
+      p.y >= bounds.yMin - BOUNDS_TOLERANCE_M &&
+      p.y <= bounds.yMax + BOUNDS_TOLERANCE_M
+  );
 }
 
 /** Rumbo del tramo en grados; 0 hacia +x, 90 hacia +y. */
@@ -296,13 +332,14 @@ function headingDeg(start: NoGoPoint, end: NoGoPoint, fallbackDeg: number): numb
 function shortestDetour(
   start: NoGoPoint,
   end: NoGoPoint,
-  polygons: NoGoPolygon[]
+  polygons: NoGoPolygon[],
+  bounds?: NoGoBounds
 ): NoGoPoint[] {
   let best: { entryT: number; detour: NoGoPoint[] } | null = null;
   for (const polygon of polygons) {
     const crossings = segmentPolygonIntersections(start, end, polygon);
     if (crossings.length < 2) continue;
-    const detour = detourAlongContour(start, end, polygon);
+    const detour = detourAlongContour(start, end, polygon, bounds);
     if (detour.length === 0) continue;
     if (!best || crossings[0].t < best.entryT) best = { entryT: crossings[0].t, detour };
   }
@@ -318,6 +355,8 @@ export interface NoGoClipOptions<T> {
   headingOf: (item: T) => number;
   /** Construir un punto de rodeo clonando el destino del tramo. */
   makeDetour: (point: NoGoPoint, headingDeg: number, target: T) => T;
+  /** Rectangulo del lote; el rodeo no puede salirse de ahi. */
+  bounds?: NoGoBounds;
 }
 
 export interface NoGoClipResult<T> {
@@ -374,7 +413,7 @@ export function clipPathToNoGo<T>(
 
       const start = options.positionOf(origin);
       const end = options.positionOf(target);
-      const detour = shortestDetour(start, end, inflated);
+      const detour = shortestDetour(start, end, inflated, options.bounds);
       if (detour.length === 0) continue;
 
       passDetours += 1;
