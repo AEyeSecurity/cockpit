@@ -924,9 +924,30 @@ function CoverageSidebarSection({
   const startDisabled = controlLocked || !coverageService.canStartMission();
   const coverageBadge = preview
     ? `${metrics?.rowCount ?? 0}`
-    : coverageState.field
-      ? "✓"
-      : "0";
+    : coverageState.fieldSource === "polygon"
+      ? `${coverageState.draft.outline.vertices.length}v`
+      : coverageState.field
+        ? "✓"
+        : "0";
+
+  /**
+   * Correr una accion del editor mostrando el error si falla.
+   *
+   * El servicio tira cuando la accion no corresponde —por ejemplo abrir una
+   * exclusion sin contorno—. Tragarse eso dejaria botones que no hacen nada sin
+   * explicar por que.
+   */
+  const runCoverageAction = (accion: () => void): void => {
+    try {
+      accion();
+    } catch (error) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `Lote: ${error instanceof Error ? error.message : String(error)}`,
+        timestamp: Date.now()
+      });
+    }
+  };
 
   const updateParameter = (key: keyof CoverageParameters, rawValue: string): void => {
     const value = Number(rawValue);
@@ -1080,6 +1101,72 @@ function CoverageSidebarSection({
               compact
             />
           </button>
+        </div>
+
+        <div className="coverage-polygon-editor">
+          <div className="coverage-polygon-actions">
+            <button
+              type="button"
+              className={joinClassNames(
+                "ncb sec-btn",
+                coverageState.draft.mode === "outline" && "active"
+              )}
+              disabled={coverageState.loading || coverageState.sending}
+              onClick={() => runCoverageAction(() => coverageService?.startOutlineDraft())}
+              title="Marcá los vértices del lote haciendo click en el mapa"
+            >
+              {coverageState.draft.mode === "outline" ? "MARCANDO LOTE…" : "DIBUJAR LOTE"}
+            </button>
+            <button
+              type="button"
+              className={joinClassNames(
+                "ncb sec-btn",
+                coverageState.draft.mode === "exclusion" && "active"
+              )}
+              disabled={
+                coverageState.loading ||
+                coverageState.sending ||
+                coverageState.draft.outline.vertices.length < 3
+              }
+              onClick={() => runCoverageAction(() => coverageService?.startExclusionDraft())}
+              title="Zona donde no se debe cortar. Los giros pueden atravesarla."
+            >
+              + EXCLUSIÓN
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={coverageState.draft.mode === "idle"}
+              onClick={() => runCoverageAction(() => coverageService?.finishDraftRing())}
+              title="Cerrar el anillo que estás dibujando"
+            >
+              CERRAR
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn danger-btn"
+              disabled={
+                coverageState.fieldSource !== "polygon" || coverageState.sending
+              }
+              onClick={() => runCoverageAction(() => coverageService?.clearDraft())}
+              title="Borrar el polígono y volver al lote cuadrado"
+            >
+              LIMPIAR POLÍGONO
+            </button>
+          </div>
+          {coverageState.fieldSource === "polygon" ? (
+            <p className="coverage-field-hint">
+              {coverageState.draft.outline.vertices.length} vértice(s)
+              {coverageState.draft.exclusions.length > 0
+                ? `, ${coverageState.draft.exclusions.length} exclusión(es)`
+                : ""}
+              {coverageState.draft.outline.vertices.length < 3
+                ? " — hacen falta al menos 3"
+                : ""}
+              . En el mapa: click para agregar, arrastrá un vértice para moverlo,
+              click derecho para borrarlo.
+            </p>
+          ) : null}
         </div>
 
         <div className="coverage-status" role={coverageState.error ? "alert" : "status"}>
@@ -1241,7 +1328,7 @@ function CoverageSidebarSection({
         <button
           type="button"
           className="ncb-wide sec-btn coverage-preview-button"
-          disabled={!coverageState.field || coverageState.loading || coverageState.sending}
+          disabled={!coverageService.canPreview()}
           title="Calcular y dibujar la trayectoria antes de iniciar"
           onClick={() => void generatePreview()}
         >

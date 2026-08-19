@@ -579,6 +579,82 @@ function buildWaypointIcon(
  * las pasadas, y `rotar` cuelga fuera del lote. Son marcadores porque Leaflet no
  * arrastra poligonos; mover el lote se hace agarrando el poligono en si.
  */
+/**
+ * Dibujar el lote de CAMPO cuando se define por poligono.
+ *
+ * El contorno va relleno y las exclusiones caladas encima, para que se lea de
+ * un vistazo que la exclusion es un agujero del lote y no otra figura suelta.
+ * Cada vertice es un tirador: se arrastra para mover y se hace click derecho
+ * para sacarlo.
+ */
+function dibujarBorradorDeLote(
+  layer: L.LayerGroup,
+  coverageState: CoverageState,
+  handlers: {
+    onMove: (ringId: string | null, index: number, lat: number, lon: number) => void;
+    onRemove: (ringId: string | null, index: number) => void;
+  }
+): void {
+  const draft = coverageState.draft;
+  const bloqueado = coverageState.sending;
+
+  const anillo = (
+    vertices: Array<{ lat: number; lon: number }>,
+    ringId: string | null,
+    esExclusion: boolean
+  ): void => {
+    if (vertices.length === 0) return;
+    const puntos = vertices.map((v) => [v.lat, v.lon] as L.LatLngTuple);
+    if (vertices.length >= 3) {
+      // L.polygon cierra el anillo solo: por eso nunca se guarda el primer
+      // vertice repetido.
+      L.polygon(puntos, {
+        color: esExclusion ? COVERAGE_ROUTE_UNSAFE_COLOR : COVERAGE_FIELD_COLOR,
+        weight: 2.5,
+        opacity: 0.95,
+        fillColor: esExclusion ? COVERAGE_ROUTE_UNSAFE_COLOR : COVERAGE_FIELD_COLOR,
+        fillOpacity: esExclusion ? 0.35 : 0.12,
+        interactive: false
+      }).addTo(layer);
+    } else if (vertices.length === 2) {
+      // Con dos puntos todavia no hay poligono; se muestra el tramo para que el
+      // operador vea que el click entro.
+      L.polyline(puntos, {
+        color: esExclusion ? COVERAGE_ROUTE_UNSAFE_COLOR : COVERAGE_FIELD_COLOR,
+        weight: 2,
+        dashArray: "5 5",
+        interactive: false
+      }).addTo(layer);
+    }
+
+    vertices.forEach((vertex, index) => {
+      const tirador = L.marker([vertex.lat, vertex.lon], {
+        icon: buildCoverageHandleIcon("resize"),
+        draggable: !bloqueado,
+        keyboard: false,
+        zIndexOffset: 600
+      }).addTo(layer);
+      tirador.bindTooltip(
+        `Vértice ${index + 1}: arrastrá para mover, click derecho para borrar`,
+        { direction: "top", offset: [0, -10] }
+      );
+      tirador.on("dragend", () => {
+        const posicion = tirador.getLatLng();
+        handlers.onMove(ringId, index, posicion.lat, posicion.lng);
+      });
+      tirador.on("contextmenu", (evt: L.LeafletMouseEvent) => {
+        L.DomEvent.stop(evt);
+        handlers.onRemove(ringId, index);
+      });
+    });
+  };
+
+  anillo(draft.outline.vertices, null, false);
+  for (const exclusion of draft.exclusions) {
+    anillo(exclusion.vertices, exclusion.id, true);
+  }
+}
+
 function buildCoverageHandleIcon(kind: "resize" | "inicio" | "rotar"): L.DivIcon {
   const glyph = kind === "rotar" ? "⟳" : "";
   const size = kind === "rotar" ? 26 : 16;
@@ -655,6 +731,9 @@ function LeafletMapCanvas({
   onCoverageFieldResize,
   onCoverageFieldRotate,
   onCoverageFieldPreview,
+  onCoverageDraftVertex,
+  onCoverageDraftMoveVertex,
+  onCoverageDraftRemoveVertex,
   onZoneToolSettled,
   onZonesChanged,
   loopRoute,
@@ -692,6 +771,17 @@ function LeafletMapCanvas({
     lon: number,
     cornerIndex?: number
   ) => Array<{ lat: number; lon: number }> | null;
+  /** Click en el mapa mientras se dibuja el lote: agrega un vertice. */
+  onCoverageDraftVertex: (lat: number, lon: number) => void;
+  /** Se arrastro un vertice. `ringId` null es el contorno. */
+  onCoverageDraftMoveVertex: (
+    ringId: string | null,
+    index: number,
+    lat: number,
+    lon: number
+  ) => void;
+  /** Se pidio borrar un vertice. `ringId` null es el contorno. */
+  onCoverageDraftRemoveVertex: (ringId: string | null, index: number) => void;
   onZoneToolSettled: () => void;
   /** Se dibujo, edito o borro una zona: lo que dependa de ellas quedo viejo. */
   onZonesChanged: () => void;
@@ -748,6 +838,12 @@ function LeafletMapCanvas({
   const onCoverageFieldResizeRef = useRef(onCoverageFieldResize);
   const onCoverageFieldRotateRef = useRef(onCoverageFieldRotate);
   const onCoverageFieldPreviewRef = useRef(onCoverageFieldPreview);
+  // El handler del click se registra una sola vez, asi que el modo tiene que
+  // leerse por ref y no por closure.
+  const coverageDraftModeRef = useRef<"idle" | "outline" | "exclusion">("idle");
+  const onCoverageDraftVertexRef = useRef(onCoverageDraftVertex);
+  const onCoverageDraftMoveVertexRef = useRef(onCoverageDraftMoveVertex);
+  const onCoverageDraftRemoveVertexRef = useRef(onCoverageDraftRemoveVertex);
   const onZoneToolSettledRef = useRef(onZoneToolSettled);
   const onZonesChangedRef = useRef(onZonesChanged);
   const appliedMapOriginKeyRef = useRef<string>("");
@@ -794,6 +890,18 @@ function LeafletMapCanvas({
   useEffect(() => {
     onCoverageFieldPreviewRef.current = onCoverageFieldPreview;
   }, [onCoverageFieldPreview]);
+  useEffect(() => {
+    onCoverageDraftVertexRef.current = onCoverageDraftVertex;
+  }, [onCoverageDraftVertex]);
+  useEffect(() => {
+    onCoverageDraftMoveVertexRef.current = onCoverageDraftMoveVertex;
+  }, [onCoverageDraftMoveVertex]);
+  useEffect(() => {
+    onCoverageDraftRemoveVertexRef.current = onCoverageDraftRemoveVertex;
+  }, [onCoverageDraftRemoveVertex]);
+  useEffect(() => {
+    coverageDraftModeRef.current = coverageState?.draft.mode ?? "idle";
+  }, [coverageState?.draft.mode]);
   useEffect(() => {
     onZoneToolSettledRef.current = onZoneToolSettled;
   }, [onZoneToolSettled]);
@@ -1400,6 +1508,12 @@ function LeafletMapCanvas({
 
     map.on("click", (evt: L.LeafletMouseEvent) => {
       if (!interactiveRef.current) return;
+      // Dibujar el lote de CAMPO se lleva el click antes que nada: mientras se
+      // marca el poligono, el mapa no tiene que encolar waypoints.
+      if (coverageDraftModeRef.current !== "idle") {
+        onCoverageDraftVertexRef.current(evt.latlng.lat, evt.latlng.lng);
+        return;
+      }
       const mode = toolModeRef.current;
       const domEvent = evt.originalEvent as MouseEvent | undefined;
       if (domEvent?.detail && domEvent.detail > 1) return;
@@ -1699,9 +1813,23 @@ function LeafletMapCanvas({
     layer.clearLayers();
     if (!coverageState) return;
 
-    const fieldPoints = coverageState.fieldPolygon.filter(
-      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
-    );
+    // Modo poligono: se dibuja el borrador y no el cuadrado legacy. Son dos
+    // representaciones distintas del lote y no se superponen nunca.
+    if (coverageState.fieldSource === "polygon") {
+      dibujarBorradorDeLote(layer, coverageState, {
+        onMove: (ringId, index, lat, lon) =>
+          onCoverageDraftMoveVertexRef.current(ringId, index, lat, lon),
+        onRemove: (ringId, index) =>
+          onCoverageDraftRemoveVertexRef.current(ringId, index)
+      });
+    }
+
+    const fieldPoints =
+      coverageState.fieldSource === "polygon"
+        ? []
+        : coverageState.fieldPolygon.filter(
+            (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
+          );
     if (fieldPoints.length >= 3) {
       // El lote se dibuja firme, no punteado: es una figura que se manipula, no
       // una guia. El relleno es lo que lo hace agarrable en toda su superficie.
@@ -3270,6 +3398,52 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   // Las zonas no-go recortan el trazado de cobertura, asi que tocarlas deja el
   // preview viejo. Se invalida en vez de regenerarlo solo: regenerar dispara un
   // servicio al backend por cada vertice que se arrastra.
+  // Editor de poligono de CAMPO. Los errores se muestran en la consola y no se
+  // tragan: si un click no entra, el operador tiene que enterarse.
+  const reportarErrorDeLote = useCallback(
+    (error: unknown) => {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: `Lote: ${error instanceof Error ? error.message : String(error)}`,
+        timestamp: Date.now()
+      });
+    },
+    [runtime.eventBus]
+  );
+
+  const appendCoverageDraftVertex = useCallback(
+    (lat: number, lon: number) => {
+      try {
+        coverageService?.appendDraftVertex({ lat, lon });
+      } catch (error) {
+        reportarErrorDeLote(error);
+      }
+    },
+    [coverageService, reportarErrorDeLote]
+  );
+
+  const moveCoverageDraftVertex = useCallback(
+    (ringId: string | null, index: number, lat: number, lon: number) => {
+      try {
+        coverageService?.moveDraftVertex(ringId, index, { lat, lon });
+      } catch (error) {
+        reportarErrorDeLote(error);
+      }
+    },
+    [coverageService, reportarErrorDeLote]
+  );
+
+  const removeCoverageDraftVertex = useCallback(
+    (ringId: string | null, index: number) => {
+      try {
+        coverageService?.removeDraftVertex(ringId, index);
+      } catch (error) {
+        reportarErrorDeLote(error);
+      }
+    },
+    [coverageService, reportarErrorDeLote]
+  );
+
   const handleZonesChanged = useCallback(() => {
     coverageService?.invalidatePreview("Cambiaron las zonas no-go; regenera el preview");
   }, [coverageService]);
@@ -3542,6 +3716,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 onZonesChanged={handleZonesChanged}
+                onCoverageDraftVertex={appendCoverageDraftVertex}
+                onCoverageDraftMoveVertex={moveCoverageDraftVertex}
+                onCoverageDraftRemoveVertex={removeCoverageDraftVertex}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}
@@ -3624,6 +3801,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onCoverageFieldPreview={previewCoverageFieldFromMap}
                 onZoneToolSettled={() => setLeafletZoneToolActive(false)}
                 onZonesChanged={handleZonesChanged}
+                onCoverageDraftVertex={appendCoverageDraftVertex}
+                onCoverageDraftMoveVertex={moveCoverageDraftVertex}
+                onCoverageDraftRemoveVertex={removeCoverageDraftVertex}
                 loopRoute={navigationState?.loopRoute === true}
                 initialCenterLat={initialCenterLat}
                 initialCenterLon={initialCenterLon}

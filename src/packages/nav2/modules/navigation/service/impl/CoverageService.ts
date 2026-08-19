@@ -129,6 +129,36 @@ export interface NoGoZoneSource {
   getState(): { zones: Array<{ enabled?: boolean; polygon?: CoverageGeoPoint[] }> };
 }
 
+/**
+ * Anillo dibujado por el operador. ABIERTO: el primer vertice no se repite al
+ * final, que es como lo espera GeoRing.msg. El cierre visual lo hace Leaflet.
+ */
+export interface CoverageRing {
+  /**
+   * Solo para la UI: sirve para decir "borra ESTA exclusion". No se serializa;
+   * al backend le alcanza el orden del array.
+   */
+  id: string;
+  vertices: CoverageGeoPoint[];
+}
+
+/** Con que definicion de lote se planifica. Espeja la bifurcacion del backend. */
+export type CoverageFieldSource = "rectangle" | "polygon";
+
+/** Lo que se esta dibujando en el mapa. Solo existe dentro de CAMPO. */
+export interface CoverageDraft {
+  mode: "idle" | "outline" | "exclusion";
+  /** Contorno del lote. Con menos de 3 vertices todavia no es un lote. */
+  outline: CoverageRing;
+  /** Zonas donde no se debe cortar. Cero o mas. */
+  exclusions: CoverageRing[];
+  /** Que anillo recibe los clicks; null mientras se dibuja el contorno. */
+  activeExclusionId: string | null;
+}
+
+/** Minimo de vertices para que un anillo sea un poligono. */
+export const MIN_RING_VERTICES = 3;
+
 export interface CoverageState {
   runtimeProfile: "sim" | "real";
   /** Las cuatro esquinas del cuadrado, vacio mientras no haya campo. */
@@ -144,6 +174,13 @@ export interface CoverageState {
    * primera pasada siga cayendo bajo el vehiculo.
    */
   vehicleAnchor: CoverageVehiclePose | null;
+  /**
+   * Que definicion de lote se manda. Explicito y no deducido de si hay
+   * poligono: el operador puede tener dibujado un poligono y volver al
+   * rectangulo, y ahi adivinar cual quiso seria una fuente de sorpresas.
+   */
+  fieldSource: CoverageFieldSource;
+  draft: CoverageDraft;
   loading: boolean;
   sending: boolean;
   error: string;
@@ -708,11 +745,100 @@ function validateParameters(
   }
 }
 
+function newRingId(): string {
+  return `ring.${Date.now()}.${Math.floor(Math.random() * 100_000)}`;
+}
+
+function emptyDraft(): CoverageDraft {
+  return {
+    mode: "idle",
+    outline: { id: newRingId(), vertices: [] },
+    exclusions: [],
+    activeExclusionId: null
+  };
+}
+
+function cloneRing(ring: CoverageRing): CoverageRing {
+  return { id: ring.id, vertices: ring.vertices.map(clonePoint) };
+}
+
+function cloneDraft(draft: CoverageDraft): CoverageDraft {
+  return {
+    mode: draft.mode,
+    outline: cloneRing(draft.outline),
+    exclusions: draft.exclusions.map(cloneRing),
+    activeExclusionId: draft.activeExclusionId
+  };
+}
+
+/**
+ * Si el borrador alcanza para planificar.
+ *
+ * Se calcula, no se guarda. Un booleano en el estado seria una copia mas que
+ * mantener sincronizada con los vertices, y la autoridad sobre la validez fina
+ * —autointersecciones, exclusiones fuera del lote— es el backend igual.
+ */
+export function isCoverageDraftPlannable(draft: CoverageDraft): boolean {
+  if (draft.outline.vertices.length < MIN_RING_VERTICES) return false;
+  // Una exclusion a medio dibujar no puede viajar: el backend la rechazaria y
+  // el operador perderia el preview por algo que se ve a simple vista.
+  return draft.exclusions.every(
+    (ring) => ring.vertices.length >= MIN_RING_VERTICES
+  );
+}
+
+/** Anillo abierto al objeto que espera GeoRing. Los id no se serializan. */
+function ringPayload(ring: CoverageRing): Record<string, unknown> {
+  return {
+    vertices: ring.vertices.map((vertex) => ({ lat: vertex.lat, lon: vertex.lon }))
+  };
+}
+
+/**
+ * Rectangulo envolvente del poligono, para los campos legacy del pedido.
+ *
+ * En modo poligono el backend planifica con el poligono, pero igual usa
+ * `start_*` como origen para georreferenciar y valida que las dimensiones sean
+ * razonables. Se le manda la caja del poligono: un origen real y unas medidas
+ * que se corresponden con el lote, en vez de numeros inventados.
+ */
+function fieldGeometryFromRing(
+  ring: CoverageRing,
+  side: "left" | "right"
+): CoverageFieldGeometry | null {
+  if (ring.vertices.length < MIN_RING_VERTICES) return null;
+  const lats = ring.vertices.map((vertex) => vertex.lat);
+  const lons = ring.vertices.map((vertex) => vertex.lon);
+  const origin = { lat: Math.min(...lats), lon: Math.min(...lons) };
+  const far = { lat: Math.max(...lats), lon: Math.max(...lons) };
+  const span = localMeters(origin, far);
+  return {
+    startLat: origin.lat,
+    startLon: origin.lon,
+    // Yaw 0: en modo poligono las pasadas las orienta Fields2Cover, no este
+    // rumbo. Solo define el marco en el que van y vuelven las coordenadas.
+    startYawDeg: 0,
+    fieldLengthM: Math.max(1, span.east),
+    fieldWidthM: Math.max(1, span.north),
+    side
+  };
+}
+
 function coverageRequestPayload(
   field: CoverageFieldGeometry,
-  parameters: CoverageParameters
+  parameters: CoverageParameters,
+  draft?: CoverageDraft
 ): Record<string, unknown> {
+  // Los campos del rectangulo viajan siempre: el backend los usa como origen
+  // para georreferenciar, tambien en modo poligono.
+  const polygon = draft
+    ? {
+        coverage_polygon: ringPayload(draft.outline),
+        coverage_exclusions: draft.exclusions.map(ringPayload)
+      }
+    : {};
   return {
+    ...polygon,
     start_lat: field.startLat,
     start_lon: field.startLon,
     start_yaw_deg: field.startYawDeg,
@@ -737,6 +863,8 @@ export class CoverageService {
     parameters: { ...DEFAULT_PARAMETERS },
     preview: null,
     vehicleAnchor: null,
+    fieldSource: "rectangle",
+    draft: emptyDraft(),
     loading: false,
     sending: false,
     error: "",
@@ -755,7 +883,8 @@ export class CoverageService {
       fieldPolygon: this.state.fieldPolygon.map(clonePoint),
       field: this.state.field ? { ...this.state.field } : null,
       parameters: { ...this.state.parameters },
-      preview: this.state.preview ? clonePreview(this.state.preview) : null
+      preview: this.state.preview ? clonePreview(this.state.preview) : null,
+      draft: cloneDraft(this.state.draft)
     };
   }
 
@@ -1235,7 +1364,13 @@ export class CoverageService {
 
   async previewCoverage(): Promise<CoveragePreview> {
     const field = this.state.field;
-    if (!field || this.state.fieldPolygon.length !== 4) {
+    if (this.state.fieldSource === "polygon") {
+      if (!isCoverageDraftPlannable(this.state.draft)) {
+        throw new Error(
+          "El polígono del lote necesita al menos 3 vértices, y cada exclusión también"
+        );
+      }
+    } else if (!field || this.state.fieldPolygon.length !== 4) {
       throw new Error("Primero armá el cuadrado");
     }
     validateParameters(this.state.parameters, this.plannerMinTurningRadiusM());
@@ -1254,7 +1389,9 @@ export class CoverageService {
     this.emit();
     try {
       const response = await this.robotDispatcher.requestCoveragePreview(
-        coverageRequestPayload(field, requestParameters)
+        coverageRequestPayload(
+          this.fieldForRequest(field), requestParameters, this.draftForRequest()
+        )
       );
       if (requestGeneration !== this.planGeneration) {
         throw new Error("Preview descartado porque cambió el campo o sus parámetros");
@@ -1262,9 +1399,12 @@ export class CoverageService {
       if (response.ok === false) {
         throw new Error(String(response.error ?? "preview_coverage fue rechazado"));
       }
+      // El mismo rectangulo que viajo en el pedido: en modo poligono es su caja
+      // envolvente, y es el marco en el que el backend devolvio las coordenadas.
+      const requestField = this.fieldForRequest(field);
       const preview = this.applyLocalNoGoClip(
-        parseCoveragePreview(response, field, requestParameters),
-        field,
+        parseCoveragePreview(response, requestField, requestParameters),
+        requestField,
         requestParameters
       );
       this.state = {
@@ -1348,12 +1488,172 @@ export class CoverageService {
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Editor de poligono. Solo lo usa CAMPO; ruta, patrulla y goals no lo tocan.
+  // ---------------------------------------------------------------------
+
+  /** Empezar a dibujar el contorno del lote, descartando el borrador previo. */
+  startOutlineDraft(): void {
+    this.setDraft({ ...emptyDraft(), mode: "outline" }, "polygon");
+    this.invalidatePreview("Dibujá el contorno del lote");
+  }
+
+  /** Abrir una exclusion nueva y mandarle los clicks siguientes. */
+  startExclusionDraft(): void {
+    const draft = cloneDraft(this.state.draft);
+    if (draft.outline.vertices.length < MIN_RING_VERTICES) {
+      throw new Error("Primero cerrá el contorno del lote");
+    }
+    const ring: CoverageRing = { id: newRingId(), vertices: [] };
+    draft.exclusions = [...draft.exclusions, ring];
+    draft.activeExclusionId = ring.id;
+    draft.mode = "exclusion";
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Agregar un vertice al anillo que este activo. */
+  appendDraftVertex(point: CoverageGeoPoint): void {
+    const draft = cloneDraft(this.state.draft);
+    if (draft.mode === "idle") return;
+    const vertex = clonePoint(point);
+    if (draft.mode === "outline") {
+      draft.outline.vertices = [...draft.outline.vertices, vertex];
+    } else {
+      draft.exclusions = draft.exclusions.map((ring) =>
+        ring.id === draft.activeExclusionId
+          ? { ...ring, vertices: [...ring.vertices, vertex] }
+          : ring
+      );
+    }
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Mover un vertice ya puesto. `ringId` null es el contorno. */
+  moveDraftVertex(ringId: string | null, index: number, point: CoverageGeoPoint): void {
+    const draft = cloneDraft(this.state.draft);
+    const mover = (ring: CoverageRing): CoverageRing => ({
+      ...ring,
+      vertices: ring.vertices.map((vertex, position) =>
+        position === index ? clonePoint(point) : vertex
+      )
+    });
+    if (ringId === null) {
+      draft.outline = mover(draft.outline);
+    } else {
+      draft.exclusions = draft.exclusions.map((ring) =>
+        ring.id === ringId ? mover(ring) : ring
+      );
+    }
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Sacar un vertice. `ringId` null es el contorno. */
+  removeDraftVertex(ringId: string | null, index: number): void {
+    const draft = cloneDraft(this.state.draft);
+    const sacar = (ring: CoverageRing): CoverageRing => ({
+      ...ring,
+      vertices: ring.vertices.filter((_, position) => position !== index)
+    });
+    if (ringId === null) {
+      draft.outline = sacar(draft.outline);
+    } else {
+      draft.exclusions = draft.exclusions.map((ring) =>
+        ring.id === ringId ? sacar(ring) : ring
+      );
+    }
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Borrar una exclusion entera. */
+  removeExclusion(ringId: string): void {
+    const draft = cloneDraft(this.state.draft);
+    draft.exclusions = draft.exclusions.filter((ring) => ring.id !== ringId);
+    if (draft.activeExclusionId === ringId) {
+      draft.activeExclusionId = null;
+      draft.mode = "idle";
+    }
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Cerrar el anillo activo y dejar de recibir clicks. */
+  finishDraftRing(): void {
+    const draft = cloneDraft(this.state.draft);
+    draft.mode = "idle";
+    draft.activeExclusionId = null;
+    this.setDraft(draft, "polygon");
+  }
+
+  /** Tirar el poligono y volver al lote rectangular. */
+  clearDraft(): void {
+    this.setDraft(emptyDraft(), "rectangle");
+    this.invalidatePreview("Se borró el polígono del lote");
+  }
+
+  private setDraft(draft: CoverageDraft, source: CoverageFieldSource): void {
+    this.planGeneration += 1;
+    this.state = {
+      ...this.state,
+      draft,
+      fieldSource: source,
+      // El preview deja de corresponder al lote apenas se mueve un vertice.
+      preview: null
+    };
+    this.emit();
+  }
+
+  /**
+   * El borrador que hay que mandar, o undefined en modo rectangulo.
+   *
+   * Derivado de `fieldSource`, no un campo aparte: si el operador vuelve al
+   * rectangulo, el poligono queda en el estado pero no viaja.
+   */
+  /**
+   * El rectangulo que viaja en el pedido.
+   *
+   * Con poligono sale de su caja envolvente; el `field` del cuadrado legacy
+   * puede no existir. Derivado, no guardado: si se mueve un vertice, la caja
+   * se recalcula sola.
+   */
+  private fieldForRequest(field: CoverageFieldGeometry | null): CoverageFieldGeometry {
+    if (this.state.fieldSource === "polygon") {
+      const derivado = fieldGeometryFromRing(
+        this.state.draft.outline,
+        field?.side ?? "left"
+      );
+      if (derivado) return derivado;
+    }
+    if (!field) {
+      throw new Error("No hay lote definido para planificar");
+    }
+    return field;
+  }
+
+  private draftForRequest(): CoverageDraft | undefined {
+    return this.state.fieldSource === "polygon"
+      ? cloneDraft(this.state.draft)
+      : undefined;
+  }
+
+  /** Si el lote definido alcanza para pedir un preview. Derivado. */
+  canPreview(): boolean {
+    if (this.state.loading || this.state.sending) return false;
+    if (this.state.fieldSource === "polygon") {
+      return isCoverageDraftPlannable(this.state.draft);
+    }
+    return this.state.field !== null && this.state.fieldPolygon.length === 4;
+  }
+
   canStartMission(): boolean {
     const preview = this.state.preview;
+    // Con poligono el cuadrado legacy no existe, asi que la condicion del lote
+    // depende de con que se planifico.
+    const loteListo =
+      this.state.fieldSource === "polygon"
+        ? isCoverageDraftPlannable(this.state.draft)
+        : this.state.field !== null && this.state.fieldPolygon.length === 4;
     return Boolean(
       preview &&
-      this.state.field !== null &&
-      this.state.fieldPolygon.length === 4 &&
+      loteListo &&
       !this.state.loading &&
       !this.state.sending &&
       preview.topologySafe &&
@@ -1369,7 +1669,13 @@ export class CoverageService {
     if (!preview) {
       throw new Error("Generá un preview antes de iniciar");
     }
-    if (!field || this.state.fieldPolygon.length !== 4) {
+    if (this.state.fieldSource === "polygon") {
+      if (!isCoverageDraftPlannable(this.state.draft)) {
+        throw new Error(
+          "El polígono del lote necesita al menos 3 vértices, y cada exclusión también"
+        );
+      }
+    } else if (!field || this.state.fieldPolygon.length !== 4) {
       throw new Error("El campo del preview ya no está disponible; regeneralo");
     }
     if (!preview.topologySafe) {
@@ -1420,7 +1726,9 @@ export class CoverageService {
       let response: Nav2IncomingMessage;
       try {
         response = await this.robotDispatcher.requestStartCoverage(
-          coverageRequestPayload(field, requestParameters)
+          coverageRequestPayload(
+            this.fieldForRequest(field), requestParameters, this.draftForRequest()
+          )
         );
       } catch (requestError) {
         const requestMessage = requestError instanceof Error ? requestError.message : String(requestError);
