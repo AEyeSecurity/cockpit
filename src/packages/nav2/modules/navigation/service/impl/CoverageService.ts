@@ -22,12 +22,12 @@ const NOGO_EXTRA_MARGIN_M = 0.5;
 
 /**
  * Cuanto radio de giro se suma al margen, espejo de
- * `coverage_nogo_turning_margin_ratio`. El rodeo hace que el vehiculo maniobre
- * contra el contorno y un Ackermann no puede doblar en escuadra: necesita su
- * radio de espacio. Sin este termino el trazado se dibuja pegado a la zona y el
- * robot termina barriendo por adentro.
+ * `coverage_nogo_turning_margin_ratio`. En 0 el trazado bordea pegado a la zona
+ * y solo se desvia donde realmente la cruza; subirlo le da lugar al vehiculo
+ * para maniobrar sin pisarla, pero agranda el hueco y lo hace esquivar mucho
+ * antes. Tiene que valer lo mismo que el parametro del route_executor.
  */
-const NOGO_TURNING_MARGIN_RATIO = 1.0;
+const NOGO_TURNING_MARGIN_RATIO = 0.0;
 
 const METERS_PER_DEG_LAT = 111_320;
 const MIN_FIELD_EDGE_M = 0.5;
