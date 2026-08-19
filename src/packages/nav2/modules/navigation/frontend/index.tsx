@@ -1012,6 +1012,28 @@ function CoverageSidebarSection({
     }
   };
 
+  const squareFromVehicle = (): void => {
+    if (!robotPose) {
+      emitError("Todavía no llegó la pose del vehículo");
+      return;
+    }
+    try {
+      // Siembra un poligono de 4 vertices, no la figura rectangular legacy: el
+      // lote de CAMPO tiene una sola representacion y es el poligono.
+      const next = coverageService.seedPolygonFromVehiclePose({
+        lat: robotPose.lat,
+        lon: robotPose.lon,
+        yawDeg: robotPose.headingDeg
+      });
+      emitInfo(
+        `Lote de ${next.draft.outline.vertices.length} vértices desde el vehículo; ` +
+          "movelos en el mapa o agregá más, y generá el preview"
+      );
+    } catch (error) {
+      emitError(`No se pudo armar el lote: ${String(error)}`);
+    }
+  };
+
   // Adelanto local del trazado: se recalcula al tipear, sin ida y vuelta al
   // backend. El preview sigue siendo el unico que audita cruces y habilita el
   // inicio, por eso esto se rotula como estimacion.
@@ -1045,6 +1067,24 @@ function CoverageSidebarSection({
         <div className="coverage-sidebar-actions">
           <button
             type="button"
+            className="ncb sec-btn"
+            disabled={!robotPose || coverageState.loading || coverageState.sending}
+            title={
+              robotPose
+                ? "Arma el polígono del lote desde el vehículo; después arrastrás los vértices para seguir el borde real"
+                : "Esperando la pose del vehículo"
+            }
+            onClick={squareFromVehicle}
+          >
+            <ButtonFace
+              icon={<NavGlyph kind="field" />}
+              label="ARMAR POLÍGONO"
+              meta={robotPose ? "8 vértices" : "Sin pose"}
+              compact
+            />
+          </button>
+          <button
+            type="button"
             className="ncb danger-btn"
             disabled={
               coverageState.loading ||
@@ -1070,16 +1110,14 @@ function CoverageSidebarSection({
             <button
               type="button"
               className={joinClassNames(
-                "ncb-wide",
-                coverageState.draft.mode === "outline" ? "active" : "sec-btn"
+                "ncb sec-btn",
+                coverageState.draft.mode === "outline" && "active"
               )}
               disabled={coverageState.loading || coverageState.sending}
               onClick={() => runCoverageAction(() => coverageService?.startOutlineDraft())}
-              title="Marcá los vértices del lote haciendo click en el mapa. Mínimo 3."
+              title="Marcá los vértices del lote haciendo click en el mapa"
             >
-              {coverageState.draft.mode === "outline"
-                ? "MARCANDO LOTE — click en el mapa"
-                : "DIBUJAR LOTE"}
+              {coverageState.draft.mode === "outline" ? "MARCANDO LOTE…" : "DIBUJAR LOTE"}
             </button>
             <button
               type="button"

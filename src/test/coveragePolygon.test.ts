@@ -187,32 +187,63 @@ describe("editor de poligono de CAMPO", () => {
 });
 
 
-describe("el lote es siempre un poligono dibujado", () => {
+describe("armar lote desde el vehiculo", () => {
   const POSE = { lat: ORIGEN.lat, lon: ORIGEN.lon, yawDeg: 0 };
 
-  it("el servicio ya no ofrece sembrar un cuadrado en el borrador", () => {
-    // El lote de CAMPO se dibuja: no hay atajo que deje una figura cuadrada en
-    // el mapa que despues haya que convertir a mano.
+  it("siembra un poligono, no un cuadrado, y descarta el lote legacy", () => {
+    // Ocho vertices: las cuatro esquinas mas el punto medio de cada lado. Con
+    // solo las esquinas lo que aparece es un cuadrado, y un cuadrado invita a
+    // dejarlo cuadrado. Tampoco quedan las dos representaciones vivas a la vez.
     const { service } = servicio();
-    expect(
-      (service as unknown as Record<string, unknown>).seedPolygonFromVehiclePose
-    ).toBeUndefined();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const state = service.getState();
+    expect(state.fieldSource).toBe("polygon");
+    expect(state.draft.outline.vertices).toHaveLength(8);
+    expect(state.field).toBeNull();
+    expect(state.fieldPolygon).toEqual([]);
   });
 
-  it("squareFromVehiclePose sigue existiendo para el modo legacy del backend", () => {
-    // No se rompe: el .srv mantiene el rectangulo para llamadas viejas, solo
-    // que el cockpit ya no lo produce.
+  it("los puntos medios caen sobre los lados, no adentro ni afuera", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const v = service.getState().draft.outline.vertices;
+    // Cada vertice impar es el medio entre sus dos vecinos.
+    for (let i = 1; i < v.length; i += 2) {
+      const previo = v[i - 1];
+      const siguiente = v[(i + 1) % v.length];
+      expect(v[i].lat).toBeCloseTo((previo.lat + siguiente.lat) / 2, 9);
+      expect(v[i].lon).toBeCloseTo((previo.lon + siguiente.lon) / 2, 9);
+    }
+  });
+
+  it("el lote sembrado se puede editar como cualquier poligono", () => {
+    const { service } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    const movido = { lat: ORIGEN.lat + DLAT, lon: ORIGEN.lon + DLON };
+    service.moveDraftVertex(null, 0, movido);
+    expect(service.getState().draft.outline.vertices[0]).toEqual(movido);
+    service.appendDraftVertex(movido);
+    expect(service.getState().draft.outline.vertices).toHaveLength(8);
+    service.startOutlineDraft();
+    expect(service.getState().draft.outline.vertices).toEqual([]);
+  });
+
+  it("el lote sembrado viaja como poligono, no como rectangulo", async () => {
+    const { service, previewRequest } = servicio();
+    service.seedPolygonFromVehiclePose(POSE, { sideM: 40 });
+    expect(service.canPreview()).toBe(true);
+    await service.previewCoverage().catch(() => undefined);
+    const payload = previewRequest.mock.calls[0][0] as Record<string, unknown>;
+    const poly = payload.coverage_polygon as { vertices: CoverageGeoPoint[] };
+    expect(poly.vertices).toHaveLength(8);
+  });
+
+  it("squareFromVehiclePose sigue existiendo para el modo legacy", () => {
+    // No se rompe: el backend mantiene el rectangulo para llamadas viejas.
     const { service } = servicio();
     service.squareFromVehiclePose(POSE, { sideM: 40 });
-    expect(service.getState().fieldSource).toBe("rectangle");
-  });
-
-  it("dibujar es el unico camino al modo poligono", () => {
-    const { service } = servicio();
-    expect(service.getState().fieldSource).toBe("rectangle");
-    expect(service.canPreview()).toBe(false);
-    dibujar(service, EN_L);
-    expect(service.getState().fieldSource).toBe("polygon");
-    expect(service.canPreview()).toBe(true);
+    const state = service.getState();
+    expect(state.fieldSource).toBe("rectangle");
+    expect(state.fieldPolygon).toHaveLength(4);
   });
 });
