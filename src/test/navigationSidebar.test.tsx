@@ -105,7 +105,7 @@ describe("navigation sidebar", () => {
     expect(coverageService.getState().field?.fieldWidthM).toBeCloseTo(26, 6);
   });
 
-  it("arma el lote desde el vehiculo y adelanta el trazado antes del preview", async () => {
+  it("adelanta el trazado antes de pedir el preview", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
     if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
@@ -117,11 +117,9 @@ describe("navigation sidebar", () => {
 
     const coverageService = runtime.services.getService<CoverageService>("nav2.service.coverage");
 
-    // Sin pose todavia no se puede: el boton queda deshabilitado en vez de
-    // armar un campo en una coordenada inventada.
-    const squareButton = screen.getByText("ARMAR LOTE").closest("button") as HTMLButtonElement;
-    expect(squareButton).toBeDisabled();
-
+    // El lote se arma por el modo legacy, que es el que trae la estimacion
+    // analitica del zigzag. Desde el cockpit el lote se dibuja como poligono y
+    // ya no hay atajo que deje un cuadrado en el mapa.
     act(() => {
       coverageService.squareFromVehiclePose(
         { lat: -31.4859, lon: -64.2425, yawDeg: 0 },

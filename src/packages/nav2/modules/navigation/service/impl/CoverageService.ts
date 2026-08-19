@@ -1492,56 +1492,6 @@ export class CoverageService {
   // Editor de poligono. Solo lo usa CAMPO; ruta, patrulla y goals no lo tocan.
   // ---------------------------------------------------------------------
 
-  /**
-   * Sembrar el poligono con un cuadrado apoyado en la pose del vehiculo.
-   *
-   * Es el atajo de siempre —un lote de un click, alineado con el vehiculo—
-   * pero deja un poligono de 4 vertices editables en vez de la figura
-   * rectangular legacy. Tener las dos representaciones vivas al mismo tiempo
-   * confunde: el operador arma un cuadrado, dibuja encima un poligono, y
-   * despues no sabe cual de los dos se va a trabajar. Con esto hay una sola.
-   *
-   * El cuadrado legacy sigue existiendo en el backend para las llamadas viejas;
-   * lo que ya no hace es salir de este cockpit.
-   */
-  seedPolygonFromVehiclePose(
-    pose: CoverageVehiclePose,
-    options: { sideM?: number; side?: "left" | "right" } = {}
-  ): CoverageState {
-    // Se reusa la geometria del cuadrado en vez de repetir la trigonometria:
-    // es la misma figura, cambia como se guarda.
-    const previo = {
-      draft: cloneDraft(this.state.draft),
-      fieldSource: this.state.fieldSource
-    };
-    const conCuadrado = this.squareFromVehiclePose(pose, options);
-    const vertices = conCuadrado.fieldPolygon.map(clonePoint);
-    if (vertices.length < MIN_RING_VERTICES) {
-      this.state = { ...this.state, ...previo };
-      throw new Error("No se pudo armar el lote desde la pose del vehículo");
-    }
-    this.planGeneration += 1;
-    this.state = {
-      ...this.state,
-      // El cuadrado legacy se descarta: lo unico que queda es el poligono.
-      field: null,
-      fieldPolygon: [],
-      vehicleAnchor: null,
-      fieldSource: "polygon",
-      draft: {
-        mode: "idle",
-        outline: { id: newRingId(), vertices },
-        exclusions: [],
-        activeExclusionId: null
-      },
-      preview: null,
-      error: "",
-      lastStatus: "Lote armado desde el vehículo; movés los vértices en el mapa"
-    };
-    this.emit();
-    return this.getState();
-  }
-
   /** Empezar a dibujar el contorno del lote, descartando el borrador previo. */
   startOutlineDraft(): void {
     this.setDraft({ ...emptyDraft(), mode: "outline" }, "polygon");
