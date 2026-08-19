@@ -96,6 +96,7 @@ export class MapService {
 
   constructor(private readonly mapDispatcher: MapDispatcher) {
     this.mapDispatcher.subscribe("state", (message) => {
+      this.adoptBackendZones(message.geojson);
       const payload = asRecord(message.datums);
       if (!payload) return;
       this.setDatumProfilesState(parseDatumProfilesState(payload));
@@ -515,6 +516,61 @@ export class MapService {
     const shouldSync = options?.sync ?? true;
     if (!shouldSync || !this.state.autoSync || !this.backendSyncConnected) return;
     void this.pushZonesToBackend().catch(() => undefined);
+  }
+
+  /**
+   * Adoptar las zonas que reporta el backend en cada mensaje de estado.
+   *
+   * El backend guarda las zonas en disco y las relee al arrancar, pero la lista
+   * del cockpit vive en el navegador y arranca vacia. Sin esto, tras recargar la
+   * pagina queda una zona que recorta el trazado de cobertura y no se dibuja en
+   * ningun lado: un cuadrado invisible que dobla la ruta. Lo que manda es el
+   * backend, que es quien realmente planifica.
+   */
+  private adoptBackendZones(raw: unknown): void {
+    const document = asRecord(raw);
+    if (!document) return;
+    const features = document.features;
+    if (!Array.isArray(features)) return;
+
+    const incoming: ZoneEntry[] = [];
+    for (const entry of features) {
+      const feature = asRecord(entry);
+      if (!feature) continue;
+      const geometry = asRecord(feature.geometry);
+      const properties = asRecord(feature.properties) ?? {};
+      if (!geometry || String(geometry.type) !== "Polygon") continue;
+      const rings = geometry.coordinates;
+      if (!Array.isArray(rings) || !Array.isArray(rings[0])) continue;
+      // El anillo GeoJSON viene cerrado y en orden [lon, lat]; el cockpit lo
+      // guarda abierto y como {lat, lon}.
+      const ring = (rings[0] as unknown[]).slice(0, -1);
+      const polygon = ring
+        .filter((point): point is number[] => Array.isArray(point) && point.length >= 2)
+        .map((point) => ({ lat: Number(point[1]), lon: Number(point[0]) }));
+      if (polygon.length < 3) continue;
+      incoming.push({
+        id: String(properties.id ?? `zone.backend.${incoming.length + 1}`),
+        name: String(properties.name ?? `Zone ${incoming.length + 1}`),
+        vertices: polygon.length,
+        enabled: properties.enabled !== false,
+        polygon,
+        updatedAt: Date.now()
+      });
+    }
+
+    // `updatedAt` se ignora en la comparacion: cambia en cada mensaje y haria
+    // que el mapa se redibujara varias veces por segundo.
+    const huella = (zones: ZoneEntry[]): string =>
+      JSON.stringify(
+        zones.map((zone) => [zone.id, zone.enabled !== false, zone.polygon ?? []])
+      );
+    if (huella(incoming) === huella(this.state.zones)) return;
+
+    this.state = { ...this.state, zones: incoming };
+    this.emit();
+    // Sin `syncZonesIfEnabled`: esto vino del backend, devolverselo seria un
+    // rebote.
   }
 
   private buildGeoJsonFromState(): Record<string, unknown> {
