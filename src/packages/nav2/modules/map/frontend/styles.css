@@ -503,6 +503,16 @@
 
 .leaflet-tooltip.coverage-field-hintbox::before { display: none; }
 
+.leaflet-tooltip.mission-waypoint-tooltip {
+  background: rgba(15, 23, 42, .94);
+  border: 1px solid rgba(147, 197, 253, .72);
+  color: #f8fafc;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .wp-icon {
   width: 30px;
   height: 30px;
@@ -554,6 +564,44 @@
 .wp-icon.auto .wp-index {
   border-style: dashed;
   color: #0f766e;
+}
+
+.wp-icon.mission-preview { opacity: .92; }
+
+.wp-icon.mission-done { opacity: .72; }
+
+.wp-icon.mission-done .wp-arrow {
+  border-bottom-color: #15803d;
+}
+
+.wp-icon.mission-done .wp-index {
+  color: #14532d;
+  background: rgba(220, 252, 231, .98);
+  border-color: #16a34a;
+}
+
+.wp-icon.mission-current .wp-arrow {
+  border-bottom-color: #facc15;
+  filter: drop-shadow(0 0 5px rgba(250, 204, 21, .96));
+}
+
+.wp-icon.mission-current .wp-index {
+  color: #422006;
+  background: rgba(254, 249, 195, .99);
+  border-color: #eab308;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, .32);
+}
+
+.wp-icon.mission-blocked .wp-arrow {
+  border-bottom-color: #dc2626;
+  filter: drop-shadow(0 0 5px rgba(220, 38, 38, .94));
+}
+
+.wp-icon.mission-blocked .wp-index {
+  color: #7f1d1d;
+  background: rgba(254, 226, 226, .99);
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .26);
 }
 
 .wp-icon.patrol-return .wp-arrow {

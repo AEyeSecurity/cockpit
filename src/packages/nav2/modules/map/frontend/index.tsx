@@ -21,7 +21,12 @@ import {
   type CoverageService,
   type CoverageState
 } from "../../navigation/service/impl/CoverageService";
-import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../../navigation/routeMissionActivity";
+import {
+  getRouteMissionActivityState,
+  getRouteWaypointVisualState,
+  normalizeRouteMissionStatus,
+  type RouteWaypointVisualState
+} from "../../navigation/routeMissionActivity";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { getBatteryPresentation } from "./batteryPresentation";
@@ -44,7 +49,7 @@ const MAP_WHEEL_PX_PER_ZOOM_LEVEL = 160;
 const MAP_WHEEL_DEBOUNCE_MS = 80;
 const MAP_TOOL_COLOR = "#55ff7f";
 const ROBOT_TRAIL_COLOR = "#ff4d6d";
-const COVERAGE_ROUTE_COLOR = "#ff0f64";
+const COVERAGE_ROUTE_COLOR = "#2f7bff";
 const COVERAGE_ROUTE_UNSAFE_COLOR = "#ff9f43";
 const COVERAGE_FIELD_COLOR = "#60a5fa";
 const ROBOT_TRAIL_MIN_STEP_M = 0.25;
@@ -544,6 +549,8 @@ function buildWaypointLabel(home: boolean, segment: PatrolSegmentVisual, action:
   return "WP";
 }
 
+type MissionWaypointMarkerState = RouteWaypointVisualState | "preview";
+
 function buildWaypointIcon(
   badge: string,
   yawDeg: number,
@@ -552,13 +559,15 @@ function buildWaypointIcon(
   manual = true,
   action = false,
   home = false,
-  patrolSegment: PatrolSegmentVisual = null
+  patrolSegment: PatrolSegmentVisual = null,
+  missionState: MissionWaypointMarkerState | null = null
 ): L.DivIcon {
   const yaw = normalizeYawDeg(yawDeg);
   const cssRotationDeg = normalizeYawDeg(90 - yaw);
   const cls =
     `wp-icon${draft ? " draft" : ""}${selected ? " selected" : ""}${manual ? " manual" : " auto"}${action ? " action" : ""}${home ? " home" : ""}` +
-    `${patrolSegment === "return" ? " patrol-return" : patrolSegment === "depart" ? " patrol-depart" : ""}`;
+    `${patrolSegment === "return" ? " patrol-return" : patrolSegment === "depart" ? " patrol-depart" : ""}` +
+    `${missionState ? ` mission-${missionState}` : ""}`;
   return L.divIcon({
     className: "",
     html:
@@ -686,20 +695,30 @@ function dibujarBorradorDeLote(
       const inicio = evento.latlng;
       let ultimo = inicio;
       let hubo = false;
+      let activo = true;
       const paso = (movimiento: L.LeafletMouseEvent): void => {
+        if (!activo) return;
         hubo = true;
         ultimo = movimiento.latlng;
         aplicar(transformar(inicio, ultimo), soloContorno);
       };
       const soltar = (): void => {
+        if (!activo) return;
+        activo = false;
         map.off("mousemove", paso);
         map.off("mouseup", soltar);
+        map.off("unload", soltar);
+        // `mouseup` sobre un panel fuera del canvas no llega al mapa. Escuchar
+        // el documento evita dejar el paneo apagado y handlers viejos vivos.
+        document.removeEventListener("mouseup", soltar);
         if (arrastreEstaba) map.dragging.enable();
         if (hubo) confirmar(inicio, ultimo);
         else aplicar(null);
       };
       map.on("mousemove", paso);
       map.on("mouseup", soltar);
+      map.once("unload", soltar);
+      document.addEventListener("mouseup", soltar);
     });
   };
 
@@ -887,6 +906,14 @@ function buildCoverageHandleIcon(kind: "resize" | "inicio" | "rotar"): L.DivIcon
   });
 }
 
+function missionWaypointStateLabel(state: MissionWaypointMarkerState): string {
+  if (state === "current") return "actual";
+  if (state === "done") return "completado";
+  if (state === "blocked") return "bloqueado";
+  if (state === "preview") return "preview";
+  return "pendiente";
+}
+
 function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
   const hasHeading = headingDeg !== null && headingDeg !== undefined && Number.isFinite(Number(headingDeg));
   const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0;
@@ -937,6 +964,7 @@ function LeafletMapCanvas({
   goalMode,
   waypointSelectionMode,
   coverageState,
+  routeMission,
   waypoints,
   patrolMissionProfile,
   selectedWaypointIndexes,
@@ -974,6 +1002,7 @@ function LeafletMapCanvas({
   goalMode: boolean;
   waypointSelectionMode: boolean;
   coverageState: CoverageState | null;
+  routeMission: NavigationState["routeMission"] | null;
   waypoints: NavigationState["waypoints"];
   patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
@@ -1029,6 +1058,8 @@ function LeafletMapCanvas({
   const draftLayerRef = useRef<L.LayerGroup | null>(null);
   const selectionLayerRef = useRef<L.LayerGroup | null>(null);
   const coverageLayerRef = useRef<L.LayerGroup | null>(null);
+  const missionWaypointLayerRef = useRef<L.LayerGroup | null>(null);
+  const missionWaypointRenderKeyRef = useRef("");
   const robotMarkerRef = useRef<L.Marker | null>(null);
   const robotTrailRef = useRef<L.Polyline | null>(null);
   const robotTrailPointsRef = useRef<L.LatLng[]>([]);
@@ -1571,6 +1602,7 @@ function LeafletMapCanvas({
     const draftLayer = L.layerGroup();
     const selectionLayer = L.layerGroup();
     const coverageLayer = L.layerGroup();
+    const missionWaypointLayer = L.layerGroup();
     const toolDraftLayer = L.layerGroup();
     const toolDrawingsLayer = L.layerGroup();
     map.addLayer(drawnItems);
@@ -1578,6 +1610,7 @@ function LeafletMapCanvas({
     map.addLayer(draftLayer);
     map.addLayer(selectionLayer);
     map.addLayer(coverageLayer);
+    map.addLayer(missionWaypointLayer);
     map.addLayer(toolDraftLayer);
     map.addLayer(toolDrawingsLayer);
     mapRef.current = map;
@@ -1587,6 +1620,8 @@ function LeafletMapCanvas({
     draftLayerRef.current = draftLayer;
     selectionLayerRef.current = selectionLayer;
     coverageLayerRef.current = coverageLayer;
+    missionWaypointLayerRef.current = missionWaypointLayer;
+    missionWaypointRenderKeyRef.current = "";
     toolDraftLayerRef.current = toolDraftLayer;
     toolDrawingsLayerRef.current = toolDrawingsLayer;
     onZoomChange?.(map.getZoom());
@@ -1964,6 +1999,8 @@ function LeafletMapCanvas({
       draftLayerRef.current = null;
       selectionLayerRef.current = null;
       coverageLayerRef.current = null;
+      missionWaypointLayerRef.current = null;
+      missionWaypointRenderKeyRef.current = "";
       toolDraftLayerRef.current = null;
       toolDrawingsLayerRef.current = null;
       robotMarkerRef.current = null;
@@ -2281,7 +2318,10 @@ function LeafletMapCanvas({
       }
     }
 
-    const sampledPoints = (coverageState.preview?.sampledWaypoints ?? []).filter(
+    // La capa azul representa la ruta que se envia, no el muestreo interno del
+    // planner. Asi una cabecera reducida para el limite de route_executor no
+    // promete en pantalla una curva que el vehiculo no va a seguir.
+    const sampledPoints = (coverageState.preview?.executionWaypoints ?? []).filter(
       (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
     );
     if (sampledPoints.length >= 2) {
@@ -2323,6 +2363,83 @@ function LeafletMapCanvas({
       }
     }
   }, [coverageState]);
+
+  useEffect(() => {
+    const layer = missionWaypointLayerRef.current;
+    if (!layer) return;
+
+    const previewPoints = (coverageState?.preview?.keyWaypoints ?? []).filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
+    );
+    const missionPoints = (routeMission?.missionWaypoints ?? [])
+      .map((point, index) => ({
+        index,
+        lat: Number(point.x),
+        lon: Number(point.y),
+        yawDeg: Number(point.yawDeg ?? 0),
+        preview: previewPoints[index] ?? null
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+    const points = missionPoints.length > 0
+      ? missionPoints.map((point) => ({
+          ...point,
+          state: routeMission
+            ? getRouteWaypointVisualState(routeMission, point.index)
+            : "pending" as const
+        }))
+      : previewPoints.map((point, index) => ({
+          index,
+          lat: Number(point.lat),
+          lon: Number(point.lon),
+          yawDeg: Number(point.yawDeg ?? 0),
+          preview: point,
+          state: "preview" as const
+        }));
+    const renderKey = points.length === 0
+      ? "__empty__"
+      : points
+          .map((point) =>
+            `${point.index}:${point.lat.toFixed(7)}:${point.lon.toFixed(7)}:${point.yawDeg.toFixed(2)}:${point.state}`
+          )
+          .join("|");
+    if (renderKey === missionWaypointRenderKeyRef.current) return;
+    missionWaypointRenderKeyRef.current = renderKey;
+    layer.clearLayers();
+
+    points.forEach((point) => {
+      const rowIndex = Number(point.preview?.rowIndex ?? -1);
+      const details = [
+        `Waypoint ${point.index + 1}`,
+        missionWaypointStateLabel(point.state),
+        Number.isFinite(rowIndex) && rowIndex >= 0 ? `fila ${rowIndex + 1}` : "",
+        `${point.lat.toFixed(7)}, ${point.lon.toFixed(7)}`,
+        `yaw ${point.yawDeg.toFixed(1)}°`
+      ].filter(Boolean);
+      L.marker([point.lat, point.lon], {
+        icon: buildWaypointIcon(
+          String(point.index + 1),
+          point.yawDeg,
+          false,
+          false,
+          true,
+          false,
+          false,
+          null,
+          point.state
+        ),
+        interactive: true,
+        keyboard: false,
+        riseOnHover: true,
+        zIndexOffset: point.state === "current" || point.state === "blocked" ? 650 : 500
+      })
+        .bindTooltip(details.join(" · "), {
+          direction: "top",
+          offset: [0, -12],
+          className: "mission-waypoint-tooltip"
+        })
+        .addTo(layer);
+    });
+  }, [coverageState?.preview, routeMission]);
 
   useEffect(() => {
     const layer = waypointLayerRef.current;
@@ -3971,6 +4088,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 goalMode={navigationState?.goalMode === true}
                 waypointSelectionMode={navigationState?.waypointSelectionMode === true}
                 coverageState={coverageState}
+                routeMission={routeMission}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -4059,6 +4177,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 goalMode={false}
                 waypointSelectionMode={false}
                 coverageState={coverageState}
+                routeMission={routeMission}
                 waypoints={navigationState?.waypoints ?? []}
                 patrolMissionProfile={
                   navigationState?.patrolMissionProfile ?? {
@@ -4309,6 +4428,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 onClick={() => {
                   const count = state.zones.length;
                   mapService.clearZones();
+                  // El preview que se genero con la zona vieja ya no describe
+                  // la ruta que el backend va a ejecutar. Sin invalidarlo el
+                  // boton de iniciar queda bloqueado por nogoClippedLocally
+                  // despues de tocar el tacho, sin explicar por que.
+                  handleZonesChanged();
                   runtime.eventBus.emit("console.event", {
                     level: "info",
                     text: `No-go zones deleted (${count})`,

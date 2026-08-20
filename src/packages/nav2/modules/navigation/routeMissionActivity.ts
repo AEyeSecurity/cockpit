@@ -7,6 +7,8 @@ export interface RouteMissionActivityState {
   isTerminal: boolean;
 }
 
+export type RouteWaypointVisualState = "pending" | "current" | "done" | "blocked";
+
 export function normalizeRouteMissionStatus(status: string): string {
   return String(status ?? "").replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
 }
@@ -110,4 +112,28 @@ export function getRouteMissionActivityState(
     hasHistory,
     isTerminal
   };
+}
+
+/** Estado visual de una meta dentro de la ruta que realmente ejecuta el backend. */
+export function getRouteWaypointVisualState(
+  routeMission: RouteMissionStateData,
+  index: number
+): RouteWaypointVisualState {
+  const waypointIndex = Math.max(0, Math.trunc(index));
+  const status = normalizeRouteMissionStatus(routeMission.status);
+  const completed =
+    status.includes("completed") || status.includes("done") || status.includes("succeeded");
+  if (completed) return "done";
+  if (waypointIndex < Math.max(0, Math.trunc(routeMission.currentStartIndex))) {
+    return "done";
+  }
+  if (waypointIndex === Math.max(0, Math.trunc(routeMission.currentTargetIndex))) {
+    if (routeMission.blockedState.length > 0 || status.includes("failed") || status.includes("aborted")) {
+      return "blocked";
+    }
+    if (!isRouteMissionTerminal(routeMission) || routeMission.active || routeMission.paused) {
+      return "current";
+    }
+  }
+  return "pending";
 }

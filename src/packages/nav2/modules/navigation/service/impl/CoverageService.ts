@@ -10,22 +10,22 @@ import {
 } from "./coverageNoGo";
 
 export const COVERAGE_SERVICE_ID = "service.coverage";
-export const MAX_COVERAGE_ROUTE_WAYPOINTS = 200;
+// Los arcos exteriores de Campo se mandan como guias cada ~1 m. El limite de
+// 200 las recortaba globalmente y deformaba una cabecera de radio 4 m; 800
+// permite conservarlas sin acercarse a los limites del mensaje ROS.
+export const MAX_COVERAGE_ROUTE_WAYPOINTS = 800;
 
 /**
- * Colchon fijo sobre el medio ancho de corte al inflar una zona no-go. Tiene que
- * ser igual al parametro `coverage_nogo_extra_margin_m` del route_executor: si
- * los margenes no coinciden, los dos recortes dan resultados distintos y el de
- * aca deja de ser un no-op sobre lo que ya recorto el backend.
+ * Colchon fijo del recorte local. Es el valor por defecto del backend; este
+ * cliente no lee los parametros ROS. Si el operador cambia aquel valor, la
+ * segunda pasada puede diferir y `nogoClippedLocally` bloquea el arranque.
  */
 const NOGO_EXTRA_MARGIN_M = 0.5;
 
 /**
- * Cuanto radio de giro se suma al margen, espejo de
- * `coverage_nogo_turning_margin_ratio`. En 0 el trazado bordea pegado a la zona
- * y solo se desvia donde realmente la cruza; subirlo le da lugar al vehiculo
- * para maniobrar sin pisarla, pero agranda el hueco y lo hace esquivar mucho
- * antes. Tiene que valer lo mismo que el parametro del route_executor.
+ * Parte local dependiente del radio de giro. Es el default del backend; una
+ * diferencia de configuracion no se oculta: se detecta como recorte local y
+ * el cockpit no deja iniciar una ruta distinta a la del preview.
  */
 const NOGO_TURNING_MARGIN_RATIO = 0.0;
 
@@ -46,12 +46,11 @@ const RIGID_FIELD_VERTICES = 8;
  *
  * Es un piso, no una preferencia: el backend rechaza un plan de cobertura con un
  * radio menor que el del Smac que despues lo tiene que seguir. En simulacion se
- * baja a 2.9 m porque el largo del giro de cabecera y la cabecera que necesita
- * escalan con el radio; el perfil real se queda en 4.0 m mientras el radio corto
- * no este validado en el vehiculo.
+ * usa 4.0 m para que la geometria de las cabeceras sea igual en simulacion y
+ * en el vehiculo. Es un piso de seguridad, no una preferencia del usuario.
  */
 const PLANNER_MIN_TURNING_RADIUS_M: Record<"sim" | "real", number> = {
-  sim: 2.9,
+  sim: 4.0,
   real: 4.0
 };
 
@@ -113,6 +112,8 @@ export interface CoverageMetrics {
 }
 
 export interface CoveragePreview {
+  /** Ruta que se enviaria a route_executor; es la unica que se dibuja. */
+  executionWaypoints: CoverageWaypoint[];
   sampledWaypoints: CoverageWaypoint[];
   keyWaypoints: CoverageWaypoint[];
   metrics: CoverageMetrics;
@@ -333,24 +334,34 @@ function normalizeYawDeg(value: number): number {
   return normalized < 0 ? normalized + 360 : normalized;
 }
 
+function normalizeLongitudeDeg(value: number): number {
+  return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
+/** Diferencia corta de longitud: +179.999 y -179.999 estan a metros, no a 360°. */
+function longitudeDeltaDeg(originLon: number, pointLon: number): number {
+  return normalizeLongitudeDeg(pointLon - originLon);
+}
+
+function metersPerDegreeLon(lat: number): number {
+  return METERS_PER_DEG_LAT * Math.max(1.0e-6, Math.abs(Math.cos(degreesToRadians(lat))));
+}
+
 function clonePoint(point: CoverageGeoPoint): CoverageGeoPoint {
   return { lat: point.lat, lon: point.lon };
 }
 
 function localMeters(origin: CoverageGeoPoint, point: CoverageGeoPoint): { east: number; north: number } {
-  const originLatRad = degreesToRadians(origin.lat);
   return {
-    east: (point.lon - origin.lon) * METERS_PER_DEG_LAT * Math.cos(originLatRad),
+    east: longitudeDeltaDeg(origin.lon, point.lon) * metersPerDegreeLon(origin.lat),
     north: (point.lat - origin.lat) * METERS_PER_DEG_LAT
   };
 }
 
 function offsetPoint(origin: CoverageGeoPoint, eastM: number, northM: number): CoverageGeoPoint {
-  const originLatRad = degreesToRadians(origin.lat);
-  const cosLat = Math.max(1.0e-9, Math.abs(Math.cos(originLatRad))) * Math.sign(Math.cos(originLatRad) || 1);
   return {
     lat: origin.lat + northM / METERS_PER_DEG_LAT,
-    lon: origin.lon + eastM / (METERS_PER_DEG_LAT * cosLat)
+    lon: normalizeLongitudeDeg(origin.lon + eastM / metersPerDegreeLon(origin.lat))
   };
 }
 
@@ -496,6 +507,7 @@ function coverageBody(response: Nav2IncomingMessage): Record<string, unknown> {
 function clonePreview(preview: CoveragePreview): CoveragePreview {
   return {
     ...preview,
+    executionWaypoints: preview.executionWaypoints.map((waypoint) => ({ ...waypoint })),
     sampledWaypoints: preview.sampledWaypoints.map((waypoint) => ({ ...waypoint })),
     keyWaypoints: preview.keyWaypoints.map((waypoint) => ({ ...waypoint })),
     metrics: {
@@ -546,11 +558,13 @@ function clipWaypointsToZones(
   polygons: NoGoPolygon[],
   origin: CoverageGeoPoint,
   marginM: number,
-  bounds: NoGoBounds
+  bounds: NoGoBounds,
+  fieldBoundary: NoGoPolygon
 ): { waypoints: CoverageWaypoint[]; dropped: number; detours: number } {
   const result = clipPathToNoGo<CoverageWaypoint>(waypoints, polygons, {
     marginM,
     bounds,
+    fieldBoundary,
     positionOf: (item) => {
       const local = localMeters(origin, item);
       return { x: local.east, y: local.north };
@@ -591,6 +605,17 @@ function parseCoveragePreview(
   const sampledWaypoints = sampledRaw
     .map(parseCoverageWaypoint)
     .filter((waypoint): waypoint is CoverageWaypoint => waypoint !== null);
+  // `route_request` es la lista que el backend va a mandar a route_executor.
+  // No se debe dibujar el muestreo denso si se tuvo que reducir para respetar
+  // el limite de la ruta: eso fue justamente lo que hacia que el plano azul y
+  // el recorrido real no coincidieran.
+  const executionRaw =
+    (Array.isArray(routeRequest.waypoints) ? routeRequest.waypoints : null) ??
+    (Array.isArray(body.route_waypoints) ? body.route_waypoints : null) ??
+    sampledRaw;
+  const executionWaypoints = executionRaw
+    .map(parseCoverageWaypoint)
+    .filter((waypoint): waypoint is CoverageWaypoint => waypoint !== null);
   const explicitKeyRaw =
     (Array.isArray(body.key_waypoints) ? body.key_waypoints : null) ??
     (Array.isArray(plan.key_waypoints) ? plan.key_waypoints : null);
@@ -602,6 +627,9 @@ function parseCoveragePreview(
     : sampledWaypoints.filter((waypoint) => waypoint.key);
   if (sampledWaypoints.length < 2) {
     throw new Error("preview_coverage no devolvió una trayectoria válida");
+  }
+  if (executionWaypoints.length < 2) {
+    throw new Error("preview_coverage no devolvió una ruta ejecutable válida");
   }
   if (keyWaypoints.length < 2) {
     throw new Error("preview_coverage no devolvió waypoints key suficientes");
@@ -690,6 +718,7 @@ function parseCoveragePreview(
         : `El backend marcó conflictos topológicos en el alcance ${topologyScope}.`);
 
   return {
+    executionWaypoints,
     sampledWaypoints,
     keyWaypoints,
     topologySafe,
@@ -790,11 +819,17 @@ function cloneDraft(draft: CoverageDraft): CoverageDraft {
   };
 }
 
-/** Centro del anillo: promedio de sus vertices. Alcanza para escalar. */
+/** Centro del anillo; la longitud se promedia sobre el circulo, no en grados. */
 function ringCentre(ring: CoverageRing): CoverageGeoPoint | null {
   if (ring.vertices.length === 0) return null;
   const lat = ring.vertices.reduce((acc, v) => acc + v.lat, 0) / ring.vertices.length;
-  const lon = ring.vertices.reduce((acc, v) => acc + v.lon, 0) / ring.vertices.length;
+  const sinLon = ring.vertices.reduce(
+    (acc, vertex) => acc + Math.sin(degreesToRadians(vertex.lon)), 0
+  );
+  const cosLon = ring.vertices.reduce(
+    (acc, vertex) => acc + Math.cos(degreesToRadians(vertex.lon)), 0
+  );
+  const lon = normalizeLongitudeDeg(Math.atan2(sinLon, cosLon) * 180 / Math.PI);
   return { lat, lon };
 }
 
@@ -819,7 +854,7 @@ function translateRing(ring: CoverageRing, deltaLat: number, deltaLon: number): 
     id: ring.id,
     vertices: ring.vertices.map((vertex) => ({
       lat: vertex.lat + deltaLat,
-      lon: vertex.lon + deltaLon
+      lon: normalizeLongitudeDeg(vertex.lon + deltaLon)
     }))
   };
 }
@@ -893,19 +928,23 @@ function fieldGeometryFromRing(
   side: "left" | "right"
 ): CoverageFieldGeometry | null {
   if (ring.vertices.length < MIN_RING_VERTICES) return null;
-  const lats = ring.vertices.map((vertex) => vertex.lat);
-  const lons = ring.vertices.map((vertex) => vertex.lon);
-  const origin = { lat: Math.min(...lats), lon: Math.min(...lons) };
-  const far = { lat: Math.max(...lats), lon: Math.max(...lons) };
-  const span = localMeters(origin, far);
+  // Se mide contra un vertice y con delta de longitud corta. Min/max lon crudo
+  // convierte un lote que cruza el antimeridiano en uno de casi 40.000 km.
+  const reference = ring.vertices[0]!;
+  const local = ring.vertices.map((vertex) => localMeters(reference, vertex));
+  const xMin = Math.min(...local.map((point) => point.east));
+  const xMax = Math.max(...local.map((point) => point.east));
+  const yMin = Math.min(...local.map((point) => point.north));
+  const yMax = Math.max(...local.map((point) => point.north));
+  const origin = offsetPoint(reference, xMin, yMin);
   return {
     startLat: origin.lat,
     startLon: origin.lon,
     // Yaw 0: en modo poligono las pasadas las orienta Fields2Cover, no este
     // rumbo. Solo define el marco en el que van y vuelven las coordenadas.
     startYawDeg: 0,
-    fieldLengthM: Math.max(1, span.east),
-    fieldWidthM: Math.max(1, span.north),
+    fieldLengthM: Math.max(1, xMax - xMin),
+    fieldWidthM: Math.max(1, yMax - yMin),
     side
   };
 }
@@ -1538,9 +1577,8 @@ export class CoverageService {
     const polygons = noGoPolygonsFromZones(this.zoneSource, origin);
     if (polygons.length === 0) return preview;
 
-    // Mismo margen que usa el backend. Si los dos no coinciden, el recorte
-    // local moveria puntos que el backend dejo donde estaban y la idempotencia
-    // se pierde.
+    // Margen local por defecto. Si el backend fue configurado distinto, el
+    // recorte deja de ser idempotente y el resultado se marca para bloqueo.
     const marginM =
       0.5 * parameters.cutterWidthM +
       NOGO_EXTRA_MARGIN_M +
@@ -1557,17 +1595,34 @@ export class CoverageService {
       yMin: Math.min(...corners.map((c) => c.y)),
       yMax: Math.max(...corners.map((c) => c.y))
     };
+    const fieldBoundary =
+      this.state.fieldSource === "polygon"
+        ? this.state.draft.outline.vertices.map((vertex) => {
+            const local = localMeters(origin, vertex);
+            return { x: local.east, y: local.north };
+          })
+        : corners;
     const sampled = clipWaypointsToZones(
-      preview.sampledWaypoints, polygons, origin, marginM, bounds
+      preview.sampledWaypoints, polygons, origin, marginM, bounds, fieldBoundary
+    );
+    const execution = clipWaypointsToZones(
+      preview.executionWaypoints, polygons, origin, marginM, bounds, fieldBoundary
     );
     const keys = clipWaypointsToZones(
-      preview.keyWaypoints, polygons, origin, marginM, bounds
+      preview.keyWaypoints, polygons, origin, marginM, bounds, fieldBoundary
     );
+    // El contador del backend dice que vio *alguna* zona, no que vio las mismas
+    // zonas ni que aplico el mismo margen. Si este segundo recorte cambia una
+    // ruta que el backend marco como recortada, iniciar ejecutaria algo distinto
+    // de lo dibujado. En ese caso se bloquea igual; con un recorte idempotente
+    // bien aplicado los cuatro contadores son cero.
     const clippedLocally =
-      preview.nogoPolygonCount === 0 &&
-      (sampled.dropped > 0 || sampled.detours > 0 || keys.dropped > 0 || keys.detours > 0);
+      sampled.dropped > 0 || sampled.detours > 0 ||
+      execution.dropped > 0 || execution.detours > 0 ||
+      keys.dropped > 0 || keys.detours > 0;
     return {
       ...preview,
+      executionWaypoints: execution.waypoints,
       sampledWaypoints: sampled.waypoints,
       keyWaypoints: keys.waypoints,
       nogoClippedLocally: clippedLocally
@@ -1606,10 +1661,11 @@ export class CoverageService {
     // cuadrado. Es una figura fija: ocho vertices calculados de una vez, no
     // ocho puntos que el operador tenga que acomodar. Lo unico que se hace con
     // ella es moverla, girarla y agrandarla, siempre entera.
-    const centro = {
-      lat: (esquinas[0]!.lat + esquinas[2]!.lat) / 2,
-      lon: (esquinas[0]!.lon + esquinas[2]!.lon) / 2
-    };
+    const centro = ringCentre({ id: "square-centre", vertices: esquinas });
+    if (!centro) {
+      this.state = { ...this.state, ...previo };
+      throw new Error("No se pudo calcular el centro del lote");
+    }
     const radio = 0.5 * Number(
       options.sideM ?? this.state.field?.fieldLengthM ?? DEFAULT_SQUARE_SIDE_M
     ) / Math.cos(Math.PI / RIGID_FIELD_VERTICES);
@@ -1949,6 +2005,8 @@ export class CoverageService {
       !this.state.sending &&
       preview.topologySafe &&
       !preview.nogoClippedLocally &&
+      preview.executionWaypoints.length >= 2 &&
+      preview.executionWaypoints.length <= MAX_COVERAGE_ROUTE_WAYPOINTS &&
       preview.keyWaypoints.length >= 2 &&
       preview.keyWaypoints.length <= MAX_COVERAGE_ROUTE_WAYPOINTS
     );
@@ -1978,9 +2036,17 @@ export class CoverageService {
     if (preview.nogoClippedLocally) {
       throw new Error(
         preview.nogoNote
-          ? `El backend no aplicó las zonas no-go (${preview.nogoNote}); revisá que zones_manager esté corriendo`
-          : "El backend no aplicó las zonas no-go; revisá que zones_manager esté corriendo"
+          ? `El recorte no-go del backend difiere del preview (${preview.nogoNote}); revisá zones_manager y sus márgenes`
+          : "El recorte no-go del backend difiere del preview; revisá zones_manager y sus márgenes"
       );
+    }
+    if (preview.executionWaypoints.length > MAX_COVERAGE_ROUTE_WAYPOINTS) {
+      throw new Error(
+        `La ruta ejecutable tiene ${preview.executionWaypoints.length} puntos; el máximo seguro es ${MAX_COVERAGE_ROUTE_WAYPOINTS}`
+      );
+    }
+    if (preview.executionWaypoints.length < 2) {
+      throw new Error("La cobertura necesita al menos dos puntos ejecutables");
     }
     if (preview.keyWaypoints.length > MAX_COVERAGE_ROUTE_WAYPOINTS) {
       throw new Error(

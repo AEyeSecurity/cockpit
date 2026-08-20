@@ -28,7 +28,10 @@ export interface NavigationProfileWaypointAction {
 
 export type WaypointAction = BrakeHoldWaypointAction | NavigationProfileWaypointAction;
 
-export interface RouteMissionWaypoint extends GoalInput {}
+export interface RouteMissionWaypoint extends GoalInput {
+  /** Rol informado por el executor (coverage, coverage_transit, normal, etc.). */
+  missionRole?: string;
+}
 
 export interface PatrolMissionProfile {
   loopWaypoints: GoalInput[];
@@ -353,6 +356,12 @@ function parseWaypointActions(raw: unknown): WaypointAction[] {
 
 function cloneGoal(input: GoalInput): GoalInput {
   return parseGoal(input);
+}
+
+function cloneRouteMissionWaypoint(input: RouteMissionWaypoint): RouteMissionWaypoint {
+  const cloned = cloneGoal(input);
+  const missionRole = String(input.missionRole ?? "").trim();
+  return missionRole ? { ...cloned, missionRole } : cloned;
 }
 
 function stripGoalRole(input: GoalInput): GoalInput {
@@ -750,11 +759,13 @@ function parseRouteWaypoint(input: unknown): RouteMissionWaypoint | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
     return null;
   }
+  const missionRole = String(value.role ?? "").trim().toLowerCase();
   return {
     x: lat,
     y: lon,
     yawDeg,
     ...(value.role === "home" ? { role: "home" as const } : {}),
+    ...(missionRole ? { missionRole } : {}),
     ...(() => {
       const actions = parseWaypointActions(value.actions);
       return actions.length > 0 ? { actions } : {};
@@ -1223,8 +1234,8 @@ export class NavigationService {
       },
       routeMission: {
         ...this.state.routeMission,
-        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => cloneGoal(waypoint))
+        missionWaypoints: this.state.routeMission.missionWaypoints.map((waypoint) => cloneRouteMissionWaypoint(waypoint)),
+        activeChunkWaypoints: this.state.routeMission.activeChunkWaypoints.map((waypoint) => cloneRouteMissionWaypoint(waypoint))
       },
       selectedWaypointIndexes: [...this.state.selectedWaypointIndexes],
       manualCommand: { ...this.state.manualCommand },

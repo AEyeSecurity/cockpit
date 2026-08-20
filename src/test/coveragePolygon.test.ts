@@ -148,6 +148,22 @@ describe("editor de poligono de CAMPO", () => {
     expect(excls[0].vertices).toHaveLength(4);
   });
 
+  it("calcula una caja local para un lote que cruza el antimeridiano", async () => {
+    const { service, previewRequest } = servicio();
+    dibujar(service, [
+      { lat: 0, lon: 179.9998 },
+      { lat: 0, lon: -179.9998 },
+      { lat: 0.0003, lon: -179.9998 },
+      { lat: 0.0003, lon: 179.9998 }
+    ]);
+    await service.previewCoverage().catch(() => undefined);
+    const payload = previewRequest.mock.calls[0][0] as Record<string, number>;
+    expect(payload.field_length_m).toBeGreaterThan(40);
+    expect(payload.field_length_m).toBeLessThan(50);
+    expect(payload.field_width_m).toBeGreaterThan(30);
+    expect(Math.abs(payload.start_lon)).toBeGreaterThan(179.99);
+  });
+
   it("en modo rectangulo NO manda poligono", async () => {
     // La compatibilidad legacy: un lote cuadrado tiene que seguir viajando sin
     // los campos nuevos.

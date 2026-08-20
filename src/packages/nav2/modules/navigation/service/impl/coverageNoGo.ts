@@ -277,7 +277,8 @@ export function detourAlongContour(
   start: NoGoPoint,
   end: NoGoPoint,
   polygon: NoGoPolygon,
-  bounds?: NoGoBounds
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
 ): NoGoPoint[] {
   const crossings = segmentPolygonIntersections(start, end, polygon);
   if (crossings.length < 2) {
@@ -303,21 +304,28 @@ export function detourAlongContour(
   ];
   // Si los dos lados se salen del lote, la zona lo cruza de lado a lado: no hay
   // por donde bordear y se devuelve el mas corto igual.
-  const inside = candidates.filter((path) => withinBounds(path, bounds));
+  const inside = candidates.filter((path) => withinBounds(path, bounds, fieldBoundary));
+  if (inside.length === 0 && fieldBoundary) {
+    throw new Error("No hay rodeo no-go que se mantenga dentro del lote");
+  }
   const elegibles = inside.length > 0 ? inside : candidates;
   return elegibles.reduce((a, b) => (pathLength(a) <= pathLength(b) ? a : b));
 }
 
 /** Decir si todos los puntos caen dentro del rectangulo del lote. */
-function withinBounds(points: NoGoPoint[], bounds?: NoGoBounds): boolean {
-  if (!bounds) return true;
-  return points.every(
+function withinBounds(
+  points: NoGoPoint[],
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
+): boolean {
+  if (bounds && !points.every(
     (p) =>
       p.x >= bounds.xMin - BOUNDS_TOLERANCE_M &&
       p.x <= bounds.xMax + BOUNDS_TOLERANCE_M &&
       p.y >= bounds.yMin - BOUNDS_TOLERANCE_M &&
       p.y <= bounds.yMax + BOUNDS_TOLERANCE_M
-  );
+  )) return false;
+  return !fieldBoundary || points.every((point) => pointInPolygon(point, fieldBoundary));
 }
 
 /** Rumbo del tramo en grados; 0 hacia +x, 90 hacia +y. */
@@ -333,13 +341,14 @@ function shortestDetour(
   start: NoGoPoint,
   end: NoGoPoint,
   polygons: NoGoPolygon[],
-  bounds?: NoGoBounds
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
 ): NoGoPoint[] {
   let best: { entryT: number; detour: NoGoPoint[] } | null = null;
   for (const polygon of polygons) {
     const crossings = segmentPolygonIntersections(start, end, polygon);
     if (crossings.length < 2) continue;
-    const detour = detourAlongContour(start, end, polygon, bounds);
+    const detour = detourAlongContour(start, end, polygon, bounds, fieldBoundary);
     if (detour.length === 0) continue;
     if (!best || crossings[0].t < best.entryT) best = { entryT: crossings[0].t, detour };
   }
@@ -357,6 +366,8 @@ export interface NoGoClipOptions<T> {
   makeDetour: (point: NoGoPoint, headingDeg: number, target: T) => T;
   /** Rectangulo del lote; el rodeo no puede salirse de ahi. */
   bounds?: NoGoBounds;
+  /** Contorno real para lotes concavos; la caja envolvente no alcanza. */
+  fieldBoundary?: NoGoPolygon;
 }
 
 export interface NoGoClipResult<T> {
@@ -402,8 +413,27 @@ export function clipPathToNoGo<T>(
   }
 
   let current = kept;
+  let droppedDuringDetour = 0;
   let totalDetours = 0;
   for (let pass = 0; pass < MAX_DETOUR_PASSES; pass += 1) {
+    // Un rodeo de zonas solapadas puede insertar un vertice dentro de otra
+    // zona. Esos puntos no existian durante el filtrado inicial; si se los
+    // dejara, una segunda aplicacion del recorte cambiaria la ruta. Filtrar
+    // antes de cada pasada hace que el resultado estable sea idempotente.
+    const filtered: T[] = [];
+    for (const item of current) {
+      const position = options.positionOf(item);
+      if (inflated.some((polygon) => strictlyInside(position, polygon))) {
+        droppedDuringDetour += 1;
+        continue;
+      }
+      filtered.push(item);
+    }
+    if (filtered.length < 2) {
+      throw new Error("Las zonas no-go no dejan superficie para cubrir");
+    }
+    current = filtered;
+
     const rebuilt: T[] = [];
     let passDetours = 0;
     for (let index = 0; index < current.length - 1; index += 1) {
@@ -413,7 +443,9 @@ export function clipPathToNoGo<T>(
 
       const start = options.positionOf(origin);
       const end = options.positionOf(target);
-      const detour = shortestDetour(start, end, inflated, options.bounds);
+      const detour = shortestDetour(
+        start, end, inflated, options.bounds, options.fieldBoundary
+      );
       if (detour.length === 0) continue;
 
       passDetours += 1;
@@ -428,7 +460,13 @@ export function clipPathToNoGo<T>(
     rebuilt.push(current[current.length - 1]);
     current = rebuilt;
     totalDetours += passDetours;
-    if (passDetours === 0) break;
+    if (passDetours === 0) {
+      return {
+        items: current,
+        dropped: dropped + droppedDuringDetour,
+        detours: totalDetours
+      };
+    }
   }
-  return { items: current, dropped, detours: totalDetours };
+  throw new Error("Las zonas no-go solapadas no estabilizaron el rodeo");
 }

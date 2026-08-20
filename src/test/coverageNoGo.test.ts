@@ -215,6 +215,60 @@ describe("coverageNoGo", () => {
       }
     }
   });
+
+  it("es idempotente cuando dos zonas se solapan", () => {
+    const primera: NoGoPolygon = [
+      { x: 21.9132805385, y: -19.4012230618 },
+      { x: 24.9744600865, y: -19.4012230618 },
+      { x: 24.9744600865, y: -3.5730292693 },
+      { x: 21.9132805385, y: -3.5730292693 }
+    ];
+    const segunda: NoGoPolygon = [
+      { x: 15.8286704333, y: -16.4143527562 },
+      { x: 24.8657650897, y: -16.4143527562 },
+      { x: 24.8657650897, y: 1.271242778 },
+      { x: 15.8286704333, y: 1.271242778 }
+    ];
+    const options = {
+      marginM: 1.5,
+      bounds: { xMin: 0, xMax: 100, yMin: -30, yMax: 30 },
+      positionOf: (item: Punto) => ({ x: item.x, y: item.y }),
+      headingOf: (item: Punto) => item.yawDeg,
+      makeDetour: (point: NoGoPoint, headingDeg: number) => ({
+        x: point.x, y: point.y, phase: NOGO_DETOUR_PHASE, yawDeg: headingDeg
+      })
+    };
+    const original = fila([
+      { x: 0, y: -8.388373976 },
+      { x: 100, y: -1.016251981 }
+    ]);
+    const first = clipPathToNoGo(original, [primera, segunda], options);
+    const second = clipPathToNoGo(first.items, [primera, segunda], options);
+    expect(posiciones(second.items)).toEqual(posiciones(first.items));
+    expect([second.dropped, second.detours]).toEqual([0, 0]);
+  });
+
+  it("no permite que el rodeo use el hueco de un lote concavo", () => {
+    const loteEnL: NoGoPolygon = [
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 4 },
+      { x: 4, y: 4 }, { x: 4, y: 10 }, { x: 0, y: 10 }
+    ];
+    const zona: NoGoPolygon = [
+      { x: 2, y: 3 }, { x: 4, y: 3 }, { x: 4, y: 5 }, { x: 2, y: 5 }
+    ];
+    const result = clipPathToNoGo(fila([{ x: 3, y: 0 }, { x: 3, y: 10 }]), [zona], {
+      marginM: 0.25,
+      bounds: { xMin: 0, xMax: 10, yMin: 0, yMax: 10 },
+      fieldBoundary: loteEnL,
+      positionOf: (item) => ({ x: item.x, y: item.y }),
+      headingOf: (item) => item.yawDeg,
+      makeDetour: (point, headingDeg) => ({
+        x: point.x, y: point.y, phase: NOGO_DETOUR_PHASE, yawDeg: headingDeg
+      })
+    });
+    expect(result.detours).toBe(1);
+    expect(result.items.every((item) => pointInPolygon(item, loteEnL))).toBe(true);
+  });
 });
 
 const METERS_PER_DEG_LAT = 111_320;

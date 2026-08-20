@@ -3346,12 +3346,11 @@ function registerServices(
     service: navigationService
   });
 
-  // El MapService se resuelve en cada consulta y no una sola vez: los modulos se
-  // activan en orden y el del mapa puede no estar registrado todavia cuando se
-  // arma este servicio.
-  const coverageService = new CoverageService(dispatcher, navigationService, {
-    getState: () => getMapService(ctx)?.getState() ?? { zones: [] }
-  });
+  // CAMPO no consume por ahora las zonas no-go globales. El rodeo actual arma
+  // quiebres rigidos que el Ackermann no puede seguir de forma confiable; las
+  // zonas siguen disponibles en el editor, pero no deforman el trazado agricola
+  // hasta que ese planificador se reemplace por uno compatible con el vehiculo.
+  const coverageService = new CoverageService(dispatcher, navigationService);
   ctx.services.registerService({
     id: COVERAGE_SERVICE_ID,
     service: coverageService

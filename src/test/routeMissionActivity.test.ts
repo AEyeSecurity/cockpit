@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getRouteMissionActivityState,
+  getRouteWaypointVisualState,
   hasRouteMissionHistory,
   isRouteMissionIdleSnapshot,
   shouldPreserveRouteMissionSnapshot
@@ -89,5 +90,29 @@ describe("routeMissionActivity", () => {
       hasHistory: true,
       isTerminal: false
     });
+  });
+
+  it("marks every mission waypoint as done, current, pending or blocked", () => {
+    const running = createRouteMission({
+      active: true,
+      status: "route active (3->3)",
+      currentStartIndex: 2,
+      currentTargetIndex: 2,
+      missionWaypoints: Array.from({ length: 5 }, (_, index) => ({
+        x: index,
+        y: index,
+        yawDeg: 0
+      }))
+    });
+
+    expect(running.missionWaypoints.map((_, index) => getRouteWaypointVisualState(running, index)))
+      .toEqual(["done", "done", "current", "pending", "pending"]);
+
+    const blocked = createRouteMission({
+      ...running,
+      blockedState: "BLOCKED_WAITING",
+      blockedReasonCode: "TF_EXTRAPOLATION"
+    });
+    expect(getRouteWaypointVisualState(blocked, 2)).toBe("blocked");
   });
 });

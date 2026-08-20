@@ -387,7 +387,7 @@ describe("CoverageService", () => {
       cutter_width_m: 2,
       overlap_ratio: 0.15,
       // Perfil sim: el radio que viaja es el piso del Smac de simulacion.
-      min_turning_radius_m: 2.9,
+      min_turning_radius_m: 4.0,
       waypoint_spacing_m: 2,
       side: "left"
     });
@@ -407,19 +407,19 @@ describe("CoverageService", () => {
 
   it("takes the turning radius floor from the active profile", () => {
     // El piso es el radio del Smac de cada perfil: pedir menos lo rechaza el
-    // backend. Simulacion traza a 2.9 m; el real sigue en 4.0 m sin validar.
+    // backend. Simulacion y real trazan a 4.0 m.
     const service = new CoverageService(makeDispatcher().dispatcher);
 
     expect(service.getState().parameters.minTurningRadiusM).toBe(4.0);
     service.setRuntimeProfile("sim");
-    expect(service.getState().parameters.minTurningRadiusM).toBe(2.9);
-    expect(() => service.setParameters({ minTurningRadiusM: 2.8 })).toThrow(/2\.9 m/);
-    service.setParameters({ minTurningRadiusM: 3.5 });
-    expect(service.getState().parameters.minTurningRadiusM).toBe(3.5);
+    expect(service.getState().parameters.minTurningRadiusM).toBe(4.0);
+    expect(() => service.setParameters({ minTurningRadiusM: 3.9 })).toThrow(/4\.0 m/);
+    service.setParameters({ minTurningRadiusM: 4.5 });
+    expect(service.getState().parameters.minTurningRadiusM).toBe(4.5);
 
     service.setRuntimeProfile("real");
     expect(service.getState().parameters.minTurningRadiusM).toBe(4.0);
-    expect(() => service.setParameters({ minTurningRadiusM: 2.9 })).toThrow(/4\.0 m/);
+    expect(() => service.setParameters({ minTurningRadiusM: 3.9 })).toThrow(/4\.0 m/);
   });
 
   it("accepts is_topologically_safe as a normalized backend alias", async () => {
