@@ -36,7 +36,7 @@ describe("zonas dibujadas a mano", () => {
     // El backend parsea con `for lon, lat in outer_ll` y exige el anillo
     // cerrado; un rectangulo abierto se descarta en silencio.
     const { service, setZones } = servicio();
-    service.addZoneFromPolygon(RECTANGULO);
+    const zona = service.addZoneFromPolygon(RECTANGULO);
     await service.pushZonesToBackend();
 
     const documento = setZones.mock.calls[0][0] as {
@@ -51,6 +51,7 @@ describe("zonas dibujadas a mano", () => {
 
     const feature = documento.features[0];
     expect(feature.properties.type).toBe("no_go");
+    expect((feature.properties as { name?: string }).name).toBe(zona.name);
     expect(feature.properties.enabled).toBe(true);
     const anillo = feature.geometry.coordinates[0];
     expect(anillo).toHaveLength(5);
@@ -76,5 +77,45 @@ describe("zonas dibujadas a mano", () => {
       features: Array<{ properties: { enabled: boolean } }>;
     };
     expect(ultima.features[0].properties.enabled).toBe(false);
+  });
+
+  it("convierte una zona circular en un poligono GeoJSON cerrado", async () => {
+    const { service, setZones } = servicio();
+    const centro = { lat: -31.48585, lon: -64.24118 };
+
+    const circulo = service.addCircularZone(centro, 10, "Circular");
+    expect(circulo.vertices).toBe(32);
+    expect(circulo.polygon).toHaveLength(32);
+    const metrosPorGradoLon = 111_320 * Math.cos((centro.lat * Math.PI) / 180);
+    circulo.polygon?.forEach((punto) => {
+      const norte = (punto.lat - centro.lat) * 111_320;
+      const este = (punto.lon - centro.lon) * metrosPorGradoLon;
+      expect(Math.hypot(este, norte)).toBeCloseTo(10, 1);
+    });
+
+    await service.pushZonesToBackend();
+    const documento = setZones.mock.calls[0][0] as {
+      features: Array<{
+        properties: { id: string; name: string };
+        geometry: { coordinates: number[][][] };
+      }>;
+    };
+    expect(documento.features).toHaveLength(1);
+    expect(documento.features[0].properties).toMatchObject({
+      id: circulo.id,
+      name: "Circular"
+    });
+    expect(documento.features[0].geometry.coordinates[0]).toHaveLength(33);
+    expect(documento.features[0].geometry.coordinates[0][32]).toEqual(
+      documento.features[0].geometry.coordinates[0][0]
+    );
+  });
+
+  it("rechaza un circulo sin radio", () => {
+    const { service } = servicio();
+
+    expect(() => service.addCircularZone({ lat: -31.48, lon: -64.24 }, 0)).toThrow(
+      "radio de la zona circular"
+    );
   });
 });

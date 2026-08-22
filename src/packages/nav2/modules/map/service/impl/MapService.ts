@@ -18,6 +18,50 @@ export interface ZoneEntry {
   polygon?: Array<{ lat: number; lon: number }>;
 }
 
+export const CIRCULAR_ZONE_VERTEX_COUNT = 32;
+const EARTH_RADIUS_M = 6_371_008.8;
+
+/**
+ * Convierte el centro y radio de Leaflet en el poligono que entiende GeoJSON.
+ * El primer punto no se repite: `buildGeoJsonFromState` cierra el anillo al
+ * enviarlo al backend.
+ */
+export function buildCircularZonePolygon(
+  center: { lat: number; lon: number },
+  radiusM: number,
+  vertexCount = CIRCULAR_ZONE_VERTEX_COUNT
+): Array<{ lat: number; lon: number }> {
+  if (!Number.isFinite(center.lat) || !Number.isFinite(center.lon)) {
+    throw new Error("El centro de la zona circular no es valido");
+  }
+  if (!Number.isFinite(radiusM) || radiusM <= 0) {
+    throw new Error("El radio de la zona circular debe ser mayor que cero");
+  }
+
+  const count = Math.max(12, Math.min(96, Math.round(vertexCount)));
+  const latitude = (center.lat * Math.PI) / 180;
+  const longitude = (center.lon * Math.PI) / 180;
+  const angularDistance = radiusM / EARTH_RADIUS_M;
+
+  return Array.from({ length: count }, (_, index) => {
+    const bearing = (2 * Math.PI * index) / count;
+    const pointLatitude = Math.asin(
+      Math.sin(latitude) * Math.cos(angularDistance) +
+        Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearing)
+    );
+    const pointLongitude =
+      longitude +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude),
+        Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(pointLatitude)
+      );
+    return {
+      lat: (pointLatitude * 180) / Math.PI,
+      lon: ((((pointLongitude * 180) / Math.PI + 540) % 360) + 360) % 360 - 180
+    };
+  });
+}
+
 export interface DatumProfile {
   id: string;
   name: string;
@@ -297,6 +341,14 @@ export class MapService {
     const zone = this.addZone(name);
     this.setZonePolygon(zone.id, polygon);
     return this.getState().zones.find((entry) => entry.id === zone.id) ?? zone;
+  }
+
+  addCircularZone(
+    center: { lat: number; lon: number },
+    radiusM: number,
+    name?: string
+  ): ZoneEntry {
+    return this.addZoneFromPolygon(buildCircularZonePolygon(center, radiusM), name);
   }
 
   clearZones(): void {
@@ -589,6 +641,7 @@ export class MapService {
           type: "Feature",
           properties: {
             id: zone.id,
+            name: zone.name,
             type: "no_go",
             enabled: zone.enabled !== false
           },

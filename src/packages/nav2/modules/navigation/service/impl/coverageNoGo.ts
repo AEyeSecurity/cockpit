@@ -24,7 +24,7 @@ export interface NoGoPoint {
 
 export type NoGoPolygon = NoGoPoint[];
 
-/** Rectangulo del lote en metros locales. El rodeo no puede salirse de ahi. */
+/** Rectangulo del lote en metros locales; permite reconocer zonas de borde. */
 export interface NoGoBounds {
   xMin: number;
   xMax: number;
@@ -56,6 +56,9 @@ const EPSILON_M = 1.0e-9;
  * que se busca evitar: lo que no puede pasar es que salga metros afuera.
  */
 const BOUNDS_TOLERANCE_M = 0.5;
+
+/** Separacion que vuelve inequivocamente exterior un arco tangente al lote. */
+const EDGE_EXIT_CLEARANCE_M = 0.75;
 
 /**
  * Tolerancia para decidir si un punto cae sobre el contorno. Es mas floja que
@@ -231,6 +234,56 @@ export function segmentPolygonIntersections(
   return crossings;
 }
 
+function effectiveFieldPolygon(
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
+): NoGoPolygon | undefined {
+  if (fieldBoundary && fieldBoundary.length >= 3) {
+    return fieldBoundary.map((point) => ({ ...point }));
+  }
+  if (!bounds) return undefined;
+  return [
+    { x: bounds.xMin, y: bounds.yMin },
+    { x: bounds.xMax, y: bounds.yMin },
+    { x: bounds.xMax, y: bounds.yMax },
+    { x: bounds.xMin, y: bounds.yMax }
+  ];
+}
+
+/**
+ * Una exclusion es interna solo si vertices y lados quedan estrictamente
+ * dentro del lote. Tocar el contorno la convierte en zona de borde y habilita
+ * el rodeo exterior.
+ */
+export function polygonIsStrictlyInsideField(
+  polygon: NoGoPolygon,
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
+): boolean {
+  const field = effectiveFieldPolygon(bounds, fieldBoundary);
+  if (!field || polygon.length < 3) return false;
+  if (!polygon.every((point) => strictlyInside(point, field))) return false;
+
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    if (!strictlyInside(midpoint, field)) return false;
+    for (let fieldIndex = 0; fieldIndex < field.length; fieldIndex += 1) {
+      const fieldStart = field[fieldIndex];
+      const fieldEnd = field[(fieldIndex + 1) % field.length];
+      if (segmentIntersection(start, end, fieldStart, fieldEnd)) return false;
+      if (
+        pointOnEdge(start, fieldStart, fieldEnd) ||
+        pointOnEdge(end, fieldStart, fieldEnd) ||
+        pointOnEdge(fieldStart, start, end) ||
+        pointOnEdge(fieldEnd, start, end)
+      ) return false;
+    }
+  }
+  return true;
+}
+
 /** Vertices que se recorren yendo de un lado al otro por el contorno. */
 function contourWalk(
   entryEdge: number,
@@ -268,10 +321,9 @@ function pathLength(points: NoGoPoint[]): number {
  * Camino que bordea la zona en vez de atravesarla.
  *
  * Devuelve los puntos intermedios que hay que meter entre `start` y `end`. Se
- * prueban los dos sentidos del perimetro y gana el mas corto **de los que se
- * quedan dentro del lote**: una zona pegada al borde tiene un lado cuyo contorno
- * cae afuera, y salir del lote para rodearla es peor que dar la vuelta larga por
- * adentro. Si el segmento no corta la zona devuelve una lista vacia.
+ * prueban los dos sentidos del perimetro. Para una zona interna gana el mas
+ * corto que queda dentro del lote; si la exclusion toca el borde, gana el arco
+ * exterior, que sale temporalmente del contorno y vuelve a entrar.
  */
 export function detourAlongContour(
   start: NoGoPoint,
@@ -302,11 +354,15 @@ export function detourAlongContour(
     [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, true), exit.point],
     [entry.point, ...contourWalk(entry.edge, exit.edge, polygon, false), exit.point]
   ];
-  // Si los dos lados se salen del lote, la zona lo cruza de lado a lado: no hay
-  // por donde bordear y se devuelve el mas corto igual.
   const inside = candidates.filter((path) => withinBounds(path, bounds, fieldBoundary));
-  if (inside.length === 0 && fieldBoundary) {
-    throw new Error("No hay rodeo no-go que se mantenga dentro del lote");
+  const boundaryZone = !polygonIsStrictlyInsideField(polygon, bounds, fieldBoundary);
+  if (boundaryZone && (bounds || fieldBoundary)) {
+    const outside = candidates.filter(
+      (path) => !pathStrictlyInsideField(path, bounds, fieldBoundary)
+    );
+    const selected = (outside.length > 0 ? outside : candidates)
+      .reduce((a, b) => (pathLength(a) <= pathLength(b) ? a : b));
+    return shiftDetourOutsideField(selected, bounds, fieldBoundary);
   }
   const elegibles = inside.length > 0 ? inside : candidates;
   return elegibles.reduce((a, b) => (pathLength(a) <= pathLength(b) ? a : b));
@@ -326,6 +382,58 @@ function withinBounds(
       p.y <= bounds.yMax + BOUNDS_TOLERANCE_M
   )) return false;
   return !fieldBoundary || points.every((point) => pointInPolygon(point, fieldBoundary));
+}
+
+function pointSegmentDistance(
+  point: NoGoPoint,
+  start: NoGoPoint,
+  end: NoGoPoint
+): number {
+  const edgeX = end.x - start.x;
+  const edgeY = end.y - start.y;
+  const lengthSq = edgeX * edgeX + edgeY * edgeY;
+  if (lengthSq <= EPSILON_M) return Math.hypot(point.x - start.x, point.y - start.y);
+  const rawT = ((point.x - start.x) * edgeX + (point.y - start.y) * edgeY) / lengthSq;
+  const t = Math.max(0, Math.min(1, rawT));
+  return Math.hypot(point.x - (start.x + t * edgeX), point.y - (start.y + t * edgeY));
+}
+
+function pathStrictlyInsideField(
+  points: NoGoPoint[],
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
+): boolean {
+  const field = effectiveFieldPolygon(bounds, fieldBoundary);
+  return Boolean(field) && points.every((point) => strictlyInside(point, field!));
+}
+
+/** Correr el tramo intermedio hacia el exterior mas cercano del lote. */
+function shiftDetourOutsideField(
+  path: NoGoPoint[],
+  bounds?: NoGoBounds,
+  fieldBoundary?: NoGoPolygon
+): NoGoPoint[] {
+  const field = effectiveFieldPolygon(bounds, fieldBoundary);
+  if (!field || path.length <= 2) return path.map((point) => ({ ...point }));
+  const middle = path.slice(1, -1);
+  const orientation = polygonSignedArea(field) >= 0 ? 1 : -1;
+  let nearest: { distance: number; normal: NoGoPoint } | null = null;
+  for (let index = 0; index < field.length; index += 1) {
+    const start = field[index];
+    const end = field[(index + 1) % field.length];
+    const distance = Math.min(...middle.map((point) => pointSegmentDistance(point, start, end)));
+    const normal = outwardNormal(start, end, orientation);
+    if (!nearest || distance < nearest.distance) nearest = { distance, normal };
+  }
+  if (!nearest) return path.map((point) => ({ ...point }));
+  return [
+    { ...path[0] },
+    ...middle.map((point) => ({
+      x: point.x + EDGE_EXIT_CLEARANCE_M * nearest!.normal.x,
+      y: point.y + EDGE_EXIT_CLEARANCE_M * nearest!.normal.y
+    })),
+    { ...path[path.length - 1] }
+  ];
 }
 
 /** Rumbo del tramo en grados; 0 hacia +x, 90 hacia +y. */

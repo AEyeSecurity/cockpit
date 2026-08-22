@@ -39,7 +39,7 @@ describe("map workspace HUD", () => {
     ).toBeTruthy();
   });
 
-  it("ofrece el cuadro no-go en la barra de zonas", async () => {
+  it("ofrece poligono, rectangulo y circulo no-go en la barra de zonas", async () => {
     // La barra de zonas es propia del cockpit y hace de proxy sobre los botones
     // de leaflet-draw. Habilitar el rectangulo en las opciones del control no
     // alcanza: sin este boton la herramienta existe pero no se puede tocar.
@@ -52,7 +52,12 @@ describe("map workspace HUD", () => {
     render(<>{workspace.render()}</>);
 
     expect(screen.getByLabelText("Dibujar zona rectangular")).toBeInTheDocument();
+    const circleButton = screen.getByLabelText("Dibujar zona circular");
+    expect(circleButton).toBeInTheDocument();
     expect(screen.getByLabelText("Dibujar zona")).toBeInTheDocument();
+
+    fireEvent.click(circleButton);
+    expect(screen.getByLabelText("Cerrar herramientas")).toBeEnabled();
   });
 
   it("clears waypoint selection and exits area selection mode with Escape", async () => {

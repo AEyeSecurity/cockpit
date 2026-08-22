@@ -1583,8 +1583,9 @@ export class CoverageService {
       0.5 * parameters.cutterWidthM +
       NOGO_EXTRA_MARGIN_M +
       NOGO_TURNING_MARGIN_RATIO * parameters.minTurningRadiusM;
-    // Rectangulo del lote en los mismos metros locales que las zonas: sin esto,
-    // una zona pegada al borde hace que el rodeo se dibuje fuera del lote.
+    // Contorno del lote en los mismos metros locales que las zonas. Permite
+    // distinguir una exclusion interna —cambio de fila dentro del campo— de
+    // una zona de borde, cuyo rodeo sale temporalmente por afuera.
     const corners = fieldPolygonFromGeometry(field).map((corner) => {
       const local = localMeters(origin, corner);
       return { x: local.east, y: local.north };
@@ -1608,18 +1609,36 @@ export class CoverageService {
     const execution = clipWaypointsToZones(
       preview.executionWaypoints, polygons, origin, marginM, bounds, fieldBoundary
     );
-    const keys = clipWaypointsToZones(
-      preview.keyWaypoints, polygons, origin, marginM, bounds, fieldBoundary
-    );
+    // Las key son metas de parada, no la polilinea ejecutada. En un rodeo
+    // circular los arcos viajan como guias no-key; unir solo las key dibuja una
+    // diagonal ficticia por la zona y produciria un falso bloqueo aunque
+    // `executionWaypoints` sea segura. Cuando el backend informa que aplico la
+    // zona, la divergencia se decide sobre muestreo y ejecucion, que si
+    // conservan las guias. Si no la aplico, se mantiene el fallback historico.
+    const keys = preview.nogoPolygonCount > 0
+      ? { waypoints: preview.keyWaypoints, dropped: 0, detours: 0 }
+      : clipWaypointsToZones(
+          preview.keyWaypoints, polygons, origin, marginM, bounds, fieldBoundary
+        );
     // El contador del backend dice que vio *alguna* zona, no que vio las mismas
     // zonas ni que aplico el mismo margen. Si este segundo recorte cambia una
     // ruta que el backend marco como recortada, iniciar ejecutaria algo distinto
     // de lo dibujado. En ese caso se bloquea igual; con un recorte idempotente
     // bien aplicado los cuatro contadores son cero.
-    const clippedLocally =
-      sampled.dropped > 0 || sampled.detours > 0 ||
-      execution.dropped > 0 || execution.detours > 0 ||
-      keys.dropped > 0 || keys.detours > 0;
+    // Cuando el backend informa que aplico las zonas, el recorte local es una
+    // SEGUNDA OPINION, no la autoridad: el dibujo ya viene del backend y es lo
+    // que se va a ejecutar. Bloquear por su divergencia daba falsos positivos
+    // -el backend cambio como esquiva una zona interna y este recorte generico
+    // no lo sabe- y dejaba el boton muerto sin explicar por que.
+    //
+    // Sin zonas aplicadas por el backend se mantiene el bloqueo historico: ahi
+    // el recorte local es la unica proteccion que hay.
+    const backendAplicoZonas = preview.nogoPolygonCount > 0;
+    const clippedLocally = backendAplicoZonas
+      ? false
+      : (sampled.dropped > 0 || sampled.detours > 0 ||
+         execution.dropped > 0 || execution.detours > 0 ||
+         keys.dropped > 0 || keys.detours > 0);
     return {
       ...preview,
       executionWaypoints: execution.waypoints,

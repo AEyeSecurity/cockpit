@@ -921,7 +921,16 @@ function CoverageSidebarSection({
   const preview = coverageState.preview;
   const metrics = preview?.metrics;
   const topologySafe = Boolean(preview?.topologySafe);
-  const startDisabled = controlLocked || !coverageService.canStartMission();
+  // El boton solo se bloquea por lo que hace imposible mandar: sin control, sin
+  // preview, o con un envio en curso. El resto de las condiciones de
+  // `canStartMission()` dejaban el boton muerto sin decir por que, y el usuario
+  // no tenia forma de saber cual de las ocho fallaba. Ahora la peticion sale y
+  // el backend contesta con el motivo real, que ademas queda en el log.
+  const startDisabled =
+    controlLocked ||
+    !preview ||
+    coverageState.loading ||
+    coverageState.sending;
   const coverageBadge = preview
     ? `${metrics?.rowCount ?? 0}`
     : coverageState.fieldSource === "polygon"
@@ -996,7 +1005,7 @@ function CoverageSidebarSection({
   };
 
   const startCoverage = async (): Promise<void> => {
-    if (!preview || !coverageService.canStartMission()) return;
+    if (!preview) return;
     const approachRequirement = coverageState.runtimeProfile === "sim"
       ? "en simulación puede estar hasta 50 m de la primera pasada y debe conservar hasta 30° de diferencia de rumbo."
       : "debe estar a no más de 5 m de la primera pasada y con hasta 30° de diferencia de rumbo.";
@@ -3346,11 +3355,12 @@ function registerServices(
     service: navigationService
   });
 
-  // CAMPO no consume por ahora las zonas no-go globales. El rodeo actual arma
-  // quiebres rigidos que el Ackermann no puede seguir de forma confiable; las
-  // zonas siguen disponibles en el editor, pero no deforman el trazado agricola
-  // hasta que ese planificador se reemplace por uno compatible con el vehiculo.
-  const coverageService = new CoverageService(dispatcher, navigationService);
+  // La fuente se resuelve al pedir el estado y no al registrar el modulo: mapa
+  // se registra despues que navegacion. Asi CAMPO siempre ve las zonas globales
+  // actuales sin acoplar CoverageService a la implementacion de MapService.
+  const coverageService = new CoverageService(dispatcher, navigationService, {
+    getState: () => getMapService(ctx)?.getState() ?? { zones: [] }
+  });
   ctx.services.registerService({
     id: COVERAGE_SERVICE_ID,
     service: coverageService

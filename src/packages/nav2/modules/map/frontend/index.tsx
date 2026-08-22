@@ -55,6 +55,7 @@ const COVERAGE_FIELD_COLOR = "#60a5fa";
 const ROBOT_TRAIL_MIN_STEP_M = 0.25;
 const ROBOT_TRAIL_MAX_POINTS = 20000;
 const PROTRACTOR_MIN_ARM_METERS = 0.05;
+const CIRCULAR_ZONE_MIN_RADIUS_M = 0.25;
 const PROTRACTOR_SNAP_THRESHOLD_DEG = 12;
 const VISION_DATA_URL = "http://localhost:8088/data";
 const VISION_DATA_POLL_INTERVAL_MS = 200;
@@ -93,6 +94,7 @@ const RELEVANT_CENTER_LABELS = new Set([
 interface MapViewportControlHandle {
   zoomIn: () => void;
   zoomOut: () => void;
+  startCircularZoneTool: () => boolean;
   cancelZoneTool: () => void;
   confirmZoneTool: () => boolean;
 }
@@ -1605,6 +1607,10 @@ function LeafletMapCanvas({
     const missionWaypointLayer = L.layerGroup();
     const toolDraftLayer = L.layerGroup();
     const toolDrawingsLayer = L.layerGroup();
+    let circularZoneActive = false;
+    let circularZoneCenter: L.LatLng | null = null;
+    let circularZonePreview: L.Circle | null = null;
+    let circularZoneCenterMarker: L.CircleMarker | null = null;
     map.addLayer(drawnItems);
     map.addLayer(waypointLayer);
     map.addLayer(draftLayer);
@@ -1637,9 +1643,8 @@ function LeafletMapCanvas({
       },
       draw: {
         polyline: false,
-        // El rectangulo entra por el mismo camino que el poligono: leaflet-draw
-        // emite CREATED con cuatro vertices y de ahi hereda persistencia,
-        // edicion, borrado y push al backend sin nada nuevo.
+        // El circulo usa abajo un gesto propio de dos clicks. Leaflet Draw lo
+        // cancelaba silenciosamente cuando el operador hacia click sin arrastrar.
         rectangle: {},
         circle: false,
         marker: false,
@@ -1712,22 +1717,6 @@ function LeafletMapCanvas({
       });
       return committed;
     };
-    if (mapControlRef) {
-      mapControlRef.current = {
-        zoomIn: () => {
-          map.zoomIn();
-        },
-        zoomOut: () => {
-          map.zoomOut();
-        },
-        cancelZoneTool: () => {
-          clickDrawAction(["cancel", "cancelar"]);
-          disableDrawHandlers();
-        },
-        confirmZoneTool: () => commitDrawHandlers() || clickDrawAction(["save", "finish", "guardar", "finalizar", "terminar"])
-      };
-    }
-
     // El push ya no se puede tragar en silencio: si el backend no recibe la
     // zona, planifica sin ella y el trazado que ve el operador miente. Se avisa
     // en la consola y, pase lo que pase, se marca el preview como viejo.
@@ -1745,14 +1734,119 @@ function LeafletMapCanvas({
       });
     };
 
+    const clearCircularZoneDraft = (): void => {
+      if (circularZonePreview) {
+        toolDraftLayer.removeLayer(circularZonePreview);
+      }
+      if (circularZoneCenterMarker) {
+        toolDraftLayer.removeLayer(circularZoneCenterMarker);
+      }
+      circularZonePreview = null;
+      circularZoneCenterMarker = null;
+      circularZoneCenter = null;
+    };
+
+    const stopCircularZoneTool = (): void => {
+      clearCircularZoneDraft();
+      circularZoneActive = false;
+      map.getContainer().style.cursor = "";
+    };
+
+    const startCircularZoneTool = (): boolean => {
+      clickDrawAction(["cancel", "cancelar"]);
+      disableDrawHandlers();
+      stopCircularZoneTool();
+      circularZoneActive = true;
+      map.getContainer().style.cursor = "crosshair";
+      mapService.setToolInfo("Zona circular: click en el centro y luego click en el borde.");
+      return true;
+    };
+
+    const updateCircularZonePreview = (edge: L.LatLng): void => {
+      if (!circularZoneActive || !circularZoneCenter) return;
+      const radiusM = map.distance(circularZoneCenter, edge);
+      if (!Number.isFinite(radiusM) || radiusM < CIRCULAR_ZONE_MIN_RADIUS_M) return;
+      if (!circularZonePreview) {
+        circularZonePreview = L.circle(circularZoneCenter, {
+          radius: radiusM,
+          color: "#f97316",
+          weight: 3,
+          fillColor: "#f97316",
+          fillOpacity: 0.25,
+          interactive: false
+        }).addTo(toolDraftLayer);
+      } else {
+        circularZonePreview.setRadius(radiusM);
+      }
+      mapService.setToolInfo(`Zona circular: radio ${radiusM.toFixed(1)} m. Click para guardar.`);
+    };
+
+    const commitCircularZone = (edge?: L.LatLng): boolean => {
+      if (!circularZoneActive || !circularZoneCenter) return false;
+      if (edge) updateCircularZonePreview(edge);
+      const radiusM = circularZonePreview?.getRadius() ?? 0;
+      if (radiusM < CIRCULAR_ZONE_MIN_RADIUS_M) {
+        mapService.setToolInfo("Zona circular: elegi un radio mayor a 0.25 m.");
+        return false;
+      }
+      const zone = mapService.addCircularZone(
+        { lat: circularZoneCenter.lat, lon: circularZoneCenter.lng },
+        radiusM
+      );
+      const polygonLayer = L.polygon(
+        (zone.polygon ?? []).map((point) => [point.lat, point.lon] as L.LatLngTuple)
+      ) as L.Polygon & { zoneId?: string };
+      polygonLayer.zoneId = zone.id;
+      drawnItems.addLayer(polygonLayer);
+      stopCircularZoneTool();
+      syncZones();
+      onZoneToolSettledRef.current();
+      return true;
+    };
+
+    if (mapControlRef) {
+      mapControlRef.current = {
+        zoomIn: () => {
+          map.zoomIn();
+        },
+        zoomOut: () => {
+          map.zoomOut();
+        },
+        startCircularZoneTool,
+        cancelZoneTool: () => {
+          clickDrawAction(["cancel", "cancelar"]);
+          disableDrawHandlers();
+          stopCircularZoneTool();
+        },
+        confirmZoneTool: () =>
+          commitCircularZone() ||
+          commitDrawHandlers() ||
+          clickDrawAction(["save", "finish", "guardar", "finalizar", "terminar"])
+      };
+    }
+
     map.on(L.Draw.Event.CREATED, (event) => {
       if (toolModeRef.current !== "idle") return;
       const layer = event.layer;
-      if (!(layer instanceof L.Polygon)) return;
-      const polygon = extractPolygonLatLon(layer);
-      const zone = mapService.addZoneFromPolygon(polygon);
-      (layer as L.Polygon & { zoneId?: string }).zoneId = zone.id;
-      drawnItems.addLayer(layer);
+      let polygonLayer: L.Polygon;
+      let zone;
+      if (layer instanceof L.Circle) {
+        const center = layer.getLatLng();
+        zone = mapService.addCircularZone(
+          { lat: center.lat, lon: center.lng },
+          layer.getRadius()
+        );
+        polygonLayer = L.polygon(
+          (zone.polygon ?? []).map((point) => [point.lat, point.lon] as L.LatLngTuple)
+        );
+      } else if (layer instanceof L.Polygon) {
+        polygonLayer = layer;
+        zone = mapService.addZoneFromPolygon(extractPolygonLatLon(layer));
+      } else {
+        return;
+      }
+      (polygonLayer as L.Polygon & { zoneId?: string }).zoneId = zone.id;
+      drawnItems.addLayer(polygonLayer);
       syncZones();
       onZoneToolSettledRef.current();
     });
@@ -1785,6 +1879,25 @@ function LeafletMapCanvas({
 
     map.on("click", (evt: L.LeafletMouseEvent) => {
       if (!interactiveRef.current) return;
+      if (circularZoneActive) {
+        if (!circularZoneCenter) {
+          circularZoneCenter = evt.latlng;
+          circularZoneCenterMarker = L.circleMarker(circularZoneCenter, {
+            radius: 4,
+            color: "#f97316",
+            weight: 2,
+            fillColor: "#f97316",
+            fillOpacity: 1,
+            interactive: false
+          })
+            .bindTooltip("Elegí el radio", { permanent: true, direction: "top" })
+            .addTo(toolDraftLayer);
+          mapService.setToolInfo("Zona circular: move el puntero y hace click en el borde.");
+          return;
+        }
+        commitCircularZone(evt.latlng);
+        return;
+      }
       // Dibujar el lote de CAMPO se lleva el click antes que nada: mientras se
       // marca el poligono, el mapa no tiene que encolar waypoints.
       if (coverageDraftModeRef.current !== "idle") {
@@ -1877,6 +1990,7 @@ function LeafletMapCanvas({
     map.on("mousedown", (evt: L.LeafletMouseEvent) => {
       if (!interactiveRef.current) return;
       if (toolModeRef.current !== "idle") return;
+      if (circularZoneActive) return;
       const domEvent = evt.originalEvent as MouseEvent | undefined;
       if (!domEvent) return;
       if (typeof domEvent.button === "number" && domEvent.button !== 0) return;
@@ -1916,6 +2030,10 @@ function LeafletMapCanvas({
     });
 
     map.on("mousemove", (evt: L.LeafletMouseEvent) => {
+      if (circularZoneActive && circularZoneCenter) {
+        updateCircularZonePreview(evt.latlng);
+        return;
+      }
       const selection = waypointSelectionSessionRef.current;
       if (selection) {
         selection.rectangle.setBounds(L.latLngBounds(selection.start, evt.latlng));
@@ -1983,6 +2101,7 @@ function LeafletMapCanvas({
     });
 
     return () => {
+      stopCircularZoneTool();
       clearGoalDraft();
       clearToolDrawings();
       inspectCopyHandlersRef.current.forEach((cleanup) => cleanup());
@@ -2318,10 +2437,13 @@ function LeafletMapCanvas({
       }
     }
 
-    // La capa azul representa la ruta que se envia, no el muestreo interno del
-    // planner. Asi una cabecera reducida para el limite de route_executor no
-    // promete en pantalla una curva que el vehiculo no va a seguir.
-    const sampledPoints = (coverageState.preview?.executionWaypoints ?? []).filter(
+    // La capa azul representa la trayectoria completa calculada por Campo. Las
+    // metas ejecutables se muestran aparte con sus flechas: unir solamente
+    // esas metas dibujaba cuerdas entre extremos de pasada y ocultaba toda la
+    // cabecera, haciendo que un lote de 40 m pareciera cubierto en solo 26 m.
+    // El muestreo es tambien la geometria que el backend audita contra el lote
+    // y las zonas no-go, por eso es la fuente correcta para el preview.
+    const sampledPoints = (coverageState.preview?.sampledWaypoints ?? []).filter(
       (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
     );
     if (sampledPoints.length >= 2) {
@@ -2828,6 +2950,7 @@ function CockpitMapCanvas({
     mapControlRef.current = {
       zoomIn: () => setZoom((current) => clampNumber(current + 1, 0, GPS_NATIVE_MAX_ZOOM)),
       zoomOut: () => setZoom((current) => clampNumber(current - 1, 0, GPS_NATIVE_MAX_ZOOM)),
+      startCircularZoneTool: () => false,
       cancelZoneTool: () => undefined,
       confirmZoneTool: () => false
     };
@@ -3888,6 +4011,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       });
       return;
     }
+    mapControlRef.current?.cancelZoneTool();
     const control = document.querySelector<HTMLAnchorElement>(selector);
     if (!control || control.classList.contains("leaflet-disabled")) {
       runtime.eventBus.emit("console.event", {
@@ -3902,6 +4026,23 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     runtime.eventBus.emit("console.event", {
       level: "info",
       text: `Map tool: ${label}`,
+      timestamp: Date.now()
+    });
+  };
+
+  const startCircularZoneTool = (): void => {
+    if (!mapToolsEnabled || !mapControlRef.current?.startCircularZoneTool()) {
+      runtime.eventBus.emit("console.event", {
+        level: "warn",
+        text: "draw circular zone unavailable",
+        timestamp: Date.now()
+      });
+      return;
+    }
+    setLeafletZoneToolActive(true);
+    runtime.eventBus.emit("console.event", {
+      level: "info",
+      text: "Map tool: circular zone — click center, then click radius",
       timestamp: Date.now()
     });
   };
@@ -4407,6 +4548,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   <rect x="3" y="4" width="10" height="8"/>
                   <circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/>
                   <circle cx="13" cy="12" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="map-btn"
+                onClick={startCircularZoneTool}
+                title="Dibujar zona circular: centro y radio"
+                aria-label="Dibujar zona circular"
+                disabled={!mapToolsEnabled}
+              >
+                <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <circle cx="8" cy="8" r="5"/>
+                  <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/>
                 </svg>
               </button>
               <button

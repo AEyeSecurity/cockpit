@@ -11,6 +11,7 @@ import {
   detourAlongContour,
   inflatePolygon,
   pointInPolygon,
+  polygonIsStrictlyInsideField,
   segmentPolygonIntersections,
   type NoGoBounds,
   type NoGoPoint,
@@ -248,7 +249,7 @@ describe("coverageNoGo", () => {
     expect([second.dropped, second.detours]).toEqual([0, 0]);
   });
 
-  it("no permite que el rodeo use el hueco de un lote concavo", () => {
+  it("usa el exterior cuando la zona toca el borde concavo", () => {
     const loteEnL: NoGoPolygon = [
       { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 4 },
       { x: 4, y: 4 }, { x: 4, y: 10 }, { x: 0, y: 10 }
@@ -267,7 +268,11 @@ describe("coverageNoGo", () => {
       })
     });
     expect(result.detours).toBe(1);
-    expect(result.items.every((item) => pointInPolygon(item, loteEnL))).toBe(true);
+    expect(
+      result.items.some(
+        (item) => item.phase === NOGO_DETOUR_PHASE && !pointInPolygon(item, loteEnL)
+      )
+    ).toBe(true);
   });
 });
 
@@ -400,6 +405,40 @@ describe("CoverageService con zonas no-go", () => {
     expect(segundo.sampledWaypoints.length).toBe(preview.sampledWaypoints.length);
   });
 
+  it("no une las key por adentro cuando el rodeo viaja como guias no-key", async () => {
+    const local = servicioConZonas(respuestaDePreview(0));
+    const recortado = await local.service.previewCoverage();
+    const waypoints = recortado.sampledWaypoints.map((item) => ({
+      lat: item.lat,
+      lon: item.lon,
+      yaw_deg: item.yawDeg,
+      phase: item.phase,
+      row_index: item.rowIndex,
+      key: item.phase !== NOGO_DETOUR_PHASE && item.key
+    }));
+    const respuesta = respuestaDePreview(1);
+    const plan = respuesta.coverage_plan as Record<string, unknown>;
+    plan.sampled_waypoints = waypoints;
+    plan.key_waypoints = waypoints.filter((item) => item.key);
+    plan.route_request = {
+      op: "set_route_ll",
+      waypoints,
+      leg_spacing_m: 40,
+      chunk_span_m: 60,
+      chunk_max_waypoints: 25
+    };
+
+    const { service } = servicioConZonas(respuesta);
+    const preview = await service.previewCoverage();
+    expect(preview.nogoClippedLocally).toBe(false);
+    expect(preview.keyWaypoints).toHaveLength(2);
+    expect(
+      preview.executionWaypoints.some(
+        (item) => item.phase === NOGO_DETOUR_PHASE && !item.key
+      )
+    ).toBe(true);
+  });
+
   it("ignora las zonas apagadas", async () => {
     const { service } = servicioConZonas(respuestaDePreview(0), fuenteDeZonas(false));
     const preview = await service.previewCoverage();
@@ -442,22 +481,16 @@ function clipConLote(puntos: Punto[], zona: NoGoPolygon, bounds?: NoGoBounds) {
 
 describe("coverageNoGo dentro del lote", () => {
   it.each([1, 2.5, 4, 6])(
-    "no saca el rodeo del lote con la zona a %s m del borde",
+    "saca el rodeo del lote con la zona a %s m del borde",
     (yc) => {
-      // Sin el rectangulo del lote el lado corto del contorno cae afuera y el
-      // rodeo se dibuja saliendo del campo.
+      // La envolvente inflada toca el borde: se elige el arco exterior.
       const r = clipConLote(
         fila([0, 10, 21.4, 30, 38].map((x) => ({ x, y: yc }))),
         zonaCentrada(21.4, yc),
         LOTE
       );
       expect(r.detours).toBeGreaterThanOrEqual(1);
-      for (const item of r.items) {
-        expect(item.x).toBeGreaterThanOrEqual(-0.5);
-        expect(item.x).toBeLessThanOrEqual(38.5);
-        expect(item.y).toBeGreaterThanOrEqual(-0.5);
-        expect(item.y).toBeLessThanOrEqual(40.5);
-      }
+      expect(Math.min(...r.items.map((item) => item.y))).toBeLessThan(-0.5);
     }
   );
 
@@ -476,5 +509,12 @@ describe("coverageNoGo dentro del lote", () => {
     const con = clipConLote(puntos, zonaCentrada(21.4, 20), LOTE);
     const sin = clipConLote(puntos, zonaCentrada(21.4, 20));
     expect(posiciones(con.items)).toEqual(posiciones(sin.items));
+  });
+
+  it("clasifica usando la envolvente inflada", () => {
+    const interna = inflatePolygon(zonaCentrada(21.4, 20), 4.4);
+    const borde = inflatePolygon(zonaCentrada(21.4, 6), 4.4);
+    expect(polygonIsStrictlyInsideField(interna, LOTE)).toBe(true);
+    expect(polygonIsStrictlyInsideField(borde, LOTE)).toBe(false);
   });
 });
