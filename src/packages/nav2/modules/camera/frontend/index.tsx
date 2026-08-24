@@ -511,7 +511,9 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const detectionsActive = liveAlertState.risk !== "normal" || detectionCount > 0 || state.detectionsActive;
   const lastDetectionMs = visionLastDetectionMs || state.lastDetectionMs;
   const detCountText = `${detectionCount} obj${detectionCount !== 1 ? "s" : ""}`;
-  const cameraEnabled = connectionState?.preset !== "sim" && isCameraFeedConfigured(cameraConfig);
+  // Video transport and PTZ control are independent capabilities. Simulation
+  // deliberately has no stream, but exposes the same PTZ contract as hardware.
+  const videoEnabled = connectionState?.preset !== "sim" && isCameraFeedConfigured(cameraConfig);
   const feedOnline = state.connected || streamStatus.connected;
   const presetLabel = connectionState?.preset === "sim" ? "SIM" : connectionState?.preset === "real" ? "REAL" : "N/A";
   const lastFrameTimestamp = state.lastFrameMs || streamStatus.lastFrameMs;
@@ -544,7 +546,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const zoneText = overviewMainDetection ? zoneLabel(overviewMainDetection.zone) : "—";
   const overviewJsonAgeLabel = jsonAgeLabel;
   const navBackendConnected = connectionState?.connected === true;
-  const ptzDisabled = !navigationService || !cameraEnabled || !navBackendConnected;
+  const ptzDisabled = !navigationService || !navBackendConnected;
   const ptzCommandDisabled = ptzDisabled || ptzBusy;
   const ptzStatusLabel = ptzState?.ok
     ? formatPresetLabel(ptzState.activePreset)
@@ -556,7 +558,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     : "Sin telemetria PTZ";
   const ptzZoomLabel = ptzState ? `${ptzState.zoomLevel.toFixed(1)}x` : "--";
   const fpsLabel = cameraFps > 0 ? `${cameraFps} FPS` : streamStatus.transport === "webrtc" ? "WEBRTC" : "LIVE";
-  const showVideo = cameraEnabled && videoRequested;
+  const showVideo = videoEnabled && videoRequested;
 
   const clearPresetSaveArm = (): void => {
     if (presetSaveTimerRef.current) {
@@ -578,12 +580,10 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   };
 
   useEffect(() => {
-    if (!navigationService || !cameraEnabled || !navBackendConnected) {
+    if (!navigationService || !navBackendConnected) {
       setPtzState(null);
       clearPresetSaveArm();
-      if (!cameraEnabled) {
-        setPtzError("Camera disabled in current preset");
-      } else if (!navBackendConnected) {
+      if (!navBackendConnected) {
         const host = connectionState?.host?.trim() || "host";
         const port = connectionState?.port?.trim() || "port";
         setPtzError(`Nav2 disconnected. Connect to ws://${host}:${port} first.`);
@@ -616,7 +616,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [cameraEnabled, connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
+  }, [connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
 
   useEffect(
     () => () => {
@@ -632,14 +632,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     successText?: string
   ): Promise<void> => {
     if (!navigationService) return;
-    if (!cameraEnabled) {
-      runtime.eventBus.emit("console.event", {
-        level: "warn",
-        text: "Camera disabled in current preset",
-        timestamp: Date.now()
-      });
-      return;
-    }
     if (!navBackendConnected) {
       const host = connectionState?.host?.trim() || "host";
       const port = connectionState?.port?.trim() || "port";
@@ -710,14 +702,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
 
   const toggleZoom = async (): Promise<void> => {
     if (!navigationService) return;
-    if (!cameraEnabled) {
-      runtime.eventBus.emit("console.event", {
-        level: "warn",
-        text: "Camera disabled in current preset",
-        timestamp: Date.now()
-      });
-      return;
-    }
     if (!navBackendConnected) {
       const host = connectionState?.host?.trim() || "host";
       const port = connectionState?.port?.trim() || "port";
@@ -767,11 +751,11 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                 <div className="cv-no-signal">
                   <div className="cv-no-signal-shell">
                     <div className="cv-no-signal-text">
-                      {!cameraEnabled
+                      {!videoEnabled
                         ? "Camera unavailable"
                         : !videoRequested
                           ? "Video paused to save mobile data"
-                          : cameraEnabled
+                          : videoEnabled
                         ? streamStatus.connecting
                           ? "Connecting camera stream"
                           : streamStatus.error
@@ -779,7 +763,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                             : "Awaiting camera stream"
                         : "Camera unavailable"}
                     </div>
-                    {cameraEnabled ? (
+                    {videoEnabled ? (
                       <button
                         type="button"
                         className="cv-camera-request-btn"

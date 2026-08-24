@@ -123,7 +123,7 @@ describe("camera preset save", () => {
     vi.unstubAllGlobals();
   });
 
-  it("requires a second click before saving HOME", async () => {
+  it("keeps simulated PTZ enabled while video remains unavailable", async () => {
     const contributions = createContributionRegistry();
     const services = new ServiceRegistry();
     const eventBus = createEventBus();
@@ -142,7 +142,7 @@ describe("camera preset save", () => {
       getState: () => ({
         connected: true,
         connecting: false,
-        preset: "real",
+        preset: "sim",
         host: "salus",
         port: "8766",
         lastError: "",
@@ -190,6 +190,7 @@ describe("camera preset save", () => {
     render(<>{contribution.render()}</>);
 
     await waitFor(() => expect(readCameraPtzState).toHaveBeenCalled());
+    expect(screen.getByText("Camera unavailable")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Set Home" }));
     expect(saveCameraPreset).not.toHaveBeenCalled();
