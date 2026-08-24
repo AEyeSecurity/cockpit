@@ -1,6 +1,10 @@
 import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
+// Zone rasterization and map reload share the gateway's 20 s long-operation
+// budget. This margin is transport-only, not an operational tolerance.
+const LONG_ROS_OPERATION_TIMEOUT_MS = 25_000;
+
 export class MapDispatcher extends Nav2DispatcherBase {
   constructor(id: string, transportId: string) {
     super(id, transportId);
@@ -11,11 +15,11 @@ export class MapDispatcher extends Nav2DispatcherBase {
   }
 
   async setZonesGeoJson(geojson: unknown): Promise<Nav2IncomingMessage> {
-    return this.request("set_zones_geojson", { geojson } as never, { timeoutMs: 6000 });
+    return this.request("set_zones_geojson", { geojson } as never, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
   }
 
   async loadZonesFile(): Promise<Nav2IncomingMessage> {
-    return this.request("load_zones_file", {}, { timeoutMs: 6000 });
+    return this.request("load_zones_file", {}, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
   }
 
   async setDatum(): Promise<Nav2IncomingMessage> {

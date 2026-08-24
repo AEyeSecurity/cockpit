@@ -7,6 +7,43 @@ export interface RouteMissionActivityState {
   isTerminal: boolean;
 }
 
+export type RouteRecoveryTone = "active" | "paused" | "error" | "idle";
+
+export interface RouteRecoveryPresentation {
+  active: boolean;
+  title: string;
+  tone: RouteRecoveryTone;
+}
+
+/**
+ * The route executor owns these states.  Cockpit only projects them; it must
+ * not infer a blockage from a non-empty diagnostic field such as `CLEAR`.
+ */
+export function normalizeRouteRecoveryState(state: string): string {
+  return String(state ?? "").trim().toUpperCase();
+}
+
+export function getRouteRecoveryPresentation(state: string): RouteRecoveryPresentation {
+  switch (normalizeRouteRecoveryState(state)) {
+    case "PENDING":
+      return { active: true, title: "Checking route clearance", tone: "active" };
+    case "WAITING_DATA":
+      return { active: true, title: "Waiting for navigation data", tone: "paused" };
+    case "WAITING_RETRY":
+      return { active: true, title: "Route blocked", tone: "paused" };
+    case "RECOVERING":
+      return { active: true, title: "Retrying blocked route", tone: "active" };
+    case "NEEDS_OPERATOR":
+      return { active: true, title: "Operator needed", tone: "error" };
+    default:
+      return { active: false, title: "", tone: "idle" };
+  }
+}
+
+export function isRouteRecoveryActive(state: string): boolean {
+  return getRouteRecoveryPresentation(state).active;
+}
+
 export function normalizeRouteMissionStatus(status: string): string {
   return String(status ?? "").replace(/\s+\[[^\]]+\]\s*$/u, "").trim().toLowerCase();
 }
@@ -36,7 +73,7 @@ export function hasRouteMissionHistory(routeMission: RouteMissionStateData): boo
     routeMission.activeChunkSize > 0 ||
     routeMission.missionWaypoints.length > 0 ||
     routeMission.activeChunkWaypoints.length > 0 ||
-    routeMission.blockedState.length > 0 ||
+    isRouteRecoveryActive(routeMission.blockedState) ||
     routeMission.actionActive ||
     routeMission.returnHomeRequested ||
     routeMission.returnHomeActive ||
@@ -70,11 +107,10 @@ export function isRouteMissionIdleSnapshot(routeMission: RouteMissionStateData):
     routeMission.legSpacingM === 0 &&
     routeMission.chunkSpanM === 0 &&
     routeMission.chunkMaxWaypoints === 0 &&
-    routeMission.blockedState.length === 0 &&
+    !isRouteRecoveryActive(routeMission.blockedState) &&
     routeMission.blockedReasonCode.length === 0 &&
     routeMission.blockedReasonText.length === 0 &&
     routeMission.blockedRetryAttempt === 0 &&
-    routeMission.blockedRetryMaxAttempts === 0 &&
     routeMission.blockedWaitRemainingS === 0 &&
     !routeMission.actionActive &&
     routeMission.actionWaypointIndex === 0 &&
@@ -106,7 +142,7 @@ export function getRouteMissionActivityState(
   const running = routeMission.active || routeMission.paused || (goalActive && hasHistory && !isTerminal);
   return {
     running,
-    activeVisual: running || routeMission.blockedState.length > 0,
+    activeVisual: running || isRouteRecoveryActive(routeMission.blockedState),
     hasHistory,
     isTerminal
   };
