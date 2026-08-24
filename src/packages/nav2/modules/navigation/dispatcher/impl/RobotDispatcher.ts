@@ -1,10 +1,6 @@
 import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
-// The ROS gateway reserves up to 20 s for profile application and snapshots.
-// Keep a small transport margin without relaxing short command deadlines.
-const LONG_ROS_OPERATION_TIMEOUT_MS = 25_000;
-
 export interface RobotStatus {
   batteryPct: number;
   batteryVoltageV: number | null;
@@ -37,7 +33,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
-    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
+    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 7000 });
   }
 
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
@@ -74,7 +70,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestSnapshot(): Promise<Nav2IncomingMessage> {
-    return this.request("get_nav_snapshot", {}, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
+    return this.request("get_nav_snapshot", {}, { timeoutMs: 7000 });
   }
 
   async requestSaveWaypointsFile(payload: {

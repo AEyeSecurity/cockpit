@@ -11,11 +11,7 @@ import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInf
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
-import {
-  getRouteMissionActivityState,
-  getRouteRecoveryPresentation,
-  normalizeRouteMissionStatus
-} from "../routeMissionActivity";
+import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../routeMissionActivity";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -161,10 +157,10 @@ function routeTone(
   goalActive = false
 ): "active" | "paused" | "done" | "error" | "idle" {
   const activity = getRouteMissionActivityState(routeMission, goalActive);
-  const recovery = getRouteRecoveryPresentation(routeMission.blockedState);
   if (routeMission.returnHomeActive) return "active";
   if (routeMission.returnHomeRequested) return "paused";
-  if (recovery.active) return recovery.tone;
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
+  if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
   const status = normalizeRouteMissionStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -175,7 +171,10 @@ function routeTone(
 }
 
 function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
-  return getRouteRecoveryPresentation(routeMission.blockedState).title;
+  if (routeMission.blockedState === "BLOCKED_RETRYING") return "Retrying blocked route";
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "Operator needed";
+  if (routeMission.blockedState === "BLOCKED_WAITING") return "Route blocked";
+  return "";
 }
 
 function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]): string {
@@ -184,7 +183,7 @@ function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]
   const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
   const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
   const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
-  const waitText = routeMission.blockedState === "WAITING_RETRY" && wait > 0 ? `${Math.ceil(wait)}s` : "";
+  const waitText = routeMission.blockedState === "BLOCKED_WAITING" && wait > 0 ? `${Math.ceil(wait)}s` : "";
   return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
 }
 
@@ -251,7 +250,7 @@ function buildNavigationStatus(
     };
   }
 
-  if (getRouteRecoveryPresentation(routeMission.blockedState).active) {
+  if (routeMission.blockedState) {
     return {
       title: formatBlockedStatusTitle(routeMission) || formatRouteStatus(routeMission.status),
       detail: formatBlockedStatusDetail(routeMission),
@@ -1079,30 +1078,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
 
       {/* ── 2. MANUAL CONTROL ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection title="MANUAL CONTROL" className="nav-sidebar-control-section nav-sidebar-manual-section">
-        <button
-          type="button"
-          className={joinClassNames("ncb-wide", "sec-btn", !navState.controlLocked && "active")}
-          disabled={!connState.connected}
-          onClick={async () => {
-            try {
-              if (navState.controlLocked) {
-                await navService.unlockControls();
-                emitInfo("Operator controls unlocked");
-              } else {
-                await navService.lockControls();
-                emitInfo("Operator controls locked");
-              }
-            } catch (error) {
-              emitError(`Control lock update failed: ${String(error)}`);
-            }
-          }}
-        >
-          <ButtonFace
-            icon={<NavGlyph kind="manual" />}
-            label={navState.controlLocked ? "UNLOCK CONTROLS" : "LOCK CONTROLS"}
-            meta={navState.controlLocked ? lockReasonText : "Heartbeat active"}
-          />
-        </button>
         <button
           type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}

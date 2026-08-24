@@ -14,12 +14,6 @@ function installStorageMock(seed: Record<string, string> = {}): void {
       getItem: (key: string) => (state.has(key) ? state.get(key)! : null),
       setItem: (key: string, value: string) => {
         state.set(key, value);
-      },
-      removeItem: (key: string) => {
-        state.delete(key);
-      },
-      clear: () => {
-        state.clear();
       }
     }
   });
@@ -843,7 +837,7 @@ describe("services", () => {
         input_waypoint_count: 3,
         expanded_waypoint_count: 7,
         active_chunk_size: 4,
-        blocked_state: "WAITING_RETRY",
+        blocked_state: "BLOCKED_WAITING",
         blocked_reason_code: "NO_VALID_PATH",
         blocked_reason_text: "no valid path found",
         blocked_retry_attempt: 1,
@@ -875,7 +869,7 @@ describe("services", () => {
       homeAvailable: true,
       expandedWaypointCount: 7,
       activeChunkSize: 4,
-      blockedState: "WAITING_RETRY",
+      blockedState: "BLOCKED_WAITING",
       blockedReasonCode: "NO_VALID_PATH",
       blockedReasonText: "no valid path found",
       blockedRetryAttempt: 1,
