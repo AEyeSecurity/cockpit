@@ -240,7 +240,7 @@ describe("AppShell", () => {
   });
 
   it("applies global zoom from keyboard and wheel", async () => {
-    if (typeof window.localStorage.removeItem === "function") {
+    if (window.localStorage && typeof window.localStorage.removeItem === "function") {
       window.localStorage.removeItem(UI_ZOOM_STORAGE_KEY);
     }
     document.documentElement.style.zoom = "";
