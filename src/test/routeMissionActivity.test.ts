@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getRouteRecoveryPresentation,
   getRouteMissionActivityState,
   hasRouteMissionHistory,
   isRouteMissionIdleSnapshot,
@@ -45,6 +46,29 @@ function createRouteMission(overrides: Partial<RouteMissionStateData> = {}): Rou
 }
 
 describe("routeMissionActivity", () => {
+  it("keeps CLEAR as a normal route state", () => {
+    const routeMission = createRouteMission({ blockedState: "CLEAR" });
+
+    expect(getRouteRecoveryPresentation(routeMission.blockedState)).toEqual({
+      active: false,
+      title: "",
+      tone: "idle"
+    });
+    expect(hasRouteMissionHistory(routeMission)).toBe(false);
+    expect(isRouteMissionIdleSnapshot(routeMission)).toBe(true);
+    expect(getRouteMissionActivityState(routeMission, false).activeVisual).toBe(false);
+  });
+
+  it.each([
+    ["PENDING", "Checking route clearance", "active"],
+    ["WAITING_DATA", "Waiting for navigation data", "paused"],
+    ["WAITING_RETRY", "Route blocked", "paused"],
+    ["RECOVERING", "Retrying blocked route", "active"],
+    ["NEEDS_OPERATOR", "Operator needed", "error"]
+  ] as const)("projects the executor recovery state %s", (state, title, tone) => {
+    expect(getRouteRecoveryPresentation(state)).toEqual({ active: true, title, tone });
+  });
+
   it("detects transient idle snapshots and preserves active route history while goal remains active", () => {
     const previous = createRouteMission({
       active: true,
