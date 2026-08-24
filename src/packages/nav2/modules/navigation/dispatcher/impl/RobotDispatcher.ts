@@ -32,10 +32,6 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_patrol_ll", goal, { timeoutMs: 7000 });
   }
 
-  async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
-    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 7000 });
-  }
-
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
     return this.request("cancel_goal", {}, { timeoutMs: 5000 });
   }
