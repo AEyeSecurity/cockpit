@@ -47,7 +47,7 @@ function createRouteMission(overrides: Partial<RouteMissionStateData> = {}): Rou
 
 describe("routeMissionActivity", () => {
   it("keeps CLEAR as a normal route state", () => {
-    const routeMission = createRouteMission({ blockedState: "CLEAR" });
+    const routeMission = createRouteMission({ blockedState: "CLEAR", blockedRetryMaxAttempts: 3 });
 
     expect(getRouteRecoveryPresentation(routeMission.blockedState)).toEqual({
       active: false,

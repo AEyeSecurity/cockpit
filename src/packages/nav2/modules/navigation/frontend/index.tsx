@@ -1081,6 +1081,30 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       <NavSidebarCollapsibleSection title="MANUAL CONTROL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
+          className={joinClassNames("ncb-wide", "sec-btn", !navState.controlLocked && "active")}
+          disabled={!connState.connected}
+          onClick={async () => {
+            try {
+              if (navState.controlLocked) {
+                await navService.unlockControls();
+                emitInfo("Operator controls unlocked");
+              } else {
+                await navService.lockControls();
+                emitInfo("Operator controls locked");
+              }
+            } catch (error) {
+              emitError(`Control lock update failed: ${String(error)}`);
+            }
+          }}
+        >
+          <ButtonFace
+            icon={<NavGlyph kind="manual" />}
+            label={navState.controlLocked ? "UNLOCK CONTROLS" : "LOCK CONTROLS"}
+            meta={navState.controlLocked ? lockReasonText : "Heartbeat active"}
+          />
+        </button>
+        <button
+          type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
           title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
           disabled={navState.controlLocked}

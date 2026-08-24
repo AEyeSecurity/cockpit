@@ -111,7 +111,6 @@ export function isRouteMissionIdleSnapshot(routeMission: RouteMissionStateData):
     routeMission.blockedReasonCode.length === 0 &&
     routeMission.blockedReasonText.length === 0 &&
     routeMission.blockedRetryAttempt === 0 &&
-    routeMission.blockedRetryMaxAttempts === 0 &&
     routeMission.blockedWaitRemainingS === 0 &&
     !routeMission.actionActive &&
     routeMission.actionWaypointIndex === 0 &&
