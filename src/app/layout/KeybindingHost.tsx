@@ -13,7 +13,13 @@ function isEditingTarget(target: EventTarget | null): boolean {
   // if (target.closest(".terminal-xterm-host")) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (tag === "INPUT") {
+    // Los sliders de control manual conservan el foco despues de ajustarlos.
+    // A diferencia de un campo de texto, no deben bloquear W/A/S/D ni sus
+    // keyup: perder el keyup podria dejar una orden manual sostenida.
+    return (target as HTMLInputElement).type !== "range";
+  }
+  return tag === "TEXTAREA" || tag === "SELECT";
 }
 
 export function KeybindingHost({ runtime, context }: KeybindingHostProps): null {
