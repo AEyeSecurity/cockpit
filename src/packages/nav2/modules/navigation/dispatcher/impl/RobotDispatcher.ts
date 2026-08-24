@@ -250,6 +250,10 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.subscribe("robot_pose", callback);
   }
 
+  subscribeScanPreview(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("scan_preview", callback);
+  }
+
   subscribeSensorInfo(callback: (message: Nav2IncomingMessage) => void): () => void {
     return this.subscribe("sensor_info", callback);
   }
