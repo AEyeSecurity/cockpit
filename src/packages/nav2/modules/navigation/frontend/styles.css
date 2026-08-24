@@ -7926,6 +7926,57 @@ pre {
   border-top: 1px solid rgba(148, 163, 184, 0.22);
 }
 
+.nav-sidebar .nav-navigation-profile-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nav-sidebar .nav-navigation-profile-option {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 7px;
+  border: 1px solid rgba(100, 116, 139, 0.34);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.88);
+  color: #475569;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-sidebar .nav-navigation-profile-option span {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.nav-sidebar .nav-navigation-profile-option small {
+  overflow: hidden;
+  color: inherit;
+  font-size: 9px;
+  opacity: 0.82;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-sidebar .nav-navigation-profile-option:hover:not(:disabled) {
+  border-color: rgba(14, 116, 144, 0.56);
+  background: rgba(236, 254, 255, 0.9);
+}
+
+.nav-sidebar .nav-navigation-profile-option.active {
+  border-color: rgba(14, 116, 144, 0.78);
+  background: linear-gradient(180deg, rgba(207, 250, 254, 0.98), rgba(224, 242, 254, 0.92));
+  box-shadow: inset 0 0 0 1px rgba(103, 232, 249, 0.56);
+  color: #0e7490;
+}
+
+.nav-sidebar .nav-navigation-profile-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .nav-sidebar .nav-route-subhead {
   display: flex;
   align-items: center;

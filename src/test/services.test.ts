@@ -337,6 +337,77 @@ describe("services", () => {
     expect(service.getState().waypointSelectionMode).toBe(false);
   });
 
+  it("applies the selected initial navigation profile before a route mission", async () => {
+    const dispatcher = {
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        active_profile: "rural"
+      }),
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 1,
+        expanded_waypoint_count: 1
+      }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    await service.setNavigationStartProfile("rural");
+    service.queueWaypoint({ x: 3, y: 4 });
+
+    await service.sendRouteMission();
+
+    expect(dispatcher.requestNavigationProfile).toHaveBeenCalledTimes(2);
+    expect(dispatcher.requestNavigationProfile).toHaveBeenLastCalledWith("rural");
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledTimes(1);
+    expect(dispatcher.requestNavigationProfile.mock.invocationCallOrder[1]).toBeLessThan(
+      dispatcher.requestRouteMission.mock.invocationCallOrder[0]
+    );
+    expect(service.getState().navigationStartProfile).toBe("rural");
+  });
+
+  it("keeps the previous initial navigation profile when Nav2 rejects it", async () => {
+    const dispatcher = {
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: false,
+        error: "profile unavailable"
+      }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+
+    await expect(service.setNavigationStartProfile("rural")).rejects.toThrow("profile unavailable");
+
+    expect(service.getState().navigationStartProfile).toBe("urban");
+  });
+
+  it("restores the urban selector when a patrol is cancelled", async () => {
+    const dispatcher = {
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        active_profile: "rural"
+      }),
+      requestCancelPatrolMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true
+      }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    await service.setNavigationStartProfile("rural");
+
+    await service.cancelPatrolMission();
+
+    expect(dispatcher.requestCancelPatrolMission).toHaveBeenCalledTimes(1);
+    expect(service.getState().navigationStartProfile).toBe("urban");
+  });
+
   it("sends queued goals through NavigationService", async () => {
     const dispatcher = {
       requestGoal: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
@@ -420,6 +491,11 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 5
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        active_profile: "urban"
+      }),
       requestCancelGoal: vi.fn(),
       requestCancelRouteMission: vi.fn(),
       requestManualMode: vi.fn(),
@@ -466,6 +542,11 @@ describe("services", () => {
         ok: true,
         input_waypoint_count: 2,
         expanded_waypoint_count: 2
+      }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        active_profile: "urban"
       }),
       requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
     };

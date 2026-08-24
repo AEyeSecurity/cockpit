@@ -879,6 +879,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     telemetryService ? telemetryService.getSnapshot() : null
   );
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [navigationProfilePending, setNavigationProfilePending] = useState(false);
   const wps = navState.waypoints.length;
   const selectedCount = navState.selectedWaypointIndexes.length;
   const selectedWaypoints = navState.selectedWaypointIndexes
@@ -941,6 +942,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMissionActivity.running;
+  const navigationProfileLocked =
+    navState.controlLocked ||
+    navigationProfilePending ||
+    missionActive ||
+    routeMission.paused ||
+    patrolMission.active ||
+    patrolMission.phase === "depart_home" ||
+    patrolMission.phase === "return_connector" ||
+    patrolMission.phase === "return_pending" ||
+    patrolMission.phase === "loop_main";
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(
@@ -960,6 +971,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         : "Disconnected";
   useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
   useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
+  useEffect(() => {
+    if (!connState.connected) navService.resetNavigationStartProfile();
+  }, [connState.connected, navService]);
   useEffect(() => {
     if (selectedCount === 0 || navState.controlLocked) {
       setActionMenuOpen(false);
@@ -1112,6 +1126,47 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         className="nav-sidebar-actions-section nav-sidebar-automatic-section nav-sidebar-route-section"
         defaultCollapsed={false}
       >
+        <div className="nav-route-subsection nav-navigation-profile-section">
+          <div className="nav-route-subhead">
+            <span>Start / manual costmap</span>
+            <small>{navigationProfileLocked ? "Mission controlled" : "Apply now"}</small>
+          </div>
+          <div className="nav-navigation-profile-switch" role="group" aria-label="Navigation profile">
+            {(["urban", "rural"] as const).map((profile) => (
+              <button
+                key={profile}
+                type="button"
+                className={joinClassNames(
+                  "nav-navigation-profile-option",
+                  navState.navigationStartProfile === profile && "active"
+                )}
+                disabled={navigationProfileLocked}
+                title={
+                  navigationProfileLocked
+                    ? navState.controlLocked
+                      ? lockReasonText
+                      : "Profile changes are controlled by the active mission and its waypoints"
+                    : `Apply ${profile} costmap now and use it to start the next mission`
+                }
+                onClick={async () => {
+                  if (navState.navigationStartProfile === profile) return;
+                  setNavigationProfilePending(true);
+                  try {
+                    await navService.setNavigationStartProfile(profile);
+                    emitInfo(`Navigation profile applied: ${profile}`);
+                  } catch (error) {
+                    emitError(`Navigation profile failed: ${String(error)}`);
+                  } finally {
+                    setNavigationProfilePending(false);
+                  }
+                }}
+              >
+                <span>{profile === "urban" ? "URBAN" : "RURAL"}</span>
+                <small>{profile === "urban" ? "Default margins" : "Narrow dirt road"}</small>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="nav-route-subsection nav-route-execution">
           <div className="nav-route-subhead">
             <span>Route</span>
@@ -1136,12 +1191,21 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className="ncb-wide cancel-btn"
-            disabled={!missionActive}
+            disabled={!(missionActive || patrolMission.active || patrolMission.phase === "depart_home" || patrolMission.phase === "return_connector" || patrolMission.phase === "return_pending" || patrolMission.phase === "loop_main")}
             onClick={async () => {
               try {
                 if (routeMission.active || routeMission.paused) {
                   await navService.cancelRouteMission();
                   emitInfo("Route mission cancelled");
+                } else if (
+                  patrolMission.active ||
+                  patrolMission.phase === "depart_home" ||
+                  patrolMission.phase === "return_connector" ||
+                  patrolMission.phase === "return_pending" ||
+                  patrolMission.phase === "loop_main"
+                ) {
+                  await navService.cancelPatrolMission();
+                  emitInfo("Patrol mission cancelled");
                 } else {
                   await navService.cancelGoal();
                   emitInfo("Goal cancelled");
