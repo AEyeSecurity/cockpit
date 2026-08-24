@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import type { RobotDispatcher } from "../../navigation/dispatcher/impl/RobotDispatcher";
@@ -6,8 +6,10 @@ import type { ConnectionService } from "../../navigation/service/impl/Connection
 import type { NavigationService } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import { TelemetryService, type TelemetrySnapshot } from "../service/impl/TelemetryService";
+import { LidarPreviewService, type LidarPreviewState } from "../service/impl/LidarPreviewService";
 
 const SERVICE_ID = "service.telemetry";
+const LIDAR_PREVIEW_SERVICE_ID = "service.lidar-preview";
 const DISPATCHER_ID = "dispatcher.robot";
 const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
@@ -252,6 +254,96 @@ function SummaryCard({
   );
 }
 
+function LidarPreviewCard({ service }: { service: LidarPreviewService | null }): JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [state, setState] = useState<LidarPreviewState>(() => service?.getState() ?? {
+    status: "waiting",
+    frameId: "",
+    sourceStamp: null,
+    receivedAtMs: 0,
+    angleMin: 0,
+    angleIncrement: 0,
+    rangeMin: 0,
+    rangeMax: 0,
+    ranges: [],
+    validCount: 0
+  });
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => service?.subscribe(setState), [service]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const stale = state.status === "live" && nowMs - state.receivedAtMs > 1500;
+  const visualStatus = state.status === "waiting" ? "waiting" : stale ? "stale" : "live";
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const pixelRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(rect.width * pixelRatio));
+    canvas.height = Math.max(1, Math.round(rect.height * pixelRatio));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.scale(pixelRatio, pixelRatio);
+    const width = rect.width;
+    const height = rect.height;
+    const originX = width / 2;
+    const originY = height - 12;
+    const radius = Math.min(width / 2 - 12, height - 22);
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = "#dbe5ef";
+    context.lineWidth = 1;
+    for (const meters of [4, 8, 12]) {
+      const ringRadius = radius * meters / 12;
+      context.beginPath();
+      context.arc(originX, originY, ringRadius, Math.PI, 2 * Math.PI);
+      context.stroke();
+    }
+    context.beginPath();
+    context.moveTo(originX - radius, originY);
+    context.lineTo(originX + radius, originY);
+    context.moveTo(originX, originY);
+    context.lineTo(originX, originY - radius);
+    context.stroke();
+    if (visualStatus === "waiting") return;
+    context.fillStyle = stale ? "#94a3b8" : "#0ea5e9";
+    state.ranges.forEach((range, index) => {
+      if (range === null) return;
+      const angle = state.angleMin + state.angleIncrement * index;
+      const scaledRange = Math.min(range, 12) / 12 * radius;
+      const x = originX - Math.sin(angle) * scaledRange;
+      const y = originY - Math.cos(angle) * scaledRange;
+      context.beginPath();
+      context.arc(x, y, 1.7, 0, Math.PI * 2);
+      context.fill();
+    });
+  }, [state, visualStatus]);
+
+  return (
+    <div className="panel-card telemetry-panel-card telemetry-lidar-card">
+      <div className="telemetry-card-header">
+        <h4>LiDAR Preview</h4>
+        <StatusChip
+          label={visualStatus}
+          tone={visualStatus === "live" ? "ok" : visualStatus === "stale" ? "warn" : "neutral"}
+        />
+      </div>
+      <div className="telemetry-lidar-preview">
+        <canvas ref={canvasRef} className="telemetry-lidar-canvas" aria-label="LiDAR preview relative to robot" />
+        <div className="telemetry-lidar-legend">
+          <span>Front ↑</span>
+          <span>{state.validCount} returns</span>
+          <span>{state.rangeMax > 0 ? `${Math.min(state.rangeMax, 12).toFixed(0)} m` : "12 m"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TelemetryMetricCard({
   label,
   value,
@@ -337,6 +429,12 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
     telemetryService = runtime.services.getService<TelemetryService>(SERVICE_ID);
   } catch {
     telemetryService = null;
+  }
+  let lidarPreviewService: LidarPreviewService | null = null;
+  try {
+    lidarPreviewService = runtime.services.getService<LidarPreviewService>(LIDAR_PREVIEW_SERVICE_ID);
+  } catch {
+    lidarPreviewService = null;
   }
   const [sensorInfoState, setSensorInfoState] = useState<SensorInfoState | null>(
     services.sensorInfo ? services.sensorInfo.getState() : null
@@ -550,6 +648,8 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
           <span>0°=E, 90°=N</span>
         </div>
       </div>
+
+      <LidarPreviewCard service={lidarPreviewService} />
     </div>
   );
 }
@@ -702,9 +802,14 @@ export function createTelemetryModule(): CockpitModule {
 
       const robotDispatcher = dispatcherDefinition.dispatcher as RobotDispatcher;
       const telemetryService = new TelemetryService(robotDispatcher, ctx.eventBus);
+      const lidarPreviewService = new LidarPreviewService(robotDispatcher);
       ctx.services.registerService({
         id: SERVICE_ID,
         service: telemetryService
+      });
+      ctx.services.registerService({
+        id: LIDAR_PREVIEW_SERVICE_ID,
+        service: lidarPreviewService
       });
 
       ctx.contributions.register({

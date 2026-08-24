@@ -180,6 +180,33 @@
 .telemetry-sidebar > .telemetry-panel-card:nth-child(2) .telemetry-card-header h4::before { content: '⊕'; }
 .telemetry-sidebar > .telemetry-panel-card:nth-child(3) .telemetry-card-header h4::before { content: '◎'; }
 .telemetry-sidebar > .telemetry-panel-card:nth-child(4) .telemetry-card-header h4::before { content: '↺'; }
+.telemetry-sidebar > .telemetry-panel-card:nth-child(5) .telemetry-card-header h4::before { content: '⌖'; }
+
+.telemetry-lidar-preview {
+  padding: 10px 12px 9px;
+  background: #f8fafe;
+}
+
+.telemetry-lidar-canvas {
+  display: block;
+  width: 100%;
+  height: 170px;
+  border: 1px solid #dce6f2;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.telemetry-lidar-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 7px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
 
 /* ─────────────────────────────────────────────────────────────────────
    Key-value rows
