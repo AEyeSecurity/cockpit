@@ -2283,6 +2283,26 @@ export class NavigationService {
     this.state = {
       ...this.state,
       patrolMissionProfile: reconciledProfile,
+      patrolMission: {
+        active: true,
+        phase: reconciledProfile.departWaypoints.length > 0 ? "depart_home" : "loop_main",
+        lowBatteryActive: false,
+        returnHomeRequested: false,
+        returnHomeActive: false,
+        returnExitLoopIndex: -1,
+        departEntryLoopIndex: reconciledProfile.departEntryLoopIndex,
+        homeAvailable: true,
+        missionId: "",
+        status: "PATROL",
+        homeWaypoint: cloneGoal(reconciledProfile.homeWaypoint),
+        loopWaypoints: reconciledProfile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        returnWaypoints: reconciledProfile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departWaypoints: reconciledProfile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        activeChunkWaypoints: (reconciledProfile.departWaypoints.length > 0
+          ? reconciledProfile.departWaypoints
+          : reconciledProfile.loopWaypoints
+        ).map((waypoint) => cloneGoal(waypoint))
+      },
       lastStatus: `Patrol mission sent (${inputCount} -> ${expandedCount})`
     };
     this.emit();
@@ -2299,6 +2319,12 @@ export class NavigationService {
     }
     this.state = {
       ...this.state,
+      patrolMission: {
+        ...this.state.patrolMission,
+        returnHomeRequested: true,
+        phase: this.state.patrolMission.returnHomeActive ? "return_connector" : "return_pending",
+        status: "RETURN_HOME_REQUESTED"
+      },
       lastStatus: "Return HOME requested"
     };
     this.emit();
