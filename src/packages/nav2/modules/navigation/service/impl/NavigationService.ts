@@ -787,6 +787,29 @@ function goalToWireWaypoint(input: GoalInput): { lat: number; lon: number; yaw_d
   return waypoint;
 }
 
+function bearingYawDeg(from: GoalInput, to: GoalInput): number {
+  const meanLatitudeRad = ((Number(from.x) + Number(to.x)) / 2) * Math.PI / 180;
+  const east = (Number(to.y) - Number(from.y)) * Math.cos(meanLatitudeRad);
+  const north = Number(to.x) - Number(from.x);
+  if (Math.abs(east) < 1e-12 && Math.abs(north) < 1e-12) return 0;
+  return Math.atan2(north, east) * 180 / Math.PI;
+}
+
+function patrolWaypointsToWire(inputs: GoalInput[], loop: boolean): ReturnType<typeof goalToWireWaypoint>[] {
+  return inputs.map((input, index) => {
+    const waypoint = goalToWireWaypoint(input);
+    if (waypoint.yaw_deg !== undefined) return waypoint;
+    const next = inputs[index + 1] ?? (loop ? inputs[0] : undefined);
+    const previous = inputs[index - 1];
+    waypoint.yaw_deg = next
+      ? bearingYawDeg(input, next)
+      : previous
+        ? bearingYawDeg(previous, input)
+        : 0;
+    return waypoint;
+  });
+}
+
 function goalToWireNavGoal(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
   const waypoint = goalToWireWaypoint(input);
   const { actions: _actions, role: _role, ...withoutActions } = waypoint;
@@ -2226,10 +2249,20 @@ export class NavigationService {
 
     const payload: Record<string, unknown> = {
       patrol_mission: {
-        loop_waypoints: reconciledProfile.loopWaypoints.map((entry) => goalToWireWaypoint(entry)),
-        home_waypoint: goalToWireWaypoint(reconciledProfile.homeWaypoint),
-        return_waypoints: reconciledProfile.returnWaypoints.map((entry) => goalToWireWaypoint(entry)),
-        depart_waypoints: reconciledProfile.departWaypoints.map((entry) => goalToWireWaypoint(entry)),
+        loop_waypoints: patrolWaypointsToWire(reconciledProfile.loopWaypoints, true),
+        home_waypoint: {
+          ...goalToWireWaypoint(reconciledProfile.homeWaypoint),
+          yaw_deg: hasExplicitYaw(reconciledProfile.homeWaypoint)
+            ? Number(reconciledProfile.homeWaypoint.yawDeg)
+            : bearingYawDeg(
+                reconciledProfile.homeWaypoint,
+                reconciledProfile.departWaypoints[0] ??
+                  reconciledProfile.loopWaypoints[reconciledProfile.departEntryLoopIndex] ??
+                  reconciledProfile.loopWaypoints[0]
+              )
+        },
+        return_waypoints: patrolWaypointsToWire(reconciledProfile.returnWaypoints, false),
+        depart_waypoints: patrolWaypointsToWire(reconciledProfile.departWaypoints, false),
         depart_entry_loop_index: reconciledProfile.departEntryLoopIndex
       }
     };
@@ -2250,6 +2283,26 @@ export class NavigationService {
     this.state = {
       ...this.state,
       patrolMissionProfile: reconciledProfile,
+      patrolMission: {
+        active: true,
+        phase: reconciledProfile.departWaypoints.length > 0 ? "depart_home" : "loop_main",
+        lowBatteryActive: false,
+        returnHomeRequested: false,
+        returnHomeActive: false,
+        returnExitLoopIndex: -1,
+        departEntryLoopIndex: reconciledProfile.departEntryLoopIndex,
+        homeAvailable: true,
+        missionId: "",
+        status: "PATROL",
+        homeWaypoint: cloneGoal(reconciledProfile.homeWaypoint),
+        loopWaypoints: reconciledProfile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        returnWaypoints: reconciledProfile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        departWaypoints: reconciledProfile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
+        activeChunkWaypoints: (reconciledProfile.departWaypoints.length > 0
+          ? reconciledProfile.departWaypoints
+          : reconciledProfile.loopWaypoints
+        ).map((waypoint) => cloneGoal(waypoint))
+      },
       lastStatus: `Patrol mission sent (${inputCount} -> ${expandedCount})`
     };
     this.emit();
@@ -2266,6 +2319,12 @@ export class NavigationService {
     }
     this.state = {
       ...this.state,
+      patrolMission: {
+        ...this.state.patrolMission,
+        returnHomeRequested: true,
+        phase: this.state.patrolMission.returnHomeActive ? "return_connector" : "return_pending",
+        status: "RETURN_HOME_REQUESTED"
+      },
       lastStatus: "Return HOME requested"
     };
     this.emit();
