@@ -721,6 +721,48 @@ describe("services", () => {
     expect(profile.departEntryLoopIndex).toBe(-1);
   });
 
+  it("resolves auto yaw before dispatching a structured patrol", async () => {
+    const dispatcher = {
+      requestControlLock: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
+      requestNavigationProfile: vi.fn().mockResolvedValue({
+        op: "ack", ok: true, active_profile: "urban"
+      }),
+      requestPatrolMission: vi.fn().mockResolvedValue({
+        op: "ack", ok: true,
+        loop_input_waypoint_count: 3,
+        loop_expanded_waypoint_count: 3
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.queueWaypoint({ x: -31.0, y: -64.0 });
+    service.queueWaypoint({ x: -31.0, y: -63.9999 });
+    service.queueWaypoint({ x: -30.9999, y: -63.9999 });
+    service.queueWaypoint({ x: -31.0001, y: -64.0001 });
+    service.toggleWaypointSelection(0);
+    service.toggleWaypointSelection(1);
+    service.toggleWaypointSelection(2);
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(3);
+    service.setPatrolHomeFromSelected();
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(0);
+    service.setPatrolDepartEntryFromSelected();
+
+    await service.sendPatrolMission();
+
+    const payload = dispatcher.requestPatrolMission.mock.calls[0][0] as {
+      patrol_mission: {
+        loop_waypoints: Array<{ yaw_deg?: number }>;
+        home_waypoint: { yaw_deg?: number };
+      };
+    };
+    expect(payload.patrol_mission.loop_waypoints).toHaveLength(3);
+    expect(payload.patrol_mission.loop_waypoints.every((waypoint) => Number.isFinite(waypoint.yaw_deg))).toBe(true);
+    expect(Number.isFinite(payload.patrol_mission.home_waypoint.yaw_deg)).toBe(true);
+  });
+
   it("saves and loads file waypoints without yaw for auto mode", async () => {
     const dispatcher = {
       requestGoal: vi.fn(),

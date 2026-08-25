@@ -137,6 +137,42 @@ describe("TelemetryService RTK state", () => {
     });
   });
 
+  it("updates robot position and heading from compact nav telemetry", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      subscribeRobotStatus: vi.fn(() => () => undefined),
+      subscribeState: vi.fn(() => () => undefined),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      }),
+      subscribeNavEvent: vi.fn(() => () => undefined),
+      subscribeNavAlerts: vi.fn(() => () => undefined),
+      subscribeRobotPose: vi.fn(() => () => undefined),
+      subscribeAck: vi.fn(() => () => undefined),
+      subscribeRtkSourceState: vi.fn(() => () => undefined)
+    };
+    const eventBus = {
+      on: vi.fn(() => () => undefined)
+    };
+    const service = new TelemetryService(dispatcher as never, eventBus as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      robot_pose: {
+        lat: -31.48581,
+        lon: -64.24102,
+        heading_deg: 127.5
+      }
+    });
+
+    expect(service.getSnapshot().robotPose).toEqual({
+      lat: -31.48581,
+      lon: -64.24102,
+      headingDeg: 127.5
+    });
+  });
+
   it("preserves battery fallback values when extended fields are missing", () => {
     let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
     const dispatcher = {

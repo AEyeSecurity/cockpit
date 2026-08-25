@@ -300,6 +300,7 @@ export class TelemetryService {
 
     this.robotDispatcher.subscribeNavTelemetry((message) => {
       this.applyNavTelemetryPayload(message);
+      this.applyPosePayload(resolvePosePayload(message));
       this.emit();
     });
 

@@ -881,6 +881,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   );
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [navigationProfilePending, setNavigationProfilePending] = useState(false);
+  const [patrolStartPending, setPatrolStartPending] = useState(false);
+  const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
   const selectedCount = navState.selectedWaypointIndexes.length;
   const selectedWaypoints = navState.selectedWaypointIndexes
@@ -1267,22 +1269,30 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("ncb-wide send-btn", patrolMission.active && "active")}
-            disabled={!patrolReady || navState.controlLocked}
+            disabled={!patrolReady || navState.controlLocked || patrolStartPending}
             onClick={async () => {
+              if (patrolStartPending) return;
+              setPatrolStartPending(true);
+              setPatrolStartError("");
               try {
                 const started = await navService.sendPatrolMission();
                 emitInfo(`Patrol mission started (${started.inputCount} loop wps, ${started.expandedCount} pts)`);
               } catch (error) {
-                emitError(`Patrol mission failed: ${String(error)}`);
+                const message = `Patrol mission failed: ${String(error)}`;
+                setPatrolStartError(message);
+                emitError(message);
+              } finally {
+                setPatrolStartPending(false);
               }
             }}
           >
             <ButtonFace
               icon={<NavGlyph kind="route" />}
               label="START PATROL"
-              meta={patrolStartMeta}
+              meta={patrolStartPending ? "Starting..." : patrolStartMeta}
             />
           </button>
+          {patrolStartError ? <p className="ps-status-error" role="alert">{patrolStartError}</p> : null}
         </div>
       </NavSidebarCollapsibleSection>
 

@@ -70,7 +70,8 @@ function LogEmptyState(): JSX.Element {
 }
 
 export function LogConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const [events, setEvents] = useState<Array<Required<ConsoleEventLike>>>([]);
+  const [telemetryEvents, setTelemetryEvents] = useState<Array<Required<ConsoleEventLike>>>([]);
+  const [localEvents, setLocalEvents] = useState<Array<Required<ConsoleEventLike>>>([]);
 
   useEffect(() => {
     let telemetryService: TelemetryServiceLike | null = null;
@@ -81,27 +82,40 @@ export function LogConsoleTab({ runtime }: { runtime: ModuleContext }): JSX.Elem
     }
 
     if (telemetryService) {
-      setEvents(
+      setTelemetryEvents(
         telemetryService
           .getSnapshot()
           .recentEvents.map((entry) => normalizeEvent(entry))
           .filter((entry) => entry.text.length > 0)
       );
-      return telemetryService.subscribeTelemetry((snapshot) => {
-        setEvents(
+      const unsubscribeTelemetry = telemetryService.subscribeTelemetry((snapshot) => {
+        setTelemetryEvents(
           snapshot.recentEvents
             .map((entry) => normalizeEvent(entry))
             .filter((entry) => entry.text.length > 0)
         );
       });
+      const unsubscribeLocal = runtime.eventBus.on<ConsoleEventLike>("console.event", (event) => {
+        const normalized = normalizeEvent(event);
+        if (!normalized.text) return;
+        setLocalEvents((current) => [normalized, ...current].slice(0, 80));
+      });
+      return () => {
+        unsubscribeTelemetry();
+        unsubscribeLocal();
+      };
     }
 
     return runtime.eventBus.on<ConsoleEventLike>("console.event", (event) => {
       const normalized = normalizeEvent(event);
       if (!normalized.text) return;
-      setEvents((current) => [normalized, ...current].slice(0, 80));
+      setLocalEvents((current) => [normalized, ...current].slice(0, 80));
     });
   }, [runtime]);
+
+  const events = [...localEvents, ...telemetryEvents]
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, 80);
 
   return (
     <div className={`cockpit-log-console${events.length === 0 ? " cockpit-log-console-empty" : ""}`} role="log" aria-live="polite">
