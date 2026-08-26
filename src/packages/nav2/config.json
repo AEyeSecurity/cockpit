@@ -4,8 +4,6 @@
     "ws_real_port": 8766,
     "ws_sim_host": "localhost",
     "ws_sim_port": 8766,
-    "rtk_default_source_id": "casisa",
-    "rtk_default_source_label": "CASISA",
     "camera_transport": "webrtc",
     "camera_mjpeg_url": "http://localhost:8089/stream.mjpg",
     "camera_webrtc_url": "http://100.66.15.45:8889/cam3/whep",
@@ -48,18 +46,6 @@
         "label": "WS Sim Port",
         "type": "number",
         "placeholder": "8766"
-      },
-      {
-        "key": "rtk_default_source_id",
-        "label": "RTK Default Source ID",
-        "type": "string",
-        "placeholder": "casisa"
-      },
-      {
-        "key": "rtk_default_source_label",
-        "label": "RTK Default Source Name",
-        "type": "string",
-        "placeholder": "CASISA"
       },
       {
         "key": "camera_transport",

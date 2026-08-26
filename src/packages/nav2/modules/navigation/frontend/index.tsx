@@ -11,6 +11,7 @@ import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInf
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
+import { rtkSourceStatus } from "../rtkSourceStatus";
 import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../routeMissionActivity";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
@@ -29,8 +30,6 @@ interface Nav2RuntimeConfig {
   ws_real_port?: unknown;
   ws_sim_host?: unknown;
   ws_sim_port?: unknown;
-  rtk_default_source_id?: unknown;
-  rtk_default_source_label?: unknown;
   manual_linear_speed_min?: unknown;
   manual_linear_speed_max?: unknown;
   manual_linear_speed_default?: unknown;
@@ -2511,8 +2510,10 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           <div className="panel-card">
             <h4>RTK Source</h4>
             <div className="key-value-grid">
-              <span>Connected</span>
+              <span>NTRIP connected</span>
               <span>{(activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.connected === true ? "yes" : "no"}</span>
+              <span>Valid RTCM</span>
+              <span>{rtkSourceStatus((activeSnapshot.rtk_source_state as Record<string, unknown>) ?? null).receiving ? "yes" : "no"}</span>
               <span>Label</span>
               <span>{String((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a")}</span>
               <span>RTCM age</span>
@@ -2805,7 +2806,6 @@ function registerServices(
 
 function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const telemetryService = getTelemetryService(runtime);
-  const nav2Config = readNav2Config(runtime);
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
@@ -2830,38 +2830,19 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
   const rtkState = (snapshot?.rtkSourceState ?? null) as Record<string, unknown> | null;
   const sources = snapshot?.rtkSources ?? [];
-  const backendActiveId = String(rtkState?.active_source_id ?? "").trim();
-  const backendActiveLabel = String(rtkState?.active_source_label ?? backendActiveId).trim();
-  const gpsStatus = snapshot?.gpsStatus ?? {};
-  const gpsRtkText = String(
-    gpsStatus.label ?? gpsStatus.normalized ?? gpsStatus.raw ?? ""
-  ).trim().toLowerCase();
-  const hasRtkCorrections =
-    gpsStatus.available === true &&
-    (gpsRtkText.includes("rtk") || gpsRtkText.includes("rtcm"));
-  const fallbackId = String(nav2Config.rtk_default_source_id ?? "").trim();
-  const fallbackLabel = String(nav2Config.rtk_default_source_label ?? fallbackId).trim();
-  const usingConfiguredFallback =
-    !backendActiveId &&
-    !backendActiveLabel &&
-    sources.length === 0 &&
-    hasRtkCorrections &&
-    Boolean(fallbackId || fallbackLabel);
-  const activeId = backendActiveId || (usingConfiguredFallback ? fallbackId : "");
-  const activeLabel = backendActiveLabel || (usingConfiguredFallback ? fallbackLabel : "");
-  const connected = rtkState?.connected === true || usingConfiguredFallback;
-  const visibleSources = sources.length > 0
-    ? sources
-    : usingConfiguredFallback
-      ? [{ id: activeId || "configured-rtk", label: activeLabel || activeId }]
-      : [];
-  const statusText = usingConfiguredFallback
-    ? "Correcciones activas · fuente configurada (backend sin identidad)"
-    : connected
-    ? "Correcciones conectadas"
-    : activeId
-      ? "Base seleccionada · esperando correcciones"
-      : "Sin fuente activa";
+  const activeId = String(rtkState?.active_source_id ?? "").trim();
+  const activeLabel = String(rtkState?.active_source_label ?? activeId).trim();
+  const [now, setNow] = useState(Date.now);
+  const sequenceSeenAt = useRef(Date.now());
+  useEffect(() => {
+    sequenceSeenAt.current = Date.now();
+  }, [rtkState?.status_sequence]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const fresh = snapshot?.robotStatus.connected === true && now - sequenceSeenAt.current < 5000;
+  const { receiving, text: statusText } = rtkSourceStatus(rtkState, fresh);
 
   const emit = (level: string, text: string): void => {
     runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
@@ -2898,7 +2879,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         port: Math.trunc(Number(sourceDraft.port)),
         mountpoint: draftMountpoint,
         username: sourceDraft.username.trim(),
-        password: sourceDraft.password.trim()
+        password: sourceDraft.password
       });
       emit("info", `Antena RTK "${sourceDraft.label.trim() || draftId}" guardada`);
       setSourceDraft({
@@ -2922,16 +2903,17 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   return (
     <div className="rtk-modal">
       <div className="rtk-modal-status">
-        <span className={joinClassNames("rtk-status-dot", connected && "connected")} aria-hidden="true" />
+        <span className={joinClassNames("rtk-status-dot", receiving && "connected")} aria-hidden="true" />
         <div className="rtk-modal-status-copy">
           <strong>Fuente activa: {activeLabel || "—"}</strong>
           <span>{statusText}</span>
+          {rtkState?.last_error ? <span>{String(rtkState.last_error)}</span> : null}
           {activeId ? <code>{activeId}</code> : null}
         </div>
       </div>
-      {visibleSources.length > 0 ? (
+      {sources.length > 0 ? (
         <ul className="rtk-source-list">
-          {visibleSources.map((source) => {
+          {sources.map((source) => {
             const isActive = source.id === activeId;
             const isBusy = busyId === source.id;
             return (
@@ -2939,11 +2921,9 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                 <button
                   type="button"
                   className={joinClassNames("rtk-source-btn", isActive && "active")}
-                  disabled={usingConfiguredFallback || isActive || busyId !== null}
+                  disabled={!fresh || isActive || busyId !== null}
                   title={
-                    usingConfiguredFallback
-                      ? "Fuente configurada localmente; el backend no publica su identidad"
-                      : isActive
+                    isActive
                         ? "Antena activa"
                         : `Cambiar a ${source.label}`
                   }
@@ -2951,7 +2931,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                 >
                   <span className="rtk-source-label">{source.label}</span>
                   <span className="rtk-source-tag">
-                    {usingConfiguredFallback ? "Configurada" : isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
+                    {isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
                   </span>
                 </button>
               </li>
