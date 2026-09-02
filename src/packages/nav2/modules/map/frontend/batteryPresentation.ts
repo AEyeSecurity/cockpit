@@ -2,14 +2,13 @@ export type BatteryTone = "ok" | "warn" | "critical" | "off";
 
 export interface BatteryPresentationInput {
   batteryPct: number | null;
+  batteryVoltageV: number | null;
   connected: boolean;
   lowBatteryActive: boolean;
   batteryState: string;
   batteryMissionState: string;
   batteryReturnHomeRecommended: boolean | null;
   batteryPresent: boolean | null;
-  batteryRecoveredVoltageV: number | null;
-  batteryLoadedVoltageV: number | null;
 }
 
 export interface BatteryPresentation {
@@ -27,24 +26,17 @@ function formatVoltage(value: number | null): string | null {
 export function getBatteryPresentation(input: BatteryPresentationInput): BatteryPresentation {
   const {
     batteryPct,
+    batteryVoltageV,
     connected,
     lowBatteryActive,
     batteryState,
     batteryMissionState,
     batteryReturnHomeRecommended,
-    batteryPresent,
-    batteryRecoveredVoltageV,
-    batteryLoadedVoltageV
+    batteryPresent
   } = input;
   const normalizedBatteryState = String(batteryState ?? "").trim().toUpperCase();
   const normalizedMissionState = String(batteryMissionState ?? "").trim().toUpperCase();
-  const underLoad =
-    normalizedBatteryState === "OK" &&
-    batteryLoadedVoltageV !== null &&
-    batteryRecoveredVoltageV !== null &&
-    Number.isFinite(batteryLoadedVoltageV) &&
-    Number.isFinite(batteryRecoveredVoltageV) &&
-    batteryLoadedVoltageV < batteryRecoveredVoltageV - 0.4;
+  const voltageText = formatVoltage(batteryVoltageV);
 
   if (batteryPresent === false || !connected || normalizedBatteryState === "UNAVAILABLE") {
     return {
@@ -75,13 +67,7 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       tone: "critical",
       badgeLabel: "Returning Home",
       detail: "Mission will return to HOME on low battery",
-      contextualVoltageText: formatVoltage(
-        batteryRecoveredVoltageV ?? batteryLoadedVoltageV
-      )
-        ? `Return-home trigger active · ${formatVoltage(
-            batteryRecoveredVoltageV ?? batteryLoadedVoltageV
-          )}`
-        : "Return-home trigger active"
+      contextualVoltageText: voltageText ? `Return-home trigger active · ${voltageText}` : "Return-home trigger active"
     };
   }
   if (batteryReturnHomeRecommended === true || normalizedMissionState === "LOW_ENERGY_GO_HOME") {
@@ -89,31 +75,31 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       tone: "critical",
       badgeLabel: "Return Home",
       detail: "Mission will return to HOME on low battery",
-      contextualVoltageText: formatVoltage(
-        batteryRecoveredVoltageV ?? batteryLoadedVoltageV
-      )
-        ? `Return-home trigger active · ${formatVoltage(
-            batteryRecoveredVoltageV ?? batteryLoadedVoltageV
-          )}`
-        : "Return-home trigger active"
+      contextualVoltageText: voltageText ? `Return-home trigger active · ${voltageText}` : "Return-home trigger active"
     };
   }
-  if (normalizedBatteryState === "LOW") {
+  if (normalizedBatteryState === "BELOW_MINIMUM" || (batteryVoltageV !== null && batteryVoltageV < 44.5)) {
     return {
-      tone: "warn",
-      badgeLabel: "Watching",
-      detail: "Low energy trend detected",
-      contextualVoltageText: null
+      tone: "critical",
+      badgeLabel: "Below Minimum",
+      detail: "Battery is below the specified 44.5 V minimum",
+      contextualVoltageText: voltageText
     };
   }
-  if (underLoad) {
+  if (normalizedBatteryState === "CRITICAL" || (batteryVoltageV !== null && batteryVoltageV <= 45)) {
+    return {
+      tone: "critical",
+      badgeLabel: "Critical",
+      detail: "Battery is at the 45 V controller protection zone",
+      contextualVoltageText: voltageText
+    };
+  }
+  if (normalizedBatteryState === "LOW" || (batteryVoltageV !== null && batteryVoltageV <= 47)) {
     return {
       tone: "warn",
-      badgeLabel: "Under Load",
-      detail: "Voltage sag under traction",
-      contextualVoltageText: formatVoltage(batteryLoadedVoltageV)
-        ? `Under-load voltage · ${formatVoltage(batteryLoadedVoltageV)}`
-        : null
+      badgeLabel: "Low",
+      detail: "Battery is in the low-voltage operating zone",
+      contextualVoltageText: voltageText
     };
   }
   if (batteryPct === null || !Number.isFinite(batteryPct)) {

@@ -2776,22 +2776,17 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
   const batteryMissionState = String(telemetrySnapshot?.robotStatus.batteryMissionState ?? "");
   const batteryReturnHomeRecommended = telemetrySnapshot?.robotStatus.batteryReturnHomeRecommended ?? null;
-  const batteryRecoveredVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryRecoveredVoltageV);
-  const batteryRecoveredVoltageV = Number.isFinite(batteryRecoveredVoltageRaw) ? batteryRecoveredVoltageRaw : null;
-  const batteryLoadedVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryLoadedVoltageV);
-  const batteryLoadedVoltageV = Number.isFinite(batteryLoadedVoltageRaw) ? batteryLoadedVoltageRaw : null;
   const batteryPresent = telemetrySnapshot?.robotStatus.batteryPresent ?? null;
   const batteryConnected = telemetrySnapshot?.robotStatus.connected === true;
   const batteryPresentation = getBatteryPresentation({
     batteryPct,
+    batteryVoltageV,
     connected: batteryConnected,
     lowBatteryActive: routeMission?.lowBatteryActive === true,
     batteryState,
     batteryMissionState,
     batteryReturnHomeRecommended,
-    batteryPresent,
-    batteryRecoveredVoltageV,
-    batteryLoadedVoltageV
+    batteryPresent
   });
   const batteryStatusTone = batteryPresentation.tone;
   const batteryStatusLabel = batteryPresentation.badgeLabel;
@@ -3263,8 +3258,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                     <span className={`map-battery-pill tone-${batteryStatusTone}`.trim()}>{batteryStatusLabel}</span>
                   </div>
                   <div className="map-battery-main">
-                    <span className="map-battery-value">{formatBatteryPct(batteryPct)}</span>
-                    <span className="map-battery-subvalue">{formatBatteryVoltage(batteryVoltageV)}</span>
+                    <span className="map-battery-value">{formatBatteryVoltage(batteryVoltageV)}</span>
+                    <span className="map-battery-subvalue">{formatBatteryPct(batteryPct)} approx.</span>
                   </div>
                   <div className="map-battery-detail">
                     <span className="map-battery-detail-primary">{batteryPresentation.detail}</span>

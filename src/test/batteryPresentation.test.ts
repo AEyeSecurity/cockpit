@@ -1,73 +1,87 @@
 import { describe, expect, it } from "vitest";
 import { getBatteryPresentation } from "../packages/nav2/modules/map/frontend/batteryPresentation";
 
+const normalInput = {
+  batteryPct: 60,
+  batteryVoltageV: 50,
+  connected: true,
+  lowBatteryActive: false,
+  batteryState: "OK",
+  batteryMissionState: "OK",
+  batteryReturnHomeRecommended: false,
+  batteryPresent: true
+};
+
 describe("batteryPresentation", () => {
   it("marks return-home recommendation clearly before route latch", () => {
     const presentation = getBatteryPresentation({
-      batteryPct: 24,
-      connected: true,
-      lowBatteryActive: false,
-      batteryState: "OK",
+      ...normalInput,
+      batteryPct: 14,
+      batteryVoltageV: 46.4,
       batteryMissionState: "LOW_ENERGY_GO_HOME",
-      batteryReturnHomeRecommended: true,
-      batteryPresent: true,
-      batteryRecoveredVoltageV: 56.9,
-      batteryLoadedVoltageV: 56.2
+      batteryReturnHomeRecommended: true
     });
 
     expect(presentation.tone).toBe("critical");
     expect(presentation.badgeLabel).toBe("Return Home");
     expect(presentation.detail).toContain("return to HOME");
-    expect(presentation.contextualVoltageText).toContain("56.90 V");
+    expect(presentation.contextualVoltageText).toContain("46.40 V");
   });
 
-  it("marks returning home when low battery already latched in mission", () => {
+  it("marks returning home when low battery is already latched in mission", () => {
     const presentation = getBatteryPresentation({
-      batteryPct: 18,
-      connected: true,
+      ...normalInput,
+      batteryPct: 14,
+      batteryVoltageV: 46.4,
       lowBatteryActive: true,
-      batteryState: "OK",
       batteryMissionState: "LOW_ENERGY_GO_HOME",
-      batteryReturnHomeRecommended: true,
-      batteryPresent: true,
-      batteryRecoveredVoltageV: 56.8,
-      batteryLoadedVoltageV: 56.0
+      batteryReturnHomeRecommended: true
     });
 
     expect(presentation.tone).toBe("critical");
     expect(presentation.badgeLabel).toBe("Returning Home");
   });
 
-  it("detects under-load sag separately from low battery", () => {
-    const presentation = getBatteryPresentation({
-      batteryPct: 88,
-      connected: true,
-      lowBatteryActive: false,
-      batteryState: "OK",
-      batteryMissionState: "OK",
-      batteryReturnHomeRecommended: false,
-      batteryPresent: true,
-      batteryRecoveredVoltageV: 60.1,
-      batteryLoadedVoltageV: 59.4
+  it("marks the 47 V band as low without treating 48 V as low", () => {
+    const low = getBatteryPresentation({
+      ...normalInput,
+      batteryPct: 20,
+      batteryVoltageV: 47,
+      batteryState: "LOW"
+    });
+    const normal = getBatteryPresentation({
+      ...normalInput,
+      batteryPct: 35,
+      batteryVoltageV: 48
     });
 
-    expect(presentation.tone).toBe("warn");
-    expect(presentation.badgeLabel).toBe("Under Load");
-    expect(presentation.detail).toBe("Voltage sag under traction");
-    expect(presentation.contextualVoltageText).toContain("59.40 V");
+    expect(low.tone).toBe("warn");
+    expect(low.badgeLabel).toBe("Low");
+    expect(normal.tone).toBe("ok");
+  });
+
+  it("surfaces the VOTOL and Pylontech critical bands", () => {
+    const critical = getBatteryPresentation({
+      ...normalInput,
+      batteryPct: 5,
+      batteryVoltageV: 45,
+      batteryState: "CRITICAL"
+    });
+    const belowMinimum = getBatteryPresentation({
+      ...normalInput,
+      batteryPct: 0,
+      batteryVoltageV: 44.4,
+      batteryState: "BELOW_MINIMUM"
+    });
+
+    expect(critical.badgeLabel).toBe("Critical");
+    expect(belowMinimum.badgeLabel).toBe("Below Minimum");
   });
 
   it("surfaces suspect telemetry as sensor check", () => {
     const presentation = getBatteryPresentation({
-      batteryPct: 88,
-      connected: true,
-      lowBatteryActive: false,
-      batteryState: "SUSPECT",
-      batteryMissionState: "",
-      batteryReturnHomeRecommended: null,
-      batteryPresent: true,
-      batteryRecoveredVoltageV: null,
-      batteryLoadedVoltageV: null
+      ...normalInput,
+      batteryState: "SUSPECT"
     });
 
     expect(presentation.tone).toBe("off");
@@ -76,15 +90,12 @@ describe("batteryPresentation", () => {
 
   it("falls back to telemetry lost when telemetry is unavailable", () => {
     const presentation = getBatteryPresentation({
+      ...normalInput,
       batteryPct: null,
+      batteryVoltageV: null,
       connected: false,
-      lowBatteryActive: false,
       batteryState: "UNAVAILABLE",
-      batteryMissionState: "",
-      batteryReturnHomeRecommended: null,
-      batteryPresent: null,
-      batteryRecoveredVoltageV: null,
-      batteryLoadedVoltageV: null
+      batteryPresent: null
     });
 
     expect(presentation.tone).toBe("off");
