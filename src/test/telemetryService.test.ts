@@ -185,4 +185,36 @@ describe("TelemetryService RTK state", () => {
       connected: true
     });
   });
+
+  it("keeps a connected robot battery voltage unavailable when telemetry sends null", () => {
+    let onNavTelemetry: ((message: Record<string, unknown>) => void) | undefined;
+    const dispatcher = {
+      subscribeRobotStatus: vi.fn(() => () => undefined),
+      subscribeState: vi.fn(() => () => undefined),
+      subscribeNavTelemetry: vi.fn((callback: (message: Record<string, unknown>) => void) => {
+        onNavTelemetry = callback;
+        return () => undefined;
+      }),
+      subscribeNavEvent: vi.fn(() => () => undefined),
+      subscribeNavAlerts: vi.fn(() => () => undefined),
+      subscribeRobotPose: vi.fn(() => () => undefined),
+      subscribeAck: vi.fn(() => () => undefined),
+      subscribeRtkSourceState: vi.fn(() => () => undefined)
+    };
+    const eventBus = {
+      on: vi.fn(() => () => undefined)
+    };
+    const service = new TelemetryService(dispatcher as never, eventBus as never);
+
+    onNavTelemetry?.({
+      op: "nav_telemetry",
+      connected: true,
+      battery_voltage_v: null
+    });
+
+    expect(service.getSnapshot().robotStatus).toMatchObject({
+      connected: true,
+      batteryVoltageV: null
+    });
+  });
 });

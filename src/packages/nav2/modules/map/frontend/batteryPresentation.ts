@@ -62,6 +62,14 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: null
     };
   }
+  if (batteryVoltageV === null) {
+    return {
+      tone: "off",
+      badgeLabel: "Telemetry Lost",
+      detail: "Battery telemetry unavailable",
+      contextualVoltageText: null
+    };
+  }
   if (lowBatteryActive) {
     return {
       tone: "critical",

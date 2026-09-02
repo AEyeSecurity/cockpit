@@ -15,6 +15,13 @@ export interface RobotStatus {
   connected: boolean;
 }
 
+function optionalFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export class RobotDispatcher extends Nav2DispatcherBase {
   constructor(id: string, transportId: string) {
     super(id, transportId);
@@ -184,7 +191,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   subscribeRobotStatus(callback: (status: RobotStatus) => void): () => void {
     return this.subscribe("nav_telemetry", (message) => {
       const connected = message.connected === true || message.ok === true;
-      const batteryVoltageV = Number(message.battery_voltage_v);
+      const batteryVoltageV = optionalFiniteNumber(message.battery_voltage_v);
       const batteryUpdatedAgeS = Number(message.battery_updated_age_s);
       const batteryRecoveredVoltageV = Number(message.battery_recovered_voltage_v);
       const batteryLoadedVoltageV = Number(message.battery_loaded_voltage_v);
@@ -192,7 +199,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
         connected,
         mode: String(message.mode ?? (connected ? "connected" : "disconnected")),
         batteryPct: Number(message.battery_pct ?? 0),
-        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : null,
+        batteryVoltageV,
         batteryState: String(message.battery_state ?? ""),
         batteryMissionState: String(message.battery_mission_state ?? ""),
         batteryReturnHomeRecommended:

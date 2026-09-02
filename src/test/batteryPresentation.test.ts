@@ -91,7 +91,6 @@ describe("batteryPresentation", () => {
   it("falls back to telemetry lost when telemetry is unavailable", () => {
     const presentation = getBatteryPresentation({
       ...normalInput,
-      batteryPct: null,
       batteryVoltageV: null,
       connected: false,
       batteryState: "UNAVAILABLE",
@@ -100,5 +99,22 @@ describe("batteryPresentation", () => {
 
     expect(presentation.tone).toBe("off");
     expect(presentation.badgeLabel).toBe("Telemetry Lost");
+  });
+
+  it("keeps a connected robot without voltage telemetry unavailable", () => {
+    const presentation = getBatteryPresentation({
+      ...normalInput,
+      batteryPct: null,
+      batteryVoltageV: null,
+      batteryState: "",
+      batteryMissionState: "",
+      batteryReturnHomeRecommended: null,
+      batteryPresent: null
+    });
+
+    expect(presentation.tone).toBe("off");
+    expect(presentation.badgeLabel).toBe("Telemetry Lost");
+    expect(presentation.badgeLabel).not.toBe("Below Minimum");
+    expect(presentation.contextualVoltageText).toBeNull();
   });
 });

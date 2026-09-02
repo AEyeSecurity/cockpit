@@ -174,6 +174,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function optionalFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function messageCandidates(message: Record<string, unknown>): Record<string, unknown>[] {
   const direct = message;
   const payload = asRecord(message.payload);
@@ -198,6 +205,8 @@ function resolveNavTelemetryPayload(raw: Record<string, unknown>): Record<string
     candidate.mode !== undefined ||
     candidate.battery_pct !== undefined ||
     candidate.batteryPct !== undefined ||
+    candidate.battery_voltage_v !== undefined ||
+    candidate.batteryVoltageV !== undefined ||
     candidate.cmd_vel_safe !== undefined ||
     candidate.goal_active !== undefined ||
     candidate.control_locked !== undefined ||
@@ -461,9 +470,10 @@ export class TelemetryService {
     const allowLegacyAlias = isLegacyLockAliasMessage(raw);
     const mode = String(payload.mode ?? this.snapshot.robotStatus.mode);
     const battery = Number(payload.battery_pct ?? payload.batteryPct ?? this.snapshot.robotStatus.batteryPct);
-    const batteryVoltageV = Number(
-      payload.battery_voltage_v ?? payload.batteryVoltageV ?? this.snapshot.robotStatus.batteryVoltageV
-    );
+    const hasBatteryVoltage = payload.battery_voltage_v !== undefined || payload.batteryVoltageV !== undefined;
+    const batteryVoltageV = hasBatteryVoltage
+      ? optionalFiniteNumber(payload.battery_voltage_v ?? payload.batteryVoltageV)
+      : this.snapshot.robotStatus.batteryVoltageV;
     const batteryUpdatedAgeS = Number(
       payload.battery_updated_age_s ??
         payload.batteryUpdatedAgeS ??
@@ -485,7 +495,7 @@ export class TelemetryService {
       robotStatus: {
         mode,
         batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
-        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : this.snapshot.robotStatus.batteryVoltageV,
+        batteryVoltageV,
         batteryState: String(payload.battery_state ?? payload.batteryState ?? this.snapshot.robotStatus.batteryState),
         batteryMissionState: String(
           payload.battery_mission_state ?? payload.batteryMissionState ?? this.snapshot.robotStatus.batteryMissionState

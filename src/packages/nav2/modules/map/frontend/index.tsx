@@ -2769,10 +2769,12 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     },
     navigationState?.patrolMission ?? null
   );
+  const batteryVoltageRaw = telemetrySnapshot?.robotStatus.batteryVoltageV;
+  const batteryVoltageV =
+    typeof batteryVoltageRaw === "number" && Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
   const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
-  const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
-  const batteryVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryVoltageV);
-  const batteryVoltageV = Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
+  const batteryPct =
+    batteryVoltageV !== null && Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
   const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
   const batteryMissionState = String(telemetrySnapshot?.robotStatus.batteryMissionState ?? "");
   const batteryReturnHomeRecommended = telemetrySnapshot?.robotStatus.batteryReturnHomeRecommended ?? null;
