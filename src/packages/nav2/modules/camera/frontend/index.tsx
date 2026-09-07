@@ -15,7 +15,7 @@ import {
   type NavigationState
 } from "../../navigation/service/impl/NavigationService";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
-import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
+import { isCameraFeedConfigured, orientCameraPtzDelta, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.camera";
@@ -674,7 +674,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     tiltDeg?: number;
     zoomLevel?: number;
   }): Promise<void> => {
-    await runPtzAction(() => navigationService!.moveCameraPtz(input));
+    const orientedInput = orientCameraPtzDelta(input, cameraConfig.ptzRotationDeg);
+    await runPtzAction(() => navigationService!.moveCameraPtz(orientedInput));
   };
 
   const goPreset = async (preset: string): Promise<void> => {
