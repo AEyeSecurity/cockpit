@@ -15,11 +15,7 @@ import {
   type NavigationState,
   type PatrolMissionProfile
 } from "../../navigation/service/impl/NavigationService";
-import {
-  getRouteMissionActivityState,
-  getRouteRecoveryPresentation,
-  normalizeRouteMissionStatus
-} from "../../navigation/routeMissionActivity";
+import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../../navigation/routeMissionActivity";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import type { TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { getBatteryPresentation } from "./batteryPresentation";
@@ -2707,21 +2703,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }, [displayTotal, fwCurrentWp, goalActive, goalSucceeded, loopTotalWaypoints, missionProgressPct, routeComplete]);
   const missionProgressLabel = `${Math.round(displayMissionProgressPct)}%`;
   const blockedState = routeMission?.blockedState ?? "";
-  const recovery = getRouteRecoveryPresentation(blockedState);
   const blockedReason =
-    routeMission?.blockedReasonText || routeMission?.blockedReasonCode || (recovery.active ? "obstacle or path blockage" : "");
+    routeMission?.blockedReasonText || routeMission?.blockedReasonCode || (blockedState ? "obstacle or path blockage" : "");
   const blockedRetryMax = Math.max(0, Math.round(routeMission?.blockedRetryMaxAttempts ?? 0));
   const blockedRetryAttempt = Math.max(0, Math.round(routeMission?.blockedRetryAttempt ?? 0));
   const blockedWait = Math.max(0, Number(routeMission?.blockedWaitRemainingS ?? 0));
   const blockedRetryText = blockedRetryMax > 0 ? `retry ${Math.min(blockedRetryAttempt + 1, blockedRetryMax)}/${blockedRetryMax}` : "";
-  const blockedWaitText = blockedState === "WAITING_RETRY" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
+  const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
   const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
   const returnHomePhase = routeMission?.returnHomePhase ?? "idle";
   const missionTitle =
     routeMission?.returnHomeActive ? "Returning HOME" :
     returnHomePhase === "completed" ? "HOME reached" :
     routeMission?.returnHomeRequested ? "Return HOME queued" :
-    recovery.active ? recovery.title :
+    blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
+    blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
+    blockedState === "BLOCKED_WAITING" ? "Route blocked" :
     routeComplete ? "Route complete" :
     routeMission?.paused ? "Route paused" :
     routeMissionActivity?.running ? "Following route" :
@@ -2740,7 +2737,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               ? `Waiting for exit waypoint${routeMission.returnHomeExitWaypointIndex >= 0 ? ` #${routeMission.returnHomeExitWaypointIndex + 1}` : ""}`
               : "Completing current segment before HOME"
             : "HOME unavailable"
-        : recovery.active ? blockedDetail :
+        : blockedState ? blockedDetail :
     routePointCount > 0
       ? `${missionCompletedCount}/${missionProgressTotal} goals completed`
       : goalActive
@@ -2753,9 +2750,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           ? "Operator control"
           : `${queuedWaypointCount} queued waypoints`;
   const missionToneClass =
-    recovery.tone === "error" || routeStatusText.includes("fail") || routeStatusText.includes("error")
+    blockedState === "BLOCKED_NEEDS_OPERATOR" || routeStatusText.includes("fail") || routeStatusText.includes("error")
       ? "error"
-      : recovery.active || routeMission?.paused || navigationState?.manualMode
+      : blockedState || routeMission?.paused || navigationState?.manualMode
         ? "warn"
         : routeMissionActivity?.activeVisual || routeComplete || goalActive || navigationState?.goalMode
           ? "active"
@@ -2772,29 +2769,26 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     },
     navigationState?.patrolMission ?? null
   );
+  const batteryVoltageRaw = telemetrySnapshot?.robotStatus.batteryVoltageV;
+  const batteryVoltageV =
+    typeof batteryVoltageRaw === "number" && Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
   const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
-  const batteryPct = Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
-  const batteryVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryVoltageV);
-  const batteryVoltageV = Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
+  const batteryPct =
+    batteryVoltageV !== null && Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
   const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
   const batteryMissionState = String(telemetrySnapshot?.robotStatus.batteryMissionState ?? "");
   const batteryReturnHomeRecommended = telemetrySnapshot?.robotStatus.batteryReturnHomeRecommended ?? null;
-  const batteryRecoveredVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryRecoveredVoltageV);
-  const batteryRecoveredVoltageV = Number.isFinite(batteryRecoveredVoltageRaw) ? batteryRecoveredVoltageRaw : null;
-  const batteryLoadedVoltageRaw = Number(telemetrySnapshot?.robotStatus.batteryLoadedVoltageV);
-  const batteryLoadedVoltageV = Number.isFinite(batteryLoadedVoltageRaw) ? batteryLoadedVoltageRaw : null;
   const batteryPresent = telemetrySnapshot?.robotStatus.batteryPresent ?? null;
   const batteryConnected = telemetrySnapshot?.robotStatus.connected === true;
   const batteryPresentation = getBatteryPresentation({
     batteryPct,
+    batteryVoltageV,
     connected: batteryConnected,
     lowBatteryActive: routeMission?.lowBatteryActive === true,
     batteryState,
     batteryMissionState,
     batteryReturnHomeRecommended,
-    batteryPresent,
-    batteryRecoveredVoltageV,
-    batteryLoadedVoltageV
+    batteryPresent
   });
   const batteryStatusTone = batteryPresentation.tone;
   const batteryStatusLabel = batteryPresentation.badgeLabel;
@@ -3266,8 +3260,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                     <span className={`map-battery-pill tone-${batteryStatusTone}`.trim()}>{batteryStatusLabel}</span>
                   </div>
                   <div className="map-battery-main">
-                    <span className="map-battery-value">{formatBatteryPct(batteryPct)}</span>
-                    <span className="map-battery-subvalue">{formatBatteryVoltage(batteryVoltageV)}</span>
+                    <span className="map-battery-value">{formatBatteryVoltage(batteryVoltageV)}</span>
+                    <span className="map-battery-subvalue">{formatBatteryPct(batteryPct)} approx.</span>
                   </div>
                   <div className="map-battery-detail">
                     <span className="map-battery-detail-primary">{batteryPresentation.detail}</span>

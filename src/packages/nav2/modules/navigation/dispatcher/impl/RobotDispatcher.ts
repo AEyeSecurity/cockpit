@@ -1,10 +1,6 @@
 import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
-// The ROS gateway reserves up to 20 s for profile application and snapshots.
-// Keep a small transport margin without relaxing short command deadlines.
-const LONG_ROS_OPERATION_TIMEOUT_MS = 25_000;
-
 export interface RobotStatus {
   batteryPct: number;
   batteryVoltageV: number | null;
@@ -17,6 +13,13 @@ export interface RobotStatus {
   batteryUpdatedAgeS: number | null;
   mode: string;
   connected: boolean;
+}
+
+function optionalFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 export class RobotDispatcher extends Nav2DispatcherBase {
@@ -34,10 +37,6 @@ export class RobotDispatcher extends Nav2DispatcherBase {
 
   async requestPatrolMission(goal: unknown): Promise<Nav2IncomingMessage> {
     return this.request("set_patrol_ll", goal, { timeoutMs: 7000 });
-  }
-
-  async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
-    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
   }
 
   async requestCancelGoal(): Promise<Nav2IncomingMessage> {
@@ -74,7 +73,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestSnapshot(): Promise<Nav2IncomingMessage> {
-    return this.request("get_nav_snapshot", {}, { timeoutMs: LONG_ROS_OPERATION_TIMEOUT_MS });
+    return this.request("get_nav_snapshot", {}, { timeoutMs: 7000 });
   }
 
   async requestSaveWaypointsFile(payload: {
@@ -192,7 +191,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   subscribeRobotStatus(callback: (status: RobotStatus) => void): () => void {
     return this.subscribe("nav_telemetry", (message) => {
       const connected = message.connected === true || message.ok === true;
-      const batteryVoltageV = Number(message.battery_voltage_v);
+      const batteryVoltageV = optionalFiniteNumber(message.battery_voltage_v);
       const batteryUpdatedAgeS = Number(message.battery_updated_age_s);
       const batteryRecoveredVoltageV = Number(message.battery_recovered_voltage_v);
       const batteryLoadedVoltageV = Number(message.battery_loaded_voltage_v);
@@ -200,7 +199,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
         connected,
         mode: String(message.mode ?? (connected ? "connected" : "disconnected")),
         batteryPct: Number(message.battery_pct ?? 0),
-        batteryVoltageV: Number.isFinite(batteryVoltageV) ? batteryVoltageV : null,
+        batteryVoltageV,
         batteryState: String(message.battery_state ?? ""),
         batteryMissionState: String(message.battery_mission_state ?? ""),
         batteryReturnHomeRecommended:

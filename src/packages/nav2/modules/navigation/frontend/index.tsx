@@ -11,11 +11,8 @@ import { SensorInfoService, type SensorInfoTab } from "../service/impl/SensorInf
 import type { RtkSourceDraft, TelemetrySnapshot } from "../../telemetry/service/impl/TelemetryService";
 import { NavigationService, type NavigationState, type SnapshotData } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
-import {
-  getRouteMissionActivityState,
-  getRouteRecoveryPresentation,
-  normalizeRouteMissionStatus
-} from "../routeMissionActivity";
+import { rtkSourceStatus } from "../rtkSourceStatus";
+import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../routeMissionActivity";
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -33,8 +30,6 @@ interface Nav2RuntimeConfig {
   ws_real_port?: unknown;
   ws_sim_host?: unknown;
   ws_sim_port?: unknown;
-  rtk_default_source_id?: unknown;
-  rtk_default_source_label?: unknown;
   manual_linear_speed_min?: unknown;
   manual_linear_speed_max?: unknown;
   manual_linear_speed_default?: unknown;
@@ -161,10 +156,10 @@ function routeTone(
   goalActive = false
 ): "active" | "paused" | "done" | "error" | "idle" {
   const activity = getRouteMissionActivityState(routeMission, goalActive);
-  const recovery = getRouteRecoveryPresentation(routeMission.blockedState);
   if (routeMission.returnHomeActive) return "active";
   if (routeMission.returnHomeRequested) return "paused";
-  if (recovery.active) return recovery.tone;
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
+  if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
   const status = normalizeRouteMissionStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -175,7 +170,10 @@ function routeTone(
 }
 
 function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
-  return getRouteRecoveryPresentation(routeMission.blockedState).title;
+  if (routeMission.blockedState === "BLOCKED_RETRYING") return "Retrying blocked route";
+  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "Operator needed";
+  if (routeMission.blockedState === "BLOCKED_WAITING") return "Route blocked";
+  return "";
 }
 
 function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]): string {
@@ -184,7 +182,7 @@ function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]
   const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
   const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
   const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
-  const waitText = routeMission.blockedState === "WAITING_RETRY" && wait > 0 ? `${Math.ceil(wait)}s` : "";
+  const waitText = routeMission.blockedState === "BLOCKED_WAITING" && wait > 0 ? `${Math.ceil(wait)}s` : "";
   return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
 }
 
@@ -251,7 +249,7 @@ function buildNavigationStatus(
     };
   }
 
-  if (getRouteRecoveryPresentation(routeMission.blockedState).active) {
+  if (routeMission.blockedState) {
     return {
       title: formatBlockedStatusTitle(routeMission) || formatRouteStatus(routeMission.status),
       detail: formatBlockedStatusDetail(routeMission),
@@ -880,7 +878,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     telemetryService ? telemetryService.getSnapshot() : null
   );
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
-  const [navigationProfilePending, setNavigationProfilePending] = useState(false);
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
@@ -945,16 +942,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMissionActivity.running;
-  const navigationProfileLocked =
-    navState.controlLocked ||
-    navigationProfilePending ||
-    missionActive ||
-    routeMission.paused ||
-    patrolMission.active ||
-    patrolMission.phase === "depart_home" ||
-    patrolMission.phase === "return_connector" ||
-    patrolMission.phase === "return_pending" ||
-    patrolMission.phase === "loop_main";
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(
@@ -974,9 +961,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         : "Disconnected";
   useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
   useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
-  useEffect(() => {
-    if (!connState.connected) navService.resetNavigationStartProfile();
-  }, [connState.connected, navService]);
   useEffect(() => {
     if (selectedCount === 0 || navState.controlLocked) {
       setActionMenuOpen(false);
@@ -1083,30 +1067,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       <NavSidebarCollapsibleSection title="MANUAL CONTROL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
-          className={joinClassNames("ncb-wide", "sec-btn", !navState.controlLocked && "active")}
-          disabled={!connState.connected}
-          onClick={async () => {
-            try {
-              if (navState.controlLocked) {
-                await navService.unlockControls();
-                emitInfo("Operator controls unlocked");
-              } else {
-                await navService.lockControls();
-                emitInfo("Operator controls locked");
-              }
-            } catch (error) {
-              emitError(`Control lock update failed: ${String(error)}`);
-            }
-          }}
-        >
-          <ButtonFace
-            icon={<NavGlyph kind="manual" />}
-            label={navState.controlLocked ? "UNLOCK CONTROLS" : "LOCK CONTROLS"}
-            meta={navState.controlLocked ? lockReasonText : "Heartbeat active"}
-          />
-        </button>
-        <button
-          type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
           title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
           disabled={navState.controlLocked}
@@ -1153,47 +1113,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         className="nav-sidebar-actions-section nav-sidebar-automatic-section nav-sidebar-route-section"
         defaultCollapsed={false}
       >
-        <div className="nav-route-subsection nav-navigation-profile-section">
-          <div className="nav-route-subhead">
-            <span>Start / manual costmap</span>
-            <small>{navigationProfileLocked ? "Mission controlled" : "Apply now"}</small>
-          </div>
-          <div className="nav-navigation-profile-switch" role="group" aria-label="Navigation profile">
-            {(["urban", "rural"] as const).map((profile) => (
-              <button
-                key={profile}
-                type="button"
-                className={joinClassNames(
-                  "nav-navigation-profile-option",
-                  navState.navigationStartProfile === profile && "active"
-                )}
-                disabled={navigationProfileLocked}
-                title={
-                  navigationProfileLocked
-                    ? navState.controlLocked
-                      ? lockReasonText
-                      : "Profile changes are controlled by the active mission and its waypoints"
-                    : `Apply ${profile} costmap now and use it to start the next mission`
-                }
-                onClick={async () => {
-                  if (navState.navigationStartProfile === profile) return;
-                  setNavigationProfilePending(true);
-                  try {
-                    await navService.setNavigationStartProfile(profile);
-                    emitInfo(`Navigation profile applied: ${profile}`);
-                  } catch (error) {
-                    emitError(`Navigation profile failed: ${String(error)}`);
-                  } finally {
-                    setNavigationProfilePending(false);
-                  }
-                }}
-              >
-                <span>{profile === "urban" ? "URBAN" : "RURAL"}</span>
-                <small>{profile === "urban" ? "Default margins" : "Narrow dirt road"}</small>
-              </button>
-            ))}
-          </div>
-        </div>
         <div className="nav-route-subsection nav-route-execution">
           <div className="nav-route-subhead">
             <span>Route</span>
@@ -1218,21 +1137,12 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className="ncb-wide cancel-btn"
-            disabled={!(missionActive || patrolMission.active || patrolMission.phase === "depart_home" || patrolMission.phase === "return_connector" || patrolMission.phase === "return_pending" || patrolMission.phase === "loop_main")}
+            disabled={!missionActive}
             onClick={async () => {
               try {
                 if (routeMission.active || routeMission.paused) {
                   await navService.cancelRouteMission();
                   emitInfo("Route mission cancelled");
-                } else if (
-                  patrolMission.active ||
-                  patrolMission.phase === "depart_home" ||
-                  patrolMission.phase === "return_connector" ||
-                  patrolMission.phase === "return_pending" ||
-                  patrolMission.phase === "loop_main"
-                ) {
-                  await navService.cancelPatrolMission();
-                  emitInfo("Patrol mission cancelled");
                 } else {
                   await navService.cancelGoal();
                   emitInfo("Goal cancelled");
@@ -2610,8 +2520,10 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           <div className="panel-card">
             <h4>RTK Source</h4>
             <div className="key-value-grid">
-              <span>Connected</span>
+              <span>NTRIP connected</span>
               <span>{(activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.connected === true ? "yes" : "no"}</span>
+              <span>Valid RTCM</span>
+              <span>{rtkSourceStatus((activeSnapshot.rtk_source_state as Record<string, unknown>) ?? null).receiving ? "yes" : "no"}</span>
               <span>Label</span>
               <span>{String((activeSnapshot.rtk_source_state as Record<string, unknown> | undefined)?.active_source_label ?? "n/a")}</span>
               <span>RTCM age</span>
@@ -2865,6 +2777,10 @@ function registerServices(
   connectionService.subscribe((state) => {
     if (!state.connected) {
       navigationService.applyLocalControlLock(true, "DISCONNECTED");
+      return;
+    }
+    if (state.preset === "sim") {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
     }
   });
   ctx.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
@@ -2900,7 +2816,6 @@ function registerServices(
 
 function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const telemetryService = getTelemetryService(runtime);
-  const nav2Config = readNav2Config(runtime);
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
@@ -2925,38 +2840,19 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 
   const rtkState = (snapshot?.rtkSourceState ?? null) as Record<string, unknown> | null;
   const sources = snapshot?.rtkSources ?? [];
-  const backendActiveId = String(rtkState?.active_source_id ?? "").trim();
-  const backendActiveLabel = String(rtkState?.active_source_label ?? backendActiveId).trim();
-  const gpsStatus = snapshot?.gpsStatus ?? {};
-  const gpsRtkText = String(
-    gpsStatus.label ?? gpsStatus.normalized ?? gpsStatus.raw ?? ""
-  ).trim().toLowerCase();
-  const hasRtkCorrections =
-    gpsStatus.available === true &&
-    (gpsRtkText.includes("rtk") || gpsRtkText.includes("rtcm"));
-  const fallbackId = String(nav2Config.rtk_default_source_id ?? "").trim();
-  const fallbackLabel = String(nav2Config.rtk_default_source_label ?? fallbackId).trim();
-  const usingConfiguredFallback =
-    !backendActiveId &&
-    !backendActiveLabel &&
-    sources.length === 0 &&
-    hasRtkCorrections &&
-    Boolean(fallbackId || fallbackLabel);
-  const activeId = backendActiveId || (usingConfiguredFallback ? fallbackId : "");
-  const activeLabel = backendActiveLabel || (usingConfiguredFallback ? fallbackLabel : "");
-  const connected = rtkState?.connected === true || usingConfiguredFallback;
-  const visibleSources = sources.length > 0
-    ? sources
-    : usingConfiguredFallback
-      ? [{ id: activeId || "configured-rtk", label: activeLabel || activeId }]
-      : [];
-  const statusText = usingConfiguredFallback
-    ? "Correcciones activas · fuente configurada (backend sin identidad)"
-    : connected
-    ? "Correcciones conectadas"
-    : activeId
-      ? "Base seleccionada · esperando correcciones"
-      : "Sin fuente activa";
+  const activeId = String(rtkState?.active_source_id ?? "").trim();
+  const activeLabel = String(rtkState?.active_source_label ?? activeId).trim();
+  const [now, setNow] = useState(Date.now);
+  const sequenceSeenAt = useRef(Date.now());
+  useEffect(() => {
+    sequenceSeenAt.current = Date.now();
+  }, [rtkState?.status_sequence]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const fresh = snapshot?.robotStatus.connected === true && now - sequenceSeenAt.current < 5000;
+  const { receiving, text: statusText } = rtkSourceStatus(rtkState, fresh);
 
   const emit = (level: string, text: string): void => {
     runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
@@ -2993,7 +2889,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
         port: Math.trunc(Number(sourceDraft.port)),
         mountpoint: draftMountpoint,
         username: sourceDraft.username.trim(),
-        password: sourceDraft.password.trim()
+        password: sourceDraft.password
       });
       emit("info", `Antena RTK "${sourceDraft.label.trim() || draftId}" guardada`);
       setSourceDraft({
@@ -3017,16 +2913,17 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   return (
     <div className="rtk-modal">
       <div className="rtk-modal-status">
-        <span className={joinClassNames("rtk-status-dot", connected && "connected")} aria-hidden="true" />
+        <span className={joinClassNames("rtk-status-dot", receiving && "connected")} aria-hidden="true" />
         <div className="rtk-modal-status-copy">
           <strong>Fuente activa: {activeLabel || "—"}</strong>
           <span>{statusText}</span>
+          {rtkState?.last_error ? <span>{String(rtkState.last_error)}</span> : null}
           {activeId ? <code>{activeId}</code> : null}
         </div>
       </div>
-      {visibleSources.length > 0 ? (
+      {sources.length > 0 ? (
         <ul className="rtk-source-list">
-          {visibleSources.map((source) => {
+          {sources.map((source) => {
             const isActive = source.id === activeId;
             const isBusy = busyId === source.id;
             return (
@@ -3034,11 +2931,9 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                 <button
                   type="button"
                   className={joinClassNames("rtk-source-btn", isActive && "active")}
-                  disabled={usingConfiguredFallback || isActive || busyId !== null}
+                  disabled={!fresh || isActive || busyId !== null}
                   title={
-                    usingConfiguredFallback
-                      ? "Fuente configurada localmente; el backend no publica su identidad"
-                      : isActive
+                    isActive
                         ? "Antena activa"
                         : `Cambiar a ${source.label}`
                   }
@@ -3046,7 +2941,7 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
                 >
                   <span className="rtk-source-label">{source.label}</span>
                   <span className="rtk-source-tag">
-                    {usingConfiguredFallback ? "Configurada" : isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
+                    {isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
                   </span>
                 </button>
               </li>

@@ -16,9 +16,6 @@ describe("navigation sidebar", () => {
 
     expect(screen.getByText("MANUAL CONTROL")).toBeInTheDocument();
     expect(screen.getByText("AUTOMATIC ROUTE")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Navigation profile" })).toBeInTheDocument();
-    expect(screen.getByText("URBAN")).toBeInTheDocument();
-    expect(screen.getByText("RURAL")).toBeInTheDocument();
     expect(screen.getByText("WAYPOINTS")).toBeInTheDocument();
     expect(screen.getByText("Route")).toBeInTheDocument();
     expect(screen.getByText("Waypoints")).toBeInTheDocument();
