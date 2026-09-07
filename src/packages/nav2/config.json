@@ -7,6 +7,7 @@
     "camera_transport": "webrtc",
     "camera_mjpeg_url": "http://localhost:8089/stream.mjpg",
     "camera_webrtc_url": "http://100.66.15.45:8889/cam3/whep",
+    "camera_ptz_rotation_deg": 180,
     "camera_probe_timeout_ms": 3000,
     "camera_load_timeout_ms": 7000,
     "map_default_center_lat": -31.4201,
@@ -64,6 +65,12 @@
         "label": "Camera WebRTC WHEP URL",
         "type": "string",
         "placeholder": "http://100.66.15.45:8889/cam3/whep"
+      },
+      {
+        "key": "camera_ptz_rotation_deg",
+        "label": "Camera PTZ Rotation (deg)",
+        "type": "number",
+        "placeholder": "0 | 180"
       },
       {
         "key": "camera_probe_timeout_ms",
