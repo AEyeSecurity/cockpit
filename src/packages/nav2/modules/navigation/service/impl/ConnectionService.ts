@@ -25,6 +25,15 @@ export interface ConnectionPresetDefaults {
   sim: { host: string; port: string };
 }
 
+export function buildConnectionWebSocketUrl(host: string, port: string, clientProfile = ""): string {
+  const base = `ws://${host}:${port}`;
+  const profile = clientProfile.trim();
+  if (!profile) return base;
+  const url = new URL(base);
+  url.searchParams.set("client", profile);
+  return url.toString();
+}
+
 function getStorageAdapter(): {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
@@ -59,6 +68,7 @@ export class ConnectionService {
   private readonly listeners = new Set<ConnectionListener>();
   private presetValues: Record<ConnectionPreset, { host: string; port: string }>;
   private initialPreset: ConnectionPreset = "real";
+  private clientProfile = "";
   private state: ConnectionState;
 
   constructor(
@@ -117,6 +127,10 @@ export class ConnectionService {
 
   getState(): ConnectionState {
     return { ...this.state };
+  }
+
+  setClientProfile(profile: string): void {
+    this.clientProfile = profile.trim();
   }
 
   subscribe(listener: ConnectionListener): () => void {
@@ -190,7 +204,7 @@ export class ConnectionService {
         throw new Error("Port must be an integer between 1 and 65535");
       }
 
-      this.env.wsUrl = `ws://${host}:${port}`;
+      this.env.wsUrl = buildConnectionWebSocketUrl(host, port, this.clientProfile);
       await this.transportManager.disconnectTransport(this.transportId);
       await this.transportManager.connectTransport(this.transportId, { env: this.env });
       this.state = {

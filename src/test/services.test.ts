@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MapService } from "../packages/nav2/modules/map/service/impl/MapService";
 import { MissionService } from "../packages/nav2/modules/debug/service/impl/MissionService";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
-import { ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
+import { buildConnectionWebSocketUrl, ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
 import type { Nav2IncomingMessage } from "../packages/nav2/protocol/messages";
 
 function installStorageMock(seed: Record<string, string> = {}): void {
@@ -20,6 +20,10 @@ function installStorageMock(seed: Record<string, string> = {}): void {
 }
 
 describe("services", () => {
+  it("keeps normal WebSocket URLs unchanged and appends nav-live explicitly", () => {
+    expect(buildConnectionWebSocketUrl("robot", "8766")).toBe("ws://robot:8766");
+    expect(buildConnectionWebSocketUrl("robot", "8766", "nav-live")).toBe("ws://robot:8766/?client=nav-live");
+  });
   it("uses config defaults for ConnectionService when localStorage is empty", () => {
     installStorageMock();
     const transportManager = {
