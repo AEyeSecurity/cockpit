@@ -106,6 +106,7 @@ export function NavLiveWindow({ runtime }: NavLiveWindowProps): JSX.Element {
 
   useEffect(() => {
     document.title = "Cockpit Nav Live";
+    connectionService.setClientProfile("nav-live");
   }, []);
 
   useEffect(() => {

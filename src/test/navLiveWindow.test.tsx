@@ -46,6 +46,7 @@ function createRuntime(requestSnapshot: ReturnType<typeof vi.fn>): AppRuntime {
     setPreset: vi.fn(),
     setHost: vi.fn(),
     setPort: vi.fn(),
+    setClientProfile: vi.fn(),
     connect: vi.fn(() => Promise.resolve())
   };
   const navigation = {
@@ -119,5 +120,14 @@ describe("NavLiveWindow", () => {
     });
     expect(screen.getByText(/Trying simulation localhost:8766/)).toBeInTheDocument();
     expect(screen.getByAltText("Nav2 live snapshot")).toHaveAttribute("src", "data:image/png;base64,AAA");
+  });
+
+  it("marks its separate connection as nav-live without acquiring control", () => {
+    const requestSnapshot = vi.fn().mockResolvedValue(createSnapshot("AAA"));
+    const runtime = createRuntime(requestSnapshot);
+    render(<NavLiveWindow runtime={runtime} />);
+
+    const connection = runtime.getService<{ setClientProfile: ReturnType<typeof vi.fn> }>("service.connection");
+    expect(connection.setClientProfile).toHaveBeenCalledWith("nav-live");
   });
 });
