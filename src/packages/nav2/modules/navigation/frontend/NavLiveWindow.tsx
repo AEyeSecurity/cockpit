@@ -156,17 +156,52 @@ export function NavLiveWindow({ runtime }: NavLiveWindowProps): JSX.Element {
   }, [connectionService, navigationService, trySimFallback]);
 
   useEffect(() => {
-    void requestFrame();
-    const timer = window.setInterval(() => {
-      void requestFrame();
-    }, NAV_LIVE_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [requestFrame]);
+    let snapshotTimer: number | null = null;
+    let ageTimer: number | null = null;
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    const stopTimers = (): void => {
+      if (snapshotTimer !== null) {
+        window.clearInterval(snapshotTimer);
+        snapshotTimer = null;
+      }
+      if (ageTimer !== null) {
+        window.clearInterval(ageTimer);
+        ageTimer = null;
+      }
+    };
+
+    const startTimers = (): void => {
+      if (document.visibilityState !== "visible") return;
+      if (snapshotTimer === null) {
+        void requestFrame();
+        snapshotTimer = window.setInterval(() => {
+          void requestFrame();
+        }, NAV_LIVE_REFRESH_MS);
+      }
+      if (ageTimer === null) {
+        setNowMs(Date.now());
+        ageTimer = window.setInterval(() => setNowMs(Date.now()), 1000);
+      }
+    };
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        startTimers();
+      } else {
+        stopTimers();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    if (document.visibilityState === "visible") {
+      startTimers();
+    }
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stopTimers();
+    };
+  }, [requestFrame]);
 
   const activeLayers = useMemo(() => frame?.snapshot.layers ?? {}, [frame]);
   const imageSrc = frame?.snapshot.imageBase64
