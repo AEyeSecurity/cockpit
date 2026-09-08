@@ -1,11 +1,18 @@
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppRuntime } from "../core/types/module";
 import {
   NAV_LIVE_REFRESH_MS,
   NavLiveWindow
 } from "../packages/nav2/modules/navigation/frontend/NavLiveWindow";
 import type { SnapshotData } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
+
+function setVisibilityState(state: "visible" | "hidden"): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+}
 
 function createSnapshot(imageBase64: string): SnapshotData {
   return {
@@ -78,11 +85,16 @@ function createRuntime(requestSnapshot: ReturnType<typeof vi.fn>): AppRuntime {
 }
 
 describe("NavLiveWindow", () => {
+  beforeEach(() => {
+    setVisibilityState("visible");
+  });
+
   afterEach(() => {
+    setVisibilityState("visible");
     vi.useRealTimers();
   });
 
-  it("refreshes every second without overlapping requests and keeps the last valid frame on error", async () => {
+  it("requests at 1 Hz while visible without overlapping requests", async () => {
     vi.useFakeTimers();
     const pending: Array<{
       resolve: (snapshot: SnapshotData) => void;
@@ -120,6 +132,90 @@ describe("NavLiveWindow", () => {
     });
     expect(screen.getByText(/Trying simulation localhost:8766/)).toBeInTheDocument();
     expect(screen.getByAltText("Nav2 live snapshot")).toHaveAttribute("src", "data:image/png;base64,AAA");
+  });
+
+  it("stops requesting snapshots while hidden", async () => {
+    vi.useFakeTimers();
+    const requestSnapshot = vi.fn().mockResolvedValue(createSnapshot("AAA"));
+
+    render(<NavLiveWindow runtime={createRuntime(requestSnapshot)} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(1);
+
+    setVisibilityState("hidden");
+    await act(async () => {
+      vi.advanceTimersByTime(NAV_LIVE_REFRESH_MS * 3);
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests immediately when visible again and resumes at 1 Hz", async () => {
+    vi.useFakeTimers();
+    const requestSnapshot = vi.fn().mockResolvedValue(createSnapshot("AAA"));
+
+    render(<NavLiveWindow runtime={createRuntime(requestSnapshot)} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    setVisibilityState("hidden");
+    await act(async () => {
+      vi.advanceTimersByTime(NAV_LIVE_REFRESH_MS * 2);
+    });
+
+    setVisibilityState("visible");
+    expect(requestSnapshot).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(NAV_LIVE_REFRESH_MS - 1);
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not duplicate timers or requests across repeated visibility changes", async () => {
+    vi.useFakeTimers();
+    const requestSnapshot = vi.fn().mockResolvedValue(createSnapshot("AAA"));
+
+    render(<NavLiveWindow runtime={createRuntime(requestSnapshot)} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    setVisibilityState("hidden");
+    setVisibilityState("visible");
+    setVisibilityState("visible");
+    setVisibilityState("hidden");
+    setVisibilityState("visible");
+    expect(requestSnapshot).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(NAV_LIVE_REFRESH_MS);
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it("removes visibility listeners and timers on unmount", async () => {
+    vi.useFakeTimers();
+    const requestSnapshot = vi.fn().mockResolvedValue(createSnapshot("AAA"));
+    const { unmount } = render(<NavLiveWindow runtime={createRuntime(requestSnapshot)} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(vi.getTimerCount()).toBe(2);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    setVisibilityState("hidden");
+    setVisibilityState("visible");
+    await act(async () => {
+      vi.advanceTimersByTime(NAV_LIVE_REFRESH_MS);
+    });
+    expect(requestSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it("marks its separate connection as nav-live without acquiring control", () => {
