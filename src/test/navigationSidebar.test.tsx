@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
 
@@ -48,6 +48,42 @@ describe("navigation sidebar", () => {
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     expect(navigationService.getState().manualLinearSpeed).toBe(2.4);
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
+  });
+
+  it("restores the connected operator control-lock toggle", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connectionService = runtime.services.getService<{
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    act(() => {
+      connectionService.applyTransportStatus({ connected: true, intentional: false, reason: "" });
+    });
+
+    const unlock = vi.spyOn(navigationService, "unlockControls").mockImplementation(async () => {
+      navigationService.applyLocalControlLock(false, "unlocked");
+    });
+    const lock = vi.spyOn(navigationService, "lockControls").mockImplementation(async () => {
+      navigationService.applyLocalControlLock(true, "locked");
+    });
+
+    const unlockButton = screen.getByText("UNLOCK CONTROLS").closest("button");
+    expect(unlockButton).not.toBeNull();
+    expect(unlockButton).toBeEnabled();
+    fireEvent.click(unlockButton as HTMLButtonElement);
+    await waitFor(() => expect(unlock).toHaveBeenCalledOnce());
+
+    const lockButton = screen.getByText("LOCK CONTROLS").closest("button");
+    expect(lockButton).not.toBeNull();
+    fireEvent.click(lockButton as HTMLButtonElement);
+    await waitFor(() => expect(lock).toHaveBeenCalledOnce());
   });
 
   it("shows HOME, patrol, and action tools together with correct enablement", async () => {
