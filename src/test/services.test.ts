@@ -463,6 +463,34 @@ describe("services", () => {
     );
   });
 
+  it("derives route-mission yaw from the route when waypoints are automatic", async () => {
+    const dispatcher = {
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 5
+      }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.setLoopRoute(false);
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.queueWaypoint({ x: 5, y: 6 });
+
+    await service.sendRouteMission();
+
+    const payload = (
+      dispatcher.requestRouteMission.mock.calls as unknown as Array<[
+        { waypoints: Array<{ yaw_deg?: number }> }
+      ]>
+    )[0][0];
+    expect(payload.waypoints).toHaveLength(2);
+    expect(payload.waypoints[0].yaw_deg).toBeCloseTo(45, 0);
+    expect(payload.waypoints[1].yaw_deg).toBeCloseTo(45, 0);
+  });
+
   it("serializes rural and urban navigation profile waypoint actions", async () => {
     const dispatcher = {
       requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
@@ -475,8 +503,8 @@ describe("services", () => {
     };
     const service = new NavigationService(dispatcher as never);
     await service.unlockControls();
-    service.queueWaypoint({ x: 3, y: 4 });
-    service.queueWaypoint({ x: 5, y: 6 });
+    service.queueWaypoint({ x: 3, y: 4, yawDeg: 0 });
+    service.queueWaypoint({ x: 5, y: 6, yawDeg: 5 });
     service.toggleWaypointSelection(0);
     service.setNavigationProfileActionForSelected("rural");
     service.clearWaypointSelection();
@@ -488,8 +516,8 @@ describe("services", () => {
     expect(dispatcher.requestRouteMission).toHaveBeenCalledWith(
       expect.objectContaining({
         waypoints: [
-          { lat: 3, lon: 4, actions: [{ type: "set_navigation_profile", profile: "rural" }] },
-          { lat: 5, lon: 6, actions: [{ type: "set_navigation_profile", profile: "urban" }] }
+          { lat: 3, lon: 4, yaw_deg: 0, actions: [{ type: "set_navigation_profile", profile: "rural" }] },
+          { lat: 5, lon: 6, yaw_deg: 5, actions: [{ type: "set_navigation_profile", profile: "urban" }] }
         ]
       })
     );
