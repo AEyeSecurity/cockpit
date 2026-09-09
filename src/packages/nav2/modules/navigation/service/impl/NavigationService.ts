@@ -793,7 +793,7 @@ function bearingYawDeg(from: GoalInput, to: GoalInput): number {
   return Math.atan2(north, east) * 180 / Math.PI;
 }
 
-function patrolWaypointsToWire(inputs: GoalInput[], loop: boolean): ReturnType<typeof goalToWireWaypoint>[] {
+function missionWaypointsToWire(inputs: GoalInput[], loop: boolean): ReturnType<typeof goalToWireWaypoint>[] {
   return inputs.map((input, index) => {
     const waypoint = goalToWireWaypoint(input);
     if (waypoint.yaw_deg !== undefined) return waypoint;
@@ -1993,7 +1993,7 @@ export class NavigationService {
     }
 
     const payload: Record<string, unknown> = {
-      waypoints: queued.map((entry) => goalToWireWaypoint(entry)),
+      waypoints: missionWaypointsToWire(queued, this.state.loopRoute),
       loop: this.state.loopRoute
     };
     if (options?.legSpacingM !== undefined) payload.leg_spacing_m = Number(options.legSpacingM);
@@ -2217,7 +2217,7 @@ export class NavigationService {
 
     const payload: Record<string, unknown> = {
       patrol_mission: {
-        loop_waypoints: patrolWaypointsToWire(reconciledProfile.loopWaypoints, true),
+        loop_waypoints: missionWaypointsToWire(reconciledProfile.loopWaypoints, true),
         home_waypoint: {
           ...goalToWireWaypoint(reconciledProfile.homeWaypoint),
           yaw_deg: hasExplicitYaw(reconciledProfile.homeWaypoint)
@@ -2229,8 +2229,8 @@ export class NavigationService {
                   reconciledProfile.loopWaypoints[0]
               )
         },
-        return_waypoints: patrolWaypointsToWire(reconciledProfile.returnWaypoints, false),
-        depart_waypoints: patrolWaypointsToWire(reconciledProfile.departWaypoints, false),
+        return_waypoints: missionWaypointsToWire(reconciledProfile.returnWaypoints, false),
+        depart_waypoints: missionWaypointsToWire(reconciledProfile.departWaypoints, false),
         depart_entry_loop_index: reconciledProfile.departEntryLoopIndex
       }
     };
