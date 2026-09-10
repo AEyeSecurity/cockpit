@@ -463,7 +463,7 @@ describe("services", () => {
     );
   });
 
-  it("derives route-mission yaw from the route when waypoints are automatic", async () => {
+  it("preserves automatic route-mission yaw for the route executor", async () => {
     const dispatcher = {
       requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
         op: "ack",
@@ -487,8 +487,8 @@ describe("services", () => {
       ]>
     )[0][0];
     expect(payload.waypoints).toHaveLength(2);
-    expect(payload.waypoints[0].yaw_deg).toBeCloseTo(45, 0);
-    expect(payload.waypoints[1].yaw_deg).toBeCloseTo(45, 0);
+    expect(payload.waypoints[0].yaw_deg).toBeUndefined();
+    expect(payload.waypoints[1].yaw_deg).toBeUndefined();
   });
 
   it("serializes rural and urban navigation profile waypoint actions", async () => {
@@ -666,7 +666,7 @@ describe("services", () => {
     expect(profile.departEntryLoopIndex).toBe(-1);
   });
 
-  it("resolves auto yaw before dispatching a structured patrol", async () => {
+  it("preserves automatic loop yaw for the structured patrol executor", async () => {
     const dispatcher = {
       requestControlLock: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
       requestNavigationProfile: vi.fn().mockResolvedValue({
@@ -704,7 +704,7 @@ describe("services", () => {
       };
     };
     expect(payload.patrol_mission.loop_waypoints).toHaveLength(3);
-    expect(payload.patrol_mission.loop_waypoints.every((waypoint) => Number.isFinite(waypoint.yaw_deg))).toBe(true);
+    expect(payload.patrol_mission.loop_waypoints.every((waypoint) => waypoint.yaw_deg === undefined)).toBe(true);
     expect(Number.isFinite(payload.patrol_mission.home_waypoint.yaw_deg)).toBe(true);
     expect(service.getState().patrolMission).toMatchObject({
       active: true,

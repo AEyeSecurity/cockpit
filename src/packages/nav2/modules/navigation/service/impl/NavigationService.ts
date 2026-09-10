@@ -793,19 +793,11 @@ function bearingYawDeg(from: GoalInput, to: GoalInput): number {
   return Math.atan2(north, east) * 180 / Math.PI;
 }
 
-function missionWaypointsToWire(inputs: GoalInput[], loop: boolean): ReturnType<typeof goalToWireWaypoint>[] {
-  return inputs.map((input, index) => {
-    const waypoint = goalToWireWaypoint(input);
-    if (waypoint.yaw_deg !== undefined) return waypoint;
-    const next = inputs[index + 1] ?? (loop ? inputs[0] : undefined);
-    const previous = inputs[index - 1];
-    waypoint.yaw_deg = next
-      ? bearingYawDeg(input, next)
-      : previous
-        ? bearingYawDeg(previous, input)
-        : 0;
-    return waypoint;
-  });
+function missionWaypointsToWire(inputs: GoalInput[], _loop: boolean): ReturnType<typeof goalToWireWaypoint>[] {
+  // Omit an automatic yaw. The route executor resolves it after converting
+  // the entire mission to map coordinates and can distinguish it from an
+  // orientation explicitly chosen by the operator at a finite chunk boundary.
+  return inputs.map((input) => goalToWireWaypoint(input));
 }
 
 function goalToWireNavGoal(input: GoalInput): { lat: number; lon: number; yaw_deg?: number } {
