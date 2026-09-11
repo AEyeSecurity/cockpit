@@ -2801,10 +2801,6 @@ function registerServices(
   connectionService.subscribe((state) => {
     if (!state.connected) {
       navigationService.applyLocalControlLock(true, "DISCONNECTED");
-      return;
-    }
-    if (state.preset === "sim") {
-      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
     }
   });
   ctx.eventBus.on<{ packageId?: unknown; config?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {

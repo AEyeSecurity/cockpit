@@ -86,6 +86,30 @@ describe("navigation sidebar", () => {
     await waitFor(() => expect(lock).toHaveBeenCalledOnce());
   });
 
+  it("keeps the simulation controls locked until the simulation backend grants the lease", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
+      throw new Error("Navigation sidebar contribution not registered");
+    }
+
+    render(<>{navigationSidebar.render()}</>);
+
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connectionService = runtime.services.getService<{
+      setPreset: (preset: "real" | "sim") => void;
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    act(() => {
+      connectionService.setPreset("sim");
+      connectionService.applyTransportStatus({ connected: true, intentional: false, reason: "" });
+    });
+
+    expect(navigationService.getState().controlLocked).toBe(true);
+    expect(screen.getByText("UNLOCK CONTROLS").closest("button")).toBeEnabled();
+    expect(screen.getByText("MANUAL").closest("button")).toBeDisabled();
+  });
+
   it("shows HOME, patrol, and action tools together with correct enablement", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
