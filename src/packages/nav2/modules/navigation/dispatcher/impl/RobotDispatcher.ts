@@ -60,7 +60,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
   }
 
   async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
-    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 5000 });
+    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 7000 });
   }
 
   async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<Nav2IncomingMessage> {
