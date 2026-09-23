@@ -878,6 +878,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     telemetryService ? telemetryService.getSnapshot() : null
   );
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [navigationProfilePending, setNavigationProfilePending] = useState(false);
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
@@ -942,6 +943,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
   const routeMissionRunning = routeMissionActivity.running;
+  const navigationProfileLocked =
+    navState.controlLocked ||
+    navigationProfilePending ||
+    missionActive ||
+    routeMission.paused ||
+    patrolMission.active ||
+    patrolMission.phase === "depart_home" ||
+    patrolMission.phase === "return_connector" ||
+    patrolMission.phase === "return_pending" ||
+    patrolMission.phase === "loop_main";
   const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(
@@ -1137,6 +1148,46 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         className="nav-sidebar-actions-section nav-sidebar-automatic-section nav-sidebar-route-section"
         defaultCollapsed={false}
       >
+        <div className="nav-route-subsection nav-navigation-profile-section">
+          <div className="nav-route-subhead">
+            <span>Navigation profile</span>
+            <small>{navigationProfileLocked ? "Mission controlled" : "Apply now"}</small>
+          </div>
+          <div className="nav-navigation-profile-switch" role="group" aria-label="Navigation profile">
+            {(["urban", "rural"] as const).map((profile) => (
+              <button
+                key={profile}
+                type="button"
+                className={joinClassNames(
+                  "nav-navigation-profile-option",
+                  navState.navigationStartProfile === profile && "active"
+                )}
+                disabled={navigationProfileLocked}
+                title={
+                  navigationProfileLocked
+                    ? navState.controlLocked
+                      ? lockReasonText
+                      : "Profile changes are controlled by the active mission"
+                    : `Apply ${profile} profile now and use it for the next mission`
+                }
+                onClick={async () => {
+                  setNavigationProfilePending(true);
+                  try {
+                    await navService.setNavigationStartProfile(profile);
+                    emitInfo(`Navigation profile applied: ${profile}`);
+                  } catch (error) {
+                    emitError(`Navigation profile failed: ${String(error)}`);
+                  } finally {
+                    setNavigationProfilePending(false);
+                  }
+                }}
+              >
+                <span>{profile === "urban" ? "URBAN" : "RURAL"}</span>
+                <small>{profile === "urban" ? "Default margins" : "Narrow dirt road"}</small>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="nav-route-subsection nav-route-execution">
           <div className="nav-route-subhead">
             <span>Route</span>

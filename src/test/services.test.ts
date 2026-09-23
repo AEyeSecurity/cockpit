@@ -20,6 +20,27 @@ function installStorageMock(seed: Record<string, string> = {}): void {
 }
 
 describe("services", () => {
+  it("applies the selected navigation profile before starting a route", async () => {
+    const dispatcher = {
+      requestNavigationProfile: vi.fn().mockResolvedValue({ op: "ack", ok: true, active_profile: "rural" }),
+      requestRouteMission: vi.fn().mockResolvedValue({
+        op: "ack", ok: true, input_waypoint_count: 2, expanded_waypoint_count: 2
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    service.applyLocalControlLock(false, "unlocked");
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+
+    await service.setNavigationStartProfile("rural");
+    await service.sendRouteMission();
+
+    expect(dispatcher.requestNavigationProfile).toHaveBeenNthCalledWith(1, "rural");
+    expect(dispatcher.requestNavigationProfile).toHaveBeenNthCalledWith(2, "rural");
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledOnce();
+    expect(service.getState().navigationStartProfile).toBe("rural");
+  });
+
   it("keeps normal WebSocket URLs unchanged and appends nav-live explicitly", () => {
     expect(buildConnectionWebSocketUrl("robot", "8766")).toBe("ws://robot:8766");
     expect(buildConnectionWebSocketUrl("robot", "8766", "nav-live")).toBe("ws://robot:8766/?client=nav-live");
@@ -424,6 +445,7 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 5
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
       requestCancelGoal: vi.fn(),
       requestCancelRouteMission: vi.fn(),
       requestManualMode: vi.fn(),
@@ -471,6 +493,7 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 5
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
       requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
     };
     const service = new NavigationService(dispatcher as never);
@@ -499,6 +522,7 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 2
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
       requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
     };
     const service = new NavigationService(dispatcher as never);
