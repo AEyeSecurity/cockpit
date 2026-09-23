@@ -59,6 +59,10 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_manual_mode", { enabled } as never, { timeoutMs: 5000 });
   }
 
+  async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
+    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 5000 });
+  }
+
   async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<Nav2IncomingMessage> {
     // Legacy backend contract expects snake_case controls at top level.
     return this.request(

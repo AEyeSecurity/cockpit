@@ -27,6 +27,7 @@ export interface NavigationProfileWaypointAction {
 }
 
 export type WaypointAction = BrakeHoldWaypointAction | NavigationProfileWaypointAction;
+export type NavigationProfile = "urban" | "rural";
 
 export interface RouteMissionWaypoint extends GoalInput {}
 
@@ -176,6 +177,7 @@ export interface NavigationState {
   patrolMission: PatrolMissionStateData;
   selectedWaypointIndexes: number[];
   waypointSelectionMode: boolean;
+  navigationStartProfile: NavigationProfile;
   loopRoute: boolean;
   routeMission: RouteMissionStateData;
   goalMode: boolean;
@@ -1085,6 +1087,7 @@ export class NavigationService {
     patrolMission: createDefaultPatrolMissionState(),
     selectedWaypointIndexes: [],
     waypointSelectionMode: false,
+    navigationStartProfile: "urban",
     loopRoute: true,
     routeMission: createDefaultRouteMission(),
     goalMode: false,
@@ -1422,6 +1425,16 @@ export class NavigationService {
       selectedWaypointIndexes: []
     };
     this.emit();
+  }
+
+  async setNavigationStartProfile(profile: NavigationProfile): Promise<void> {
+    if (this.state.controlLocked) {
+      throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
+    }
+    if (this.isNavigationMissionActive()) {
+      throw new Error("Navigation profile cannot be changed while a mission is active");
+    }
+    await this.applyNavigationProfile(profile, "Navigation profile applied");
   }
 
   removeSelectedWaypoints(): number {
@@ -1984,6 +1997,11 @@ export class NavigationService {
       throw new Error("No waypoint queued");
     }
 
+    await this.applyNavigationProfile(
+      this.state.navigationStartProfile,
+      "Navigation start profile applied"
+    );
+
     const payload: Record<string, unknown> = {
       waypoints: missionWaypointsToWire(queued, this.state.loopRoute),
       loop: this.state.loopRoute
@@ -2206,6 +2224,11 @@ export class NavigationService {
     if (!reconciledProfile.homeWaypoint) {
       throw new Error("Patrol HOME waypoint is missing");
     }
+
+    await this.applyNavigationProfile(
+      this.state.navigationStartProfile,
+      "Navigation start profile applied"
+    );
 
     const payload: Record<string, unknown> = {
       patrol_mission: {
@@ -2836,6 +2859,33 @@ export class NavigationService {
       ...this.state,
       patrolMission,
       lastStatus: patrolMission.status.trim() || this.state.lastStatus
+    };
+    this.emit();
+  }
+
+  private isNavigationMissionActive(): boolean {
+    return (
+      this.state.routeMission.active ||
+      this.state.routeMission.paused ||
+      this.state.patrolMission.active ||
+      this.state.patrolMission.phase === "depart_home" ||
+      this.state.patrolMission.phase === "return_connector" ||
+      this.state.patrolMission.phase === "return_pending" ||
+      this.state.patrolMission.phase === "loop_main"
+    );
+  }
+
+  private async applyNavigationProfile(profile: NavigationProfile, status: string): Promise<void> {
+    const response = await this.robotDispatcher.requestNavigationProfile(profile);
+    if (response.ok === false) {
+      throw new Error(String(response.error ?? "Navigation profile change failed"));
+    }
+    const activeProfile = String(response.active_profile ?? profile).trim().toLowerCase();
+    const resolvedProfile: NavigationProfile = activeProfile === "rural" ? "rural" : "urban";
+    this.state = {
+      ...this.state,
+      navigationStartProfile: resolvedProfile,
+      lastStatus: `${status}: ${resolvedProfile}`
     };
     this.emit();
   }
