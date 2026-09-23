@@ -1215,13 +1215,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             disabled={!missionActive}
             onClick={async () => {
               try {
-                if (routeMission.active || routeMission.paused) {
-                  await navService.cancelRouteMission();
-                  emitInfo("Route mission cancelled");
-                } else {
-                  await navService.cancelGoal();
-                  emitInfo("Goal cancelled");
-                }
+                // Route state arrives asynchronously from the backend.  Do not
+                // let a stale local idle snapshot downgrade this Route-panel
+                // cancel into a bare Nav2 cancellation: that would leave the
+                // route executor paused and block profile changes/new routes.
+                // The structured service also cancels a direct Nav2 goal when
+                // no route mission exists.
+                await navService.cancelRouteMission();
+                emitInfo("Route mission cancelled");
               } catch (error) {
                 emitError(`Cancel failed: ${String(error)}`);
               }
