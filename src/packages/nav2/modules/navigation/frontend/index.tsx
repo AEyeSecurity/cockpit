@@ -158,8 +158,8 @@ function routeTone(
   const activity = getRouteMissionActivityState(routeMission, goalActive);
   if (routeMission.returnHomeActive) return "active";
   if (routeMission.returnHomeRequested) return "paused";
-  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "error";
-  if (routeMission.blockedState === "BLOCKED_WAITING" || routeMission.blockedState === "BLOCKED_RETRYING") return "paused";
+  if (routeMission.blockedState === "NEEDS_OPERATOR") return "error";
+  if (["PENDING", "WAITING_DATA", "WAITING_RETRY", "RECOVERING"].includes(routeMission.blockedState)) return "paused";
   const status = normalizeRouteMissionStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -170,9 +170,9 @@ function routeTone(
 }
 
 function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
-  if (routeMission.blockedState === "BLOCKED_RETRYING") return "Retrying blocked route";
-  if (routeMission.blockedState === "BLOCKED_NEEDS_OPERATOR") return "Operator needed";
-  if (routeMission.blockedState === "BLOCKED_WAITING") return "Route blocked";
+  if (routeMission.blockedState === "RECOVERING") return "Reintentando la ruta";
+  if (routeMission.blockedState === "NEEDS_OPERATOR") return "Se necesita intervención";
+  if (["PENDING", "WAITING_DATA", "WAITING_RETRY"].includes(routeMission.blockedState)) return "Camino bloqueado";
   return "";
 }
 
@@ -182,7 +182,7 @@ function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]
   const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
   const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
   const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
-  const waitText = routeMission.blockedState === "BLOCKED_WAITING" && wait > 0 ? `${Math.ceil(wait)}s` : "";
+  const waitText = routeMission.blockedState === "WAITING_RETRY" && wait > 0 ? `${Math.ceil(wait)}s` : "";
   return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
 }
 
@@ -879,6 +879,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   );
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [navigationProfilePending, setNavigationProfilePending] = useState(false);
+  const [routeStartPending, setRouteStartPending] = useState(false);
+  const [routeStartError, setRouteStartError] = useState("");
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
@@ -929,7 +931,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     ? patrolReadiness.summary
     : `Missing: ${patrolReadiness.missingRequirements.join(", ")}`;
   const routeStartBlockedByPatrol = patrolProfileConfigured;
-  const routeStartDisabled = wps < 2 || navState.controlLocked || routeStartBlockedByPatrol;
+  const routeStartDisabled = wps < 2 || navState.controlLocked || routeStartBlockedByPatrol || routeStartPending;
   const routeStartMeta = wps < 2
     ? "Needs 2+ waypoints"
     : routeStartBlockedByPatrol
@@ -1199,16 +1201,24 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             disabled={routeStartDisabled}
             title={routeStartTitle}
             onClick={async () => {
+              if (routeStartPending) return;
+              setRouteStartPending(true);
+              setRouteStartError("");
               try {
                 const started = await navService.sendRouteMission();
                 emitInfo(`Route mission started (${started.inputCount} wps, ${started.expandedCount} pts)`);
               } catch (error) {
-                emitError(`Route mission failed: ${String(error)}`);
+                const message = `No se pudo iniciar la ruta: ${String(error)}`;
+                setRouteStartError(message);
+                emitError(message);
+              } finally {
+                setRouteStartPending(false);
               }
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={routeStartMeta} />
+            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={routeStartPending ? "Starting..." : routeStartMeta} />
           </button>
+          {routeStartError ? <p className="ps-status-error" role="alert">{routeStartError}</p> : null}
           <button
             type="button"
             className="ncb-wide cancel-btn"

@@ -1075,6 +1075,8 @@ function extractPatrolLoopUpdate(message: Record<string, unknown>): Partial<Patr
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatCount = 0;
+  private missionRefreshPending = false;
   private manualLoopTimer: ReturnType<typeof setInterval> | null = null;
   private manualLoopIntervalMs: number;
   private manualLinearMin = DEFAULT_MANUAL_LINEAR_MIN;
@@ -1920,6 +1922,18 @@ export class NavigationService {
     if (this.heartbeatTimer) return;
     this.heartbeatTimer = setInterval(() => {
       void this.robotDispatcher.requestControlHeartbeat().catch(() => undefined);
+      // Route recovery is only returned by get_state, not the compact
+      // telemetry stream. Refresh it so a terminal block reaches Cockpit.
+      this.heartbeatCount += 1;
+      if (this.heartbeatCount % 3 === 0 && !this.missionRefreshPending) {
+        const refresh = this.robotDispatcher.requestState?.();
+        if (refresh) {
+          this.missionRefreshPending = true;
+          void refresh.catch(() => undefined).finally(() => {
+            this.missionRefreshPending = false;
+          });
+        }
+      }
     }, Math.max(300, intervalMs));
   }
 

@@ -1232,6 +1232,23 @@ describe("services", () => {
     }
   });
 
+  it("refreshes mission state while the connection stays open", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispatcher = {
+        requestControlHeartbeat: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
+        requestState: vi.fn().mockResolvedValue({ op: "state", ok: true })
+      };
+      const service = new NavigationService(dispatcher as never);
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      expect(dispatcher.requestState).toHaveBeenCalledOnce();
+      service.stopControlHeartbeat();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("updates lock state from ack payloads", () => {
     const subscribers: {
       ack?: (message: Record<string, unknown>) => void;
