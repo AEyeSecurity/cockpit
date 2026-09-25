@@ -69,6 +69,16 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
       reportError(error);
     }
   };
+  const selectAreaOnMap = async (): Promise<void> => {
+    setMessage("");
+    try {
+      if (state.goalMode) await navigation.setGoalMode(false);
+      navigation.setWaypointSelectionMode(true);
+      runtime.commands.execute(ShellCommands.openWorkspace, MAP_WORKSPACE_ID);
+    } catch (error) {
+      reportError(error);
+    }
+  };
   const confirmDiscard = async (action: string): Promise<boolean> => {
     if (!state.routeEditor.dirty) return true;
     return dialogs.confirm({
@@ -139,6 +149,13 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
       reportError(error);
     }
   };
+  const addPauseToSelection = async (): Promise<void> => {
+    const value = await dialogs.prompt({ title: "Pausa en los puntos", message: "Segundos que debe esperar el robot en cada punto seleccionado:", defaultValue: "5", confirmLabel: "Aplicar" });
+    if (value === null) return;
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) { setMessage("Escribe una duración entre 0 y 600 segundos."); return; }
+    withError(() => navigation.setBrakeHoldActionForSelected(true, seconds), `Pausa de ${seconds} segundos asignada.`);
+  };
 
   const count = state.waypoints.length;
   const selectedIndex = state.selectedWaypointIndexes.length === 1 ? state.selectedWaypointIndexes[0] : null;
@@ -147,6 +164,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     setFixedYawDraft(String(selectedWaypoint?.yawDeg ?? 0));
   }, [selectedWaypoint?.localId, selectedWaypoint?.yawDeg]);
   const selectionIncludesHome = state.selectedWaypointIndexes.some((index) => state.waypoints[index]?.role === "home");
+  const selectionHasActions = state.selectedWaypointIndexes.some((index) => Boolean(state.waypoints[index]?.actions?.length));
   const patrolReadiness = getPatrolProfileReadiness(state.patrolMissionProfile);
   const structuredPatrol = patrolReadiness.profileConfigured;
   const editingDisabled = state.controlLocked || state.routeMission.active || state.patrolMission.active;
@@ -277,6 +295,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
           </div>
           <div className="route-editor-history-actions">
             <button type="button" className="route-editor-button" disabled={!count || editingDisabled} onClick={() => navigation.selectAllWaypoints()}>Seleccionar todos</button>
+            <button type="button" className="route-editor-button" disabled={!count || editingDisabled} onClick={() => void selectAreaOnMap()}>Seleccionar área en el mapa</button>
             <button type="button" className="route-editor-button" disabled={!state.selectedWaypointIndexes.length} onClick={() => navigation.clearWaypointSelection()}>Quitar selección</button>
             <button type="button" className="route-editor-button" disabled={!state.routeEditor.canUndo || editingDisabled} onClick={() => navigation.undoRouteEdit()}>Deshacer</button>
             <button type="button" className="route-editor-button" disabled={!state.routeEditor.canRedo || editingDisabled} onClick={() => navigation.redoRouteEdit()}>Rehacer</button>
@@ -330,7 +349,24 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             <aside className="route-editor-selected-tools" aria-label={selectedWaypoint ? `Opciones del punto ${selectedIndex! + 1}` : "Opciones de puntos"}>
               {state.selectedWaypointIndexes.length > 1 ? (
                 <>
-                  <div><h3>{state.selectedWaypointIndexes.length} puntos seleccionados</h3><p>Asigna la selección a un tramo de patrulla.</p></div>
+                  <div><h3>{state.selectedWaypointIndexes.length} puntos seleccionados</h3><p>Edita estos puntos juntos o asígnalos a un tramo de patrulla.</p></div>
+                  <section className="route-editor-option-group" aria-label="Edición de varios puntos">
+                    <h4>Edición de ruta</h4>
+                    <button type="button" className="route-editor-button danger" disabled={editingDisabled} onClick={async () => {
+                      const selectedCount = state.selectedWaypointIndexes.length;
+                      if (!(await dialogs.confirm({ title: "Eliminar puntos seleccionados", message: `¿Eliminar los ${selectedCount} puntos seleccionados de la ruta?`, confirmLabel: "Eliminar puntos", danger: true }))) return;
+                      withError(() => navigation.removeSelectedWaypoints(), `${selectedCount} puntos eliminados.`);
+                    }}>Eliminar {state.selectedWaypointIndexes.length} puntos…</button>
+                  </section>
+                  <section className="route-editor-option-group" aria-label="Acciones al llegar a varios puntos">
+                    <h4>Acciones al llegar</h4>
+                    <div className="route-editor-tool-buttons">
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome} onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("urban"), "Perfil urbano asignado.")}>Usar perfil urbano</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome} onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("rural"), "Perfil rural asignado.")}>Usar perfil rural</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome} onClick={() => void addPauseToSelection()}>Añadir pausa…</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || !selectionHasActions} onClick={() => withError(() => navigation.clearWaypointActionsForSelected(), "Acciones quitadas de la selección.")}>Quitar acciones</button>
+                    </div>
+                  </section>
                   <section className="route-editor-option-group" aria-label="Patrulla para varios puntos">
                     <h4>Patrulla</h4>
                     <div className="route-editor-tool-buttons">
@@ -479,13 +515,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                   <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
                     onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("rural"), "Perfil rural asignado.")}>Usar perfil rural</button>
                   <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
-                    onClick={async () => {
-                      const value = await dialogs.prompt({ title: "Pausa en el punto", message: "Segundos que debe esperar el robot:", defaultValue: "5", confirmLabel: "Aplicar" });
-                      if (value === null) return;
-                      const seconds = Number(value);
-                      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) { setMessage("Escribe una duración entre 0 y 600 segundos."); return; }
-                      withError(() => navigation.setBrakeHoldActionForSelected(true, seconds), `Pausa de ${seconds} segundos asignada.`);
-                    }}>Añadir pausa…</button>
+                    onClick={() => void addPauseToSelection()}>Añadir pausa…</button>
                   <button type="button" className="route-editor-button" disabled={editingDisabled || !(selectedWaypoint.actions?.length)}
                     onClick={() => withError(() => navigation.clearWaypointActionsForSelected(), "Acciones quitadas del punto.")}>Quitar acciones</button>
                 </div>
@@ -511,6 +541,10 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         <div className="route-editor-patrol-actions">
           <button type="button" className="route-editor-button" disabled={editingDisabled || count < 2}
             onClick={() => withError(() => navigation.useQueuedWaypointsAsPatrolLoop(), "Recorrido principal actualizado con los puntos de la ruta.")}>Usar los puntos de la ruta como recorrido</button>
+          <button type="button" className="route-editor-button" disabled={editingDisabled || !state.patrolMissionProfile.departWaypoints.length}
+            onClick={() => withError(() => navigation.clearPatrolSegment("depart"), "Salida desde HOME vaciada.")}>Vaciar salida desde HOME</button>
+          <button type="button" className="route-editor-button" disabled={editingDisabled || !state.patrolMissionProfile.returnWaypoints.length}
+            onClick={() => withError(() => navigation.clearPatrolSegment("return"), "Regreso a HOME vaciado.")}>Vaciar regreso a HOME</button>
           <button type="button" className="route-editor-button danger" disabled={editingDisabled || !patrolReadiness.profileConfigured}
             onClick={async () => {
               if (!(await dialogs.confirm({ title: "Borrar configuración de patrulla", message: "Se quitarán HOME y los segmentos de patrulla de esta ruta. ¿Continuar?", confirmLabel: "Borrar configuración", danger: true }))) return;

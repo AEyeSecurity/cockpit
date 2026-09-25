@@ -197,6 +197,34 @@ describe("navigation sidebar and route editor", () => {
     expect(state.routeEditor.dirty).toBe(true);
   });
 
+  it("restores area selection and actions for several selected points", async () => {
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 20 });
+      navigationService.queueWaypoint({ x: 11, y: 21 });
+      navigationService.queueWaypoint({ x: 12, y: 22 });
+    });
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+    render(<>{editor.render()}</>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Seleccionar área en el mapa" }));
+    await waitFor(() => expect(navigationService.getState().waypointSelectionMode).toBe(true));
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+
+    act(() => navigationService.setWaypointSelection([0, 1], "replace"));
+    const panel = screen.getByLabelText("Opciones de puntos");
+    expect(panel).toHaveTextContent("2 puntos seleccionados");
+    expect(screen.getByRole("button", { name: "Eliminar 2 puntos…" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Usar perfil rural" }));
+    expect(navigationService.getState().waypoints[0].actions).toEqual(expect.arrayContaining([expect.objectContaining({ profile: "rural" })]));
+    expect(navigationService.getState().waypoints[1].actions).toEqual(expect.arrayContaining([expect.objectContaining({ profile: "rural" })]));
+    expect(navigationService.getState().waypoints[2].actions ?? []).toEqual([]);
+  });
+
   it("keeps patrol segment insertion tied to that segment's order", async () => {
     const runtime = await bootstrapApp();
     const editor = runtime.contributions.get("nav2.workspace.route-editor");

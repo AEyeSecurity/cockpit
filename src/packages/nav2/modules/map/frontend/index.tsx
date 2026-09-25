@@ -3103,6 +3103,18 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           }}>Cancelar y volver al editor</button>
         </div>
       ) : null}
+      {navigationState?.waypointSelectionMode && navigationState.routeEditor.insertionAfterIndex === null ? (
+        <div className="map-route-insertion-banner" role="status">
+          <div>
+            <strong>Seleccionar puntos por área</strong>
+            <span>Arrastra un rectángulo sobre los puntos. Mantén Shift para sumar otra área a la selección.</span>
+          </div>
+          <button type="button" onClick={() => {
+            navigationService?.setWaypointSelectionMode(false);
+            runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
+          }}>Terminar y volver al editor</button>
+        </div>
+      ) : null}
       <div className={`stage map-stage map-html-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
         {mainIsMap ? (
           <section className="stage-pane main map-stage-pane">
