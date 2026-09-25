@@ -3101,7 +3101,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           </section>
         ) : null}
         {cameraPaneAvailable && !mainIsMap ? (
-          <section className="map-stage-pane map-map-stage-pane-mini">
+          <section className={`map-stage-pane map-map-stage-pane-mini${showVideo ? " is-video-active" : ""}`}>
             <div className="map-camera-mini-head map-map-mini-head">
               <span>Map</span>
               <div className="map-camera-mini-head-right">

@@ -7396,13 +7396,27 @@ input[type="range"]::-moz-range-track {
 }
 
 /* Keep camera controls clear of the frame and give the live preview more room. */
+.map-html-stage {
+  --map-camera-live-width: min(450px, calc(100vw - 96px));
+  --map-camera-live-height: clamp(250px, 34vh, 320px);
+}
+
 .map-right-stack .map-camera-stage-pane-mini.is-video-active {
   align-self: flex-end !important;
-  width: min(390px, calc(100vw - 96px)) !important;
-  height: clamp(220px, 30vh, 280px) !important;
-  min-height: 220px !important;
+  width: var(--map-camera-live-width) !important;
+  height: var(--map-camera-live-height) !important;
+  min-height: 0 !important;
   max-width: calc(100vw - 96px) !important;
   transform: none !important;
+  transition: width 180ms ease, height 180ms ease;
+}
+
+.map-html-stage.mode-camera-main .map-map-stage-pane-mini.is-video-active {
+  width: var(--map-camera-live-width) !important;
+  height: var(--map-camera-live-height) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: calc(100vw - 96px) !important;
   transition: width 180ms ease, height 180ms ease;
 }
 
@@ -7453,16 +7467,28 @@ input[type="range"]::-moz-range-track {
 }
 
 @media (max-width: 900px), (max-height: 760px) {
+  .map-html-stage {
+    --map-camera-live-width: min(380px, calc(100vw - 86px));
+    --map-camera-live-height: clamp(210px, 32vh, 260px);
+  }
+
   .map-right-stack .map-camera-stage-pane-mini.is-video-active {
-    width: min(350px, calc(100vw - 86px)) !important;
-    height: clamp(190px, 28vh, 230px) !important;
-    min-height: 190px !important;
+    width: var(--map-camera-live-width) !important;
+    height: var(--map-camera-live-height) !important;
+    min-height: 0 !important;
+    max-width: calc(100vw - 86px) !important;
+  }
+
+  .map-html-stage.mode-camera-main .map-map-stage-pane-mini.is-video-active {
+    width: var(--map-camera-live-width) !important;
+    height: var(--map-camera-live-height) !important;
     max-width: calc(100vw - 86px) !important;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .map-right-stack .map-camera-stage-pane-mini.is-video-active {
+  .map-right-stack .map-camera-stage-pane-mini.is-video-active,
+  .map-html-stage.mode-camera-main .map-map-stage-pane-mini.is-video-active {
     transition: none;
   }
 }
