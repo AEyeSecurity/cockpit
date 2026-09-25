@@ -619,6 +619,8 @@ function LeafletMapCanvas({
   robotPose,
   datumPose,
   centerRequestKey,
+  followRobot,
+  onStopFollowingRobot,
   onQueueWaypoint,
   onToggleWaypointSelection,
   onSetWaypointSelection,
@@ -646,6 +648,8 @@ function LeafletMapCanvas({
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
+  followRobot: boolean;
+  onStopFollowingRobot: () => void;
   onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onSetWaypointSelection: (indexes: number[], mode: "replace" | "add") => void;
@@ -1745,11 +1749,21 @@ function LeafletMapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !robotPose || centerRequestKey <= 0) return;
-    if (centerRequestHandledRef.current === centerRequestKey) return;
-    centerRequestHandledRef.current = centerRequestKey;
-    map.setView([robotPose.lat, robotPose.lon], Math.max(map.getZoom(), 17));
-  }, [centerRequestKey, robotPose]);
+    if (!map || !robotPose) return;
+    const centerRequested = centerRequestKey > 0 && centerRequestHandledRef.current !== centerRequestKey;
+    if (centerRequested) centerRequestHandledRef.current = centerRequestKey;
+    if (!centerRequested && !followRobot) return;
+    const target = L.latLng(robotPose.lat, robotPose.lon);
+    if (!centerRequested && map.distance(map.getCenter(), target) < 0.1) return;
+    map.setView(target, centerRequested ? Math.max(map.getZoom(), 17) : map.getZoom(), { animate: false });
+  }, [centerRequestKey, followRobot, robotPose]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !interactive) return;
+    map.on("dragstart", onStopFollowingRobot);
+    return () => { map.off("dragstart", onStopFollowingRobot); };
+  }, [interactive, onStopFollowingRobot]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2529,6 +2543,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   });
   const [leafletZoneToolActive, setLeafletZoneToolActive] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
+  const [followRobot, setFollowRobot] = useState(false);
   const [mapZoom, setMapZoom] = useState(GPS_DEFAULT_ZOOM);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
@@ -3143,6 +3158,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                followRobot={followRobot}
+                onStopFollowingRobot={() => setFollowRobot(false)}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
@@ -3227,6 +3244,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                followRobot={followRobot}
+                onStopFollowingRobot={() => setFollowRobot(false)}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
@@ -3557,18 +3576,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               </button>
               <button
                 type="button"
-                className="map-btn map-btn-sep"
+                className={`map-btn map-btn-sep${followRobot ? " active" : ""}`}
                 onClick={() => {
-                  setCenterRequestKey((value) => value + 1);
-                  mapService.centerRobot();
+                  const next = !followRobot;
+                  setFollowRobot(next);
+                  if (next) {
+                    setCenterRequestKey((value) => value + 1);
+                  }
                   runtime.eventBus.emit("console.event", {
                     level: "info",
-                    text: "Map centered on robot",
+                    text: next ? "Map following robot" : "Map stopped following robot",
                     timestamp: Date.now()
                   });
                 }}
-                title="Centrar robot"
-                aria-label="Centrar robot"
+                title={followRobot ? "Dejar de seguir al robot" : "Seguir al robot"}
+                aria-label={followRobot ? "Dejar de seguir al robot" : "Seguir al robot"}
+                aria-pressed={followRobot}
                 disabled={!mapToolsEnabled}
               >
                 <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">

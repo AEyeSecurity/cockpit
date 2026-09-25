@@ -4,6 +4,21 @@ import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
 
 describe("map workspace HUD", () => {
+  it("keeps robot following active until the operator turns it off", async () => {
+    const runtime = await bootstrapApp();
+    const workspace = runtime.contributions.get("nav2.workspace.map");
+    if (!workspace || workspace.slot !== "workspace") throw new Error("Map workspace contribution not registered");
+
+    render(<>{workspace.render()}</>);
+    const followButton = screen.getByRole("button", { name: "Seguir al robot" });
+    expect(followButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(followButton);
+    const stopButton = screen.getByRole("button", { name: "Dejar de seguir al robot" });
+    expect(stopButton).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(stopButton);
+    expect(screen.getByRole("button", { name: "Seguir al robot" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("shows Patrol card above Battery and reflects local patrol readiness", async () => {
     const runtime = await bootstrapApp();
     const workspace = runtime.contributions.get("nav2.workspace.map");

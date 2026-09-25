@@ -394,14 +394,6 @@ export class MapService {
     this.emit();
   }
 
-  centerRobot(): void {
-    this.state = {
-      ...this.state,
-      toolInfo: "Centered map on robot pose."
-    };
-    this.emit();
-  }
-
   setDatumFromRobot(): void {
     this.state = {
       ...this.state,
