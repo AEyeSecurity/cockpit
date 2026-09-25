@@ -16,6 +16,7 @@ import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../ro
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
+import { RouteEditorWorkspace } from "./RouteEditorWorkspace";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.robot";
@@ -141,14 +142,24 @@ function formatControlLockReason(reason: string): string {
 
 function formatRouteStatus(status: string): string {
   const normalized = normalizeRouteMissionStatus(status);
-  if (!normalized || normalized === "idle") return "Idle";
-  if (normalized === "route starting") return "Starting route";
-  if (normalized.startsWith("route active")) return "Following route";
-  if (normalized === "route completed") return "Route complete";
-  if (normalized === "route cancelled") return "Route cancelled";
-  if (normalized === "route paused by manual takeover") return "Paused by manual";
-  if (normalized.startsWith("route failed")) return "Route error";
+  if (!normalized || normalized === "idle") return "Listo";
+  if (normalized === "route starting") return "Iniciando ruta";
+  if (normalized.startsWith("route active")) return "Ruta en marcha";
+  if (normalized === "route completed") return "Ruta completada";
+  if (normalized === "route cancelled") return "Ruta cancelada";
+  if (normalized === "route paused by manual takeover") return "Pausada por control manual";
+  if (normalized.startsWith("route failed")) return "Error en la ruta";
   return status.trim();
+}
+
+function formatPatrolMissionPhase(phase: string): string {
+  const labels: Record<string, string> = {
+    depart_home: "Salida desde HOME",
+    loop_main: "Recorrido principal",
+    return_pending: "Regreso pendiente",
+    return_connector: "Regresando a HOME"
+  };
+  return labels[phase] ?? "Patrulla activa";
 }
 
 function routeTone(
@@ -570,6 +581,7 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
 
   switch (title) {
     case "CONNECTION":
+    case "CONEXIÓN":
       return (
         <svg {...baseProps}>
           <path d="M5 12.5a10 10 0 0 1 14 0" />
@@ -579,6 +591,7 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
       );
     case "CONTROL MODE":
     case "MANUAL CONTROL":
+    case "CONTROL MANUAL":
       return (
         <svg {...baseProps}>
           <path d="m4 7 5 5-5 5" />
@@ -586,6 +599,7 @@ function NavSidebarSectionIcon({ title }: { title: string }): JSX.Element {
         </svg>
       );
     case "AUTOMATIC ROUTE":
+    case "RUTA AUTOMÁTICA":
       return (
         <svg {...baseProps}>
           <path d="m4 11 16-7-7 16-2-7-7-2Z" />
@@ -844,107 +858,41 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
   );
 }
 
-function describeWaypointActions(waypoint: NavigationState["waypoints"][number]): string[] {
-  return (waypoint.actions ?? []).map((action) => {
-    if (action.type === "brake_hold") return `Brake ${action.duration_s}s`;
-    return action.profile === "rural" ? "Rural" : "Urban";
-  });
-}
-
-function describePatrolWaypointTags(
-  waypoint: NavigationState["waypoints"][number],
-  profile: NavigationState["patrolMissionProfile"]
-): string[] {
-  const id = waypoint.localId;
-  if (!id) return waypoint.role === "home" ? ["HOME"] : [];
-  const tags: string[] = [];
-  if (waypoint.role === "home" || profile.homeWaypoint?.localId === id) tags.push("HOME");
-  const loopIndex = profile.loopWaypoints.findIndex((entry) => entry.localId === id);
-  if (loopIndex >= 0) tags.push("LOOP");
-  if (profile.returnWaypoints.some((entry) => entry.localId === id)) tags.push("RETURN");
-  if (profile.departWaypoints.some((entry) => entry.localId === id)) tags.push("DEPART");
-  if (loopIndex >= 0 && profile.departEntryLoopIndex === loopIndex) tags.push("ENTRY");
-  return tags;
-}
-
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const navService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const connService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
-  const dialogService = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const telemetryService = getTelemetryService(runtime);
   const [navState, setNavState] = useState<NavigationState>(navService.getState());
   const [connState, setConnState] = useState(connService.getState());
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
-  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [navigationProfilePending, setNavigationProfilePending] = useState(false);
   const [routeStartPending, setRouteStartPending] = useState(false);
   const [routeStartError, setRouteStartError] = useState("");
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
-  const selectedCount = navState.selectedWaypointIndexes.length;
-  const selectedWaypoints = navState.selectedWaypointIndexes
-    .map((index) => navState.waypoints[index])
-    .filter((entry): entry is NavigationState["waypoints"][number] => Boolean(entry));
-  const selectedHomeCount = selectedWaypoints.filter((waypoint) => waypoint.role === "home").length;
   const homeWaypointCount = navState.waypoints.filter((waypoint) => waypoint.role === "home").length;
-  const selectedSingleHome = selectedCount === 1 && selectedHomeCount === 1;
-  const selectedHasHome = selectedHomeCount > 0;
-  const selectedBrakeHoldEnabled =
-    selectedWaypoints.length > 0 &&
-    selectedWaypoints.every((waypoint) => (waypoint.actions ?? []).some((action) => action.type === "brake_hold"));
-  const selectedNavigationProfile =
-    selectedWaypoints.length > 0 &&
-    selectedWaypoints.every((waypoint) =>
-      (waypoint.actions ?? []).some(
-        (action) => action.type === "set_navigation_profile" && action.profile === "rural"
-      )
-    )
-      ? "rural"
-      : selectedWaypoints.length > 0 &&
-          selectedWaypoints.every((waypoint) =>
-            (waypoint.actions ?? []).some(
-              (action) => action.type === "set_navigation_profile" && action.profile === "urban"
-            )
-          )
-        ? "urban"
-        : null;
-  const selectedHasAnyAction = selectedWaypoints.some((waypoint) => (waypoint.actions ?? []).length > 0);
-  const selectedBrakeHoldDuration =
-    selectedWaypoints
-      .flatMap((waypoint) => waypoint.actions ?? [])
-      .find((action) => action.type === "brake_hold")?.duration_s ?? 5;
-  const programmedWaypointCount = navState.waypoints.filter((waypoint) => (waypoint.actions ?? []).length > 0).length;
   const lockReasonText = formatControlLockReason(navState.controlLockReason);
   const routeMission = navState.routeMission;
   const patrolMission = navState.patrolMission;
   const patrolProfile = navState.patrolMissionProfile;
-  const patrolLoopCount = patrolProfile.loopWaypoints.length;
-  const patrolReturnCount = patrolProfile.returnWaypoints.length;
-  const patrolDepartCount = patrolProfile.departWaypoints.length;
   const patrolReadiness = getPatrolProfileReadiness(patrolProfile);
   const patrolProfileConfigured = patrolReadiness.profileConfigured;
   const patrolReady = patrolReadiness.isReady;
+  const patrolRequirementLabels: Record<string, string> = {
+    LOOP: "recorrido principal",
+    HOME: "punto HOME",
+    ENTRY: "punto de reingreso"
+  };
   const patrolStartMeta = patrolReady
-    ? patrolReadiness.summary
-    : `Missing: ${patrolReadiness.missingRequirements.join(", ")}`;
+    ? `${patrolProfile.loopWaypoints.length} puntos en el recorrido`
+    : `Falta: ${patrolReadiness.missingRequirements.map((item) => patrolRequirementLabels[item] ?? item.toLowerCase()).join(", ")}`;
   const routeStartBlockedByPatrol = patrolProfileConfigured;
-  const routeStartDisabled = wps < 2 || navState.controlLocked || routeStartBlockedByPatrol || routeStartPending;
-  const routeStartMeta = wps < 2
-    ? "Needs 2+ waypoints"
-    : routeStartBlockedByPatrol
-      ? "Structured patrol loaded: use START PATROL"
-      : "Expanded route mission";
-  const routeStartTitle = navState.controlLocked
-    ? lockReasonText
-    : routeStartBlockedByPatrol
-      ? "Structured patrol configured. Use START PATROL or clear the patrol profile."
-      : "Start a simple route mission from the queued waypoints";
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
-  const routeMissionRunning = routeMissionActivity.running;
+  const goalModeSelected = navState.goalMode;
   const navigationProfileLocked =
     navState.controlLocked ||
     navigationProfilePending ||
@@ -955,7 +903,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     patrolMission.phase === "return_connector" ||
     patrolMission.phase === "return_pending" ||
     patrolMission.phase === "loop_main";
-  const goalModeSelected = navState.goalMode;
   const manualModeSelected = navState.manualMode && !goalModeSelected;
   const connectionStatusClassName = joinClassNames(
     "status-pill",
@@ -966,19 +913,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     Boolean(connState.lastError) && !connState.connected && !connState.connecting && "bad"
   );
   const connectionStatusText = connState.connected
-    ? connState.preset === "real" ? "Connected · Real Robot" : "Connected · Simulation"
+    ? connState.preset === "real" ? "Conectado · Robot real" : "Conectado · Simulación"
     : connState.connecting
-      ? connState.preset === "real" ? "Connecting to Real Robot..." : "Connecting to Simulation..."
+      ? connState.preset === "real" ? "Conectando con el robot real…" : "Conectando con la simulación…"
       : connState.lastError
-        ? "Link error"
-        : "Disconnected";
+        ? "Error de conexión"
+        : "Desconectado";
   useEffect(() => navService.subscribe((next) => setNavState(next)), [navService]);
   useEffect(() => connService.subscribe((next) => setConnState(next)), [connService]);
-  useEffect(() => {
-    if (selectedCount === 0 || navState.controlLocked) {
-      setActionMenuOpen(false);
-    }
-  }, [selectedCount, navState.controlLocked]);
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
@@ -990,53 +932,27 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const emitError = (text: string): void => {
     runtime.eventBus.emit("console.event", { level: "error", text, timestamp: Date.now() });
   };
-  const confirmDiscardRouteChanges = async (action: string): Promise<boolean> => {
-    if (!navState.routeEditor.dirty) return true;
-    return dialogService.confirm({
-      title: "Cambios sin guardar",
-      message: `La ruta tiene cambios sin guardar. ¿Descartarlos para ${action}?`,
-      confirmLabel: "Descartar",
-      danger: true
-    });
-  };
-  const enableMapWaypointPlacement = async (): Promise<void> => {
-    if (navState.controlLocked) {
-      emitError(`Waypoint placement blocked: ${lockReasonText}`);
-      return;
-    }
-    if (!goalModeSelected) {
-      try {
-        await navService.setGoalMode(true);
-      } catch (error) {
-        emitError(`Waypoint placement failed: ${String(error)}`);
-        return;
-      }
-    }
-    navService.setWaypointSelectionMode(false);
-    emitInfo("Waypoint placement enabled: click and drag on the map to place it");
-  };
-
   return (
     <div className="nav-sidebar">
-      <NavSidebarCollapsibleSection title="CONNECTION" className="nav-sidebar-connection-section">
+      <NavSidebarCollapsibleSection title="CONEXIÓN" className="nav-sidebar-connection-section">
         <select
           className="connection-preset-select"
           value={connState.preset}
           onChange={(event) => connService.setPreset(event.target.value === "sim" ? "sim" : "real")}
         >
-          <option value="real">Real Robot</option>
-          <option value="sim">Simulation</option>
+          <option value="real">Robot real</option>
+          <option value="sim">Simulación</option>
         </select>
         <div className="input-grid">
           <input
             value={connState.host}
             onChange={(event) => connService.setHost(event.target.value)}
-            placeholder="Host address"
+            placeholder="Dirección del robot"
           />
           <input
             value={connState.port}
             onChange={(event) => connService.setPort(event.target.value)}
-            placeholder="Port"
+            placeholder="Puerto"
           />
         </div>
         <div className="action-grid">
@@ -1054,13 +970,13 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           >
             <ButtonFace
               icon={<NavGlyph kind="connect" />}
-              label={connState.connected ? "CONNECTED" : connState.connecting ? "CONNECTING" : "CONNECT"}
+              label={connState.connected ? "CONECTADO" : connState.connecting ? "CONECTANDO" : "CONECTAR"}
               meta={
                 connState.connected
-                  ? connState.preset === "real" ? "Real Robot session open" : "Simulation session open"
+                  ? connState.preset === "real" ? "Sesión con robot real abierta" : "Sesión de simulación abierta"
                   : connState.connecting
-                    ? "Opening backend session"
-                    : "Open backend session"
+                    ? "Conectando con el backend"
+                    : "Abrir conexión con el backend"
               }
             />
           </button>
@@ -1076,7 +992,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               }
             }}
           >
-            <ButtonFace icon={<NavGlyph kind="disconnect" />} label="DISCONNECT" meta="Close session" />
+            <ButtonFace icon={<NavGlyph kind="disconnect" />} label="DESCONECTAR" meta="Cerrar conexión" />
           </button>
         </div>
         <div className={connectionStatusClassName}>
@@ -1085,8 +1001,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
-      {/* ── 2. MANUAL CONTROL ─────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection title="MANUAL CONTROL" className="nav-sidebar-control-section nav-sidebar-manual-section">
+      {/* ── 2. CONTROL MANUAL ─────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection title="CONTROL MANUAL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
           className={joinClassNames("ncb-wide", "sec-btn", !navState.controlLocked && "active")}
@@ -1095,10 +1011,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             try {
               if (navState.controlLocked) {
                 await navService.unlockControls();
-                emitInfo("Operator controls unlocked");
+                emitInfo("Controles desbloqueados");
               } else {
                 await navService.lockControls();
-                emitInfo("Operator controls locked");
+                emitInfo("Controles bloqueados");
               }
             } catch (error) {
               emitError(`Control lock update failed: ${String(error)}`);
@@ -1107,30 +1023,30 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         >
           <ButtonFace
             icon={<NavGlyph kind="manual" />}
-            label={navState.controlLocked ? "UNLOCK CONTROLS" : "LOCK CONTROLS"}
-            meta={navState.controlLocked ? lockReasonText : "Heartbeat active"}
+            label={navState.controlLocked ? "DESBLOQUEAR CONTROLES" : "BLOQUEAR CONTROLES"}
+            meta={navState.controlLocked ? lockReasonText : "Control habilitado"}
           />
         </button>
         <button
           type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
-          title={navState.controlLocked ? lockReasonText : "Manual mode (tecla F)"}
+          title={navState.controlLocked ? lockReasonText : "Modo manual (tecla F)"}
           disabled={navState.controlLocked}
           onClick={async () => {
             const next = !navState.manualMode;
             try {
               await navService.setManualMode(next);
-              emitInfo(next ? "Manual mode enabled" : "Manual mode disabled");
+                emitInfo(next ? "Modo manual activado" : "Modo manual desactivado");
             } catch (error) {
               emitError(`Manual mode failed: ${String(error)}`);
             }
           }}
         >
-          <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Enabled" : "Disabled"} />
+          <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Activado" : "Desactivado"} />
         </button>
         <div className="nav-manual-range-stack">
           <ManualRangeControl
-            label="Linear speed"
+            label="Velocidad lineal"
             unit="m/s"
             value={navState.manualLinearSpeed}
             min={navState.manualLinearMin}
@@ -1140,8 +1056,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             onChange={(value) => navService.setManualLinearSpeed(value)}
           />
           <ManualRangeControl
-            label="Steering angle / turn radius"
-            unit="deg"
+            label="Ángulo de giro / radio de giro"
+            unit="°"
             value={navState.manualSteeringAngleDeg}
             min={navState.manualSteeringAngleMinDeg}
             max={navState.manualSteeringAngleMaxDeg}
@@ -1152,853 +1068,137 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
-      {/* ── 3. AUTOMATIC ROUTE ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection
-        title="AUTOMATIC ROUTE"
+        title="RUTA ACTUAL"
         badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
-        className="nav-sidebar-actions-section nav-sidebar-automatic-section nav-sidebar-route-section"
+        className="nav-sidebar-route-summary-section"
         defaultCollapsed={false}
       >
-        <div className="nav-route-subsection nav-navigation-profile-section">
-          <div className="nav-route-subhead">
-            <span>Navigation profile</span>
-            <small>{navigationProfileLocked ? "Mission controlled" : "Apply now"}</small>
-          </div>
-          <div className="nav-navigation-profile-switch" role="group" aria-label="Navigation profile">
-            {(["urban", "rural"] as const).map((profile) => (
-              <button
-                key={profile}
-                type="button"
-                className={joinClassNames(
-                  "nav-navigation-profile-option",
-                  navState.navigationStartProfile === profile && "active"
-                )}
-                disabled={navigationProfileLocked}
-                title={
-                  navigationProfileLocked
-                    ? navState.controlLocked
-                      ? lockReasonText
-                      : "Profile changes are controlled by the active mission"
-                    : `Apply ${profile} profile now and use it for the next mission`
+        <div className="nav-sidebar-route-summary">
+          <strong>{navState.routeEditor.activeRouteName ?? "Borrador nuevo"}</strong>
+          <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
+          <span className={navState.routeEditor.dirty ? "pending" : "saved"}>
+            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en Cockpit" : "Sin guardar"}
+          </span>
+          {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
+          <button
+            type="button"
+            className="ncb-wide prim-btn nav-sidebar-open-route-editor"
+            onClick={() => runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor")}
+          >
+            <ButtonFace icon={<NavGlyph kind="route" />} label="EDITAR RUTA" meta="Abrir editor de puntos y patrulla" />
+          </button>
+          {missionActive || patrolMission.active ? (
+            <>
+              <span>{patrolMission.active ? formatPatrolMissionPhase(patrolMission.phase) : formatRouteStatus(routeMission.status)}</span>
+              <button type="button" className="ncb-wide cancel-btn" onClick={async () => {
+                try {
+                  await navService.cancelRouteMission();
+                  emitInfo("Misión cancelada");
+                } catch (error) {
+                  emitError(`No se pudo cancelar la misión: ${String(error)}`);
                 }
-                onClick={async () => {
-                  setNavigationProfilePending(true);
-                  try {
-                    await navService.setNavigationStartProfile(profile);
-                    emitInfo(`Navigation profile applied: ${profile}`);
-                  } catch (error) {
-                    emitError(`Navigation profile failed: ${String(error)}`);
-                  } finally {
-                    setNavigationProfilePending(false);
-                  }
-                }}
-              >
-                <span>{profile === "urban" ? "URBAN" : "RURAL"}</span>
-                <small>{profile === "urban" ? "Default margins" : "Narrow dirt road"}</small>
+              }}>
+                <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCELAR MISIÓN" meta="Detener la navegación" />
               </button>
-            ))}
-          </div>
-        </div>
-        <div className="nav-route-subsection nav-route-execution">
-          <div className="nav-route-subhead">
-            <span>Route</span>
-            <small>{routeMissionRunning ? "Running" : "Ready"}</small>
-          </div>
-          <button
-            type="button"
-            className={joinClassNames("ncb-wide send-btn", routeMissionRunning && "active")}
-            disabled={routeStartDisabled}
-            title={routeStartTitle}
-            onClick={async () => {
-              if (routeStartPending) return;
-              setRouteStartPending(true);
-              setRouteStartError("");
-              try {
-                const started = await navService.sendRouteMission();
-                emitInfo(`Route mission started (${started.inputCount} wps, ${started.expandedCount} pts)`);
-              } catch (error) {
-                const message = `No se pudo iniciar la ruta: ${String(error)}`;
-                setRouteStartError(message);
-                emitError(message);
-              } finally {
-                setRouteStartPending(false);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="route" />} label="START ROUTE" meta={routeStartPending ? "Starting..." : routeStartMeta} />
-          </button>
-          {routeStartError ? <p className="ps-status-error" role="alert">{routeStartError}</p> : null}
-          <button
-            type="button"
-            className="ncb-wide cancel-btn"
-            disabled={!missionActive}
-            onClick={async () => {
-              try {
-                // Route state arrives asynchronously from the backend.  Do not
-                // let a stale local idle snapshot downgrade this Route-panel
-                // cancel into a bare Nav2 cancellation: that would leave the
-                // route executor paused and block profile changes/new routes.
-                // The structured service also cancels a direct Nav2 goal when
-                // no route mission exists.
-                await navService.cancelRouteMission();
-                emitInfo("Route mission cancelled");
-              } catch (error) {
-                emitError(`Cancel failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL" meta="Stop active navigation" />
-          </button>
-          <button
-            type="button"
-            className="ncb-wide sec-btn"
-            disabled={navState.controlLocked || !(patrolMission.active || patrolMission.phase === "return_pending" || patrolMission.phase === "loop_main")}
-            title={navState.controlLocked ? lockReasonText : "Solicitar retorno estructurado a HOME"}
-            onClick={async () => {
-              try {
-                await navService.requestReturnHome();
-                emitInfo("Return HOME requested");
-              } catch (error) {
-                emitError(`Return HOME failed: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="home" />} label="RETURN HOME" meta={patrolMission.phase || "Patrol only"} />
-          </button>
-        </div>
-        <div className="nav-route-subsection nav-route-execution">
-          <div className="nav-route-subhead">
-            <span>Patrol Mission</span>
-            <small>{patrolMission.active ? patrolMission.phase : patrolReady ? "Ready" : "Setup needed"}</small>
-          </div>
-          <button
-            type="button"
-            className={joinClassNames("ncb-wide send-btn", patrolMission.active && "active")}
-            disabled={!patrolReady || navState.controlLocked || patrolStartPending}
-            onClick={async () => {
+              {patrolMission.active && !navState.controlLocked && (patrolMission.phase === "return_pending" || patrolMission.phase === "loop_main") ? (
+                <button type="button" className="ncb-wide sec-btn" onClick={async () => {
+                  try {
+                    await navService.requestReturnHome();
+                    emitInfo("Regreso a HOME solicitado");
+                  } catch (error) {
+                    emitError(`No se pudo solicitar el regreso a HOME: ${String(error)}`);
+                  }
+                }}>
+                  <ButtonFace icon={<NavGlyph kind="home" />} label="VOLVER A HOME" meta="Regresar al punto de inicio" />
+                </button>
+              ) : null}
+            </>
+          ) : !navState.controlLocked && patrolProfileConfigured && patrolReady ? (
+            <button type="button" className="ncb-wide send-btn" disabled={patrolStartPending} onClick={async () => {
               if (patrolStartPending) return;
               setPatrolStartPending(true);
               setPatrolStartError("");
               try {
                 const started = await navService.sendPatrolMission();
-                emitInfo(`Patrol mission started (${started.inputCount} loop wps, ${started.expandedCount} pts)`);
+                emitInfo(`Patrulla iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
               } catch (error) {
-                const message = `Patrol mission failed: ${String(error)}`;
-                setPatrolStartError(message);
-                emitError(message);
+                const errorMessage = `No se pudo iniciar la patrulla: ${String(error)}`;
+                setPatrolStartError(errorMessage);
+                emitError(errorMessage);
               } finally {
                 setPatrolStartPending(false);
               }
-            }}
-          >
-            <ButtonFace
-              icon={<NavGlyph kind="route" />}
-              label="START PATROL"
-              meta={patrolStartPending ? "Starting..." : patrolStartMeta}
-            />
-          </button>
-          {patrolStartError ? <p className="ps-status-error" role="alert">{patrolStartError}</p> : null}
-        </div>
-      </NavSidebarCollapsibleSection>
-
-      <NavSidebarCollapsibleSection
-        title="WAYPOINTS"
-        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
-        className="nav-sidebar-actions-section nav-sidebar-waypoints-section"
-        defaultCollapsed={false}
-      >
-        <div className="nav-route-subsection nav-route-setup">
-          <div className="nav-route-subhead">
-            <span>Waypoints</span>
-            <small>{wps} waypoint{wps === 1 ? "" : "s"} · {homeWaypointCount} HOME</small>
-          </div>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={wps === 0 || navState.controlLocked}
-              title="Seleccionar todos los waypoints"
-              onClick={() => navService.selectAllWaypoints()}
-            >
-              <ButtonFace icon={<NavGlyph kind="route" />} label="SELECT ALL" meta={`${wps} total`} compact />
+            }}>
+              <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR PATRULLA" meta={patrolStartPending ? "Iniciando…" : patrolStartMeta} />
             </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedCount === 0 || navState.controlLocked}
-              title="Deseleccionar todos los waypoints (ESC en el mapa)"
-              onClick={() => navService.clearWaypointSelection()}
-            >
-              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR SEL." meta={`${selectedCount} sel.`} compact />
-            </button>
-            <button
-              type="button"
-              className={joinClassNames("ncb sec-btn", navState.waypointSelectionMode && "active")}
-              disabled={wps === 0 || navState.controlLocked}
-              title="Arrastrá un rectángulo en el mapa. Shift suma a la selección actual. ESC sale del modo y limpia la selección."
-              onClick={() => navService.setWaypointSelectionMode(!navState.waypointSelectionMode)}
-            >
-              <ButtonFace icon={<NavGlyph kind="goal" />} label="SELECT AREA" meta={navState.waypointSelectionMode ? "Map active" : "Draw on map"} compact />
-            </button>
-          </div>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={wps < 2 || navState.controlLocked}
-              title="Usar los waypoints en cola como loop principal"
-              onClick={() => {
-                try {
-                  const count = navService.useQueuedWaypointsAsPatrolLoop();
-                  emitInfo(`Patrol loop updated (${count} waypoints)`);
-                } catch (error) {
-                  emitError(`Patrol loop failed: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="route" />} label="USE LOOP" meta={`${wps} queued`} compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedCount !== 1 || navState.controlLocked}
-              title="Usar el waypoint seleccionado como HOME de la patrulla"
-              onClick={() => {
-                try {
-                  navService.setPatrolHomeFromSelected();
-                  emitInfo("Patrol HOME updated");
-                } catch (error) {
-                  emitError(`Patrol HOME failed: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="home" />} label="SET HOME" meta={selectedCount === 1 ? "Selected" : "Pick 1"} compact />
-            </button>
-            <button
-              type="button"
-              className="ncb danger-btn"
-              disabled={navState.controlLocked}
-              title="Limpiar el perfil de misión de patrulla"
-              onClick={() => {
-                navService.clearPatrolMissionProfile();
-                emitInfo("Patrol mission profile cleared");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="Patrol profile" compact />
-            </button>
-          </div>
-          <div className="waypoint-manager-list" aria-label="Waypoint manager">
-            {navState.waypoints.map((waypoint, index) => {
-              const selected = navState.selectedWaypointIndexes.includes(index);
-              const patrolTags = describePatrolWaypointTags(waypoint, patrolProfile);
-              const actions = describeWaypointActions(waypoint);
-              const yaw = Number(waypoint.yawDeg);
-              return (
-                <button
-                  key={waypoint.localId ?? `${waypoint.x}-${waypoint.y}-${index}`}
-                  type="button"
-                  className={joinClassNames("waypoint-manager-row", selected && "selected")}
-                  aria-pressed={selected}
-                  title="Alternar selección"
-                  onClick={() => navService.toggleWaypointSelection(index)}
-                >
-                  <span className="waypoint-manager-index">#{index + 1}</span>
-                  <span className="waypoint-manager-coordinates">
-                    {Number(waypoint.x).toFixed(6)}, {Number(waypoint.y).toFixed(6)}
-                  </span>
-                  <span className="waypoint-manager-yaw">{Number.isFinite(yaw) ? `${yaw.toFixed(1)}° manual` : "auto yaw"}</span>
-                  <span className="waypoint-manager-tags">
-                    {patrolTags.map((tag) => <span key={tag} className="waypoint-manager-tag">{tag}</span>)}
-                    {actions.map((action) => <span key={action} className="waypoint-manager-tag action">{action}</span>)}
-                  </span>
-                </button>
-              );
-            })}
-            {wps === 0 ? <p className="muted waypoint-manager-empty">No waypoints queued.</p> : null}
-          </div>
-          <div className="nav-route-editor-status" aria-live="polite">
-            <span>{navState.routeEditor.activeRouteName ? `Ruta: ${navState.routeEditor.activeRouteName}` : "Borrador sin nombre"}</span>
-            {navState.routeEditor.dirty ? <strong>· Cambios sin guardar</strong> : <small>· Guardada</small>}
-          </div>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className={joinClassNames("ncb sec-btn", navState.routeEditor.insertionAfterIndex !== null && "active")}
-              disabled={selectedCount !== 1 || navState.controlLocked}
-              title={selectedCount === 1 ? "Elegir en el mapa un waypoint para insertar después del seleccionado" : "Seleccioná un waypoint"}
-              onClick={() => {
-                if (selectedCount !== 1) return;
-                try {
-                  navService.beginWaypointInsertion(navState.selectedWaypointIndexes[0]!);
-                  emitInfo(`Insert waypoint after ${navState.selectedWaypointIndexes[0]! + 1}`);
-                } catch (error) {
-                  emitError(`Insert waypoint failed: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="INSERT AFTER" meta={selectedCount === 1 ? "Click map" : "Pick 1"} compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={!navState.routeEditor.insertionAfterIndex && navState.routeEditor.insertionAfterIndex !== 0}
-              title="Cancelar la inserción pendiente"
-              onClick={() => navService.cancelWaypointInsertion()}
-            >
-              <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL INSERT" meta="Map mode" compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={!navState.routeEditor.canRedo || navState.controlLocked}
-              title="Rehacer la última edición de ruta"
-              onClick={() => {
-                if (navService.redoRouteEdit()) emitInfo("Route edit redone");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="route" />} label="REDO" meta="Route edit" compact />
-            </button>
-          </div>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedCount !== 1 || navState.selectedWaypointIndexes[0] === 0 || navState.controlLocked}
-              title="Mover el waypoint seleccionado una posición hacia arriba"
-              onClick={() => {
-                const index = navState.selectedWaypointIndexes[0];
-                if (index === undefined) return;
-                if (navService.reorderWaypoint(index, index - 1)) emitInfo("Waypoint moved up");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="route" />} label="MOVE UP" meta="Selected" compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={selectedCount !== 1 || navState.selectedWaypointIndexes[0] === wps - 1 || navState.controlLocked}
-              title="Mover el waypoint seleccionado una posición hacia abajo"
-              onClick={() => {
-                const index = navState.selectedWaypointIndexes[0];
-                if (index === undefined) return;
-                if (navService.reorderWaypoint(index, index + 1)) emitInfo("Waypoint moved down");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="route" />} label="MOVE DOWN" meta="Selected" compact />
-            </button>
-            <button
-              type="button"
-              className="ncb sec-btn"
-              disabled={!navState.routeEditor.canUndo || navState.controlLocked}
-              title="Deshacer la última edición de ruta"
-              onClick={() => {
-                if (navService.undoRouteEdit()) emitInfo("Route edit undone");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Route edit" compact />
-            </button>
-          </div>
-          <button
-            type="button"
-            className={joinClassNames("ncb-wide", goalModeSelected && "active")}
-            title={navState.controlLocked ? lockReasonText : "Goal mode"}
-            disabled={navState.controlLocked}
-            onClick={async () => {
-              const next = !goalModeSelected;
+          ) : !navState.controlLocked && !routeStartBlockedByPatrol && wps >= 2 ? (
+            <button type="button" className="ncb-wide send-btn" disabled={routeStartPending} onClick={async () => {
+              if (routeStartPending) return;
+              setRouteStartPending(true);
+              setRouteStartError("");
               try {
-                await navService.setGoalMode(next);
-                if (next) navService.setWaypointSelectionMode(false);
-                emitInfo(next ? "Goal mode enabled" : "Goal mode disabled");
+                const started = await navService.sendRouteMission();
+                emitInfo(`Ruta iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
               } catch (error) {
-                emitError(`Goal mode failed: ${String(error)}`);
+                const errorMessage = `No se pudo iniciar la ruta: ${String(error)}`;
+                setRouteStartError(errorMessage);
+                emitError(errorMessage);
+              } finally {
+                setRouteStartPending(false);
               }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="goal" />} label="GOAL MODE" meta={goalModeSelected ? "Waypoint editing" : "Standby"} />
-          </button>
-          <label className="check-row nav-loop-check">
-            <input
-              type="checkbox"
-              checked={navState.loopRoute}
-              onChange={(event) => navService.setLoopRoute(event.target.checked)}
-            />
-            Loop route
-          </label>
-          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
-            <button
-              type="button"
-              className="ncb danger-btn"
-              disabled={wps === 0 || navState.controlLocked}
-              title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
-              onClick={async () => {
-                if (!(await confirmDiscardRouteChanges("limpiar la ruta"))) return;
-                navService.clearWaypoints();
-                emitInfo("Waypoints cleared");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" compact />
+            }}>
+              <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR RUTA" meta={routeStartPending ? "Iniciando…" : "Usar los puntos actuales"} />
             </button>
-            <button
-              type="button"
-              className="ncb danger-btn"
-              disabled={selectedCount === 0 || navState.controlLocked}
-              title={navState.controlLocked ? lockReasonText : `${selectedCount} waypoints seleccionados`}
-              onClick={() => {
-                const removed = navService.removeSelectedWaypoints();
-                if (removed > 0) emitInfo(`Removed ${removed} selected waypoint${removed > 1 ? "s" : ""}`);
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="remove" />} label="REMOVE" meta={`${selectedCount} sel.`} compact />
-            </button>
-          </div>
-          <div className="nav-route-programming-row">
-            <button
-              type="button"
-              className={joinClassNames(
-                "ncb-wide sec-btn",
-                actionMenuOpen && "active",
-                (selectedHasAnyAction || selectedHasHome) && "programmed"
-              )}
-              disabled={selectedCount === 0 || navState.controlLocked}
-              title={
-                navState.controlLocked
-                  ? lockReasonText
-                  : selectedCount === 0
-                    ? "Seleccioná uno o más waypoints"
-                    : "Abrir herramientas especiales para los waypoints seleccionados"
-              }
-              onClick={() => {
-                setActionMenuOpen((current) => !current);
-              }}
-            >
-              <ButtonFace
-                icon={<NavGlyph kind="goal" />}
-                label="WAYPOINT TOOLS"
-                meta={
-                  selectedCount === 0
-                    ? "Pick waypoint"
-                    : selectedSingleHome
-                      ? "1 selected · HOME"
-                      : `${selectedCount} selected · tools available`
-                }
-              />
-            </button>
-            {actionMenuOpen ? (
-              <div className="nav-route-action-menu">
-                <div className="nav-route-action-group">
-                  <div className="nav-route-action-group-label">HOME</div>
-                  <button
-                    type="button"
-                    className={joinClassNames("nav-route-action-option", selectedSingleHome && "active")}
-                    disabled={selectedCount !== 1 || navState.controlLocked}
-                    title={
-                      navState.controlLocked
-                        ? lockReasonText
-                        : selectedCount !== 1
-                          ? "Select exactly one waypoint to mark HOME"
-                          : "Mark selected waypoint as HOME"
-                    }
-                    onClick={() => {
-                      try {
-                        const homeIndex = navService.setHomeForSelected();
-                        setActionMenuOpen(false);
-                        emitInfo(`Waypoint ${homeIndex + 1} marked as HOME`);
-                      } catch (error) {
-                        emitError(`HOME waypoint failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Set HOME</span>
-                    <small>Selected waypoint</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="nav-route-action-option"
-                    disabled={selectedHomeCount === 0 || navState.controlLocked}
-                    title={
-                      navState.controlLocked
-                        ? lockReasonText
-                        : selectedHomeCount === 0
-                          ? "Selected waypoints do not include HOME"
-                          : "Clear HOME from selected waypoint"
-                    }
-                    onClick={() => {
-                      try {
-                        const changed = navService.clearHomeForSelected();
-                        setActionMenuOpen(false);
-                        if (changed > 0) emitInfo("HOME removed from selected waypoint");
-                      } catch (error) {
-                        emitError(`HOME waypoint failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Clear HOME</span>
-                    <small>Selected HOME</small>
-                  </button>
-                </div>
-                <div className="nav-route-action-group">
-                  <div className="nav-route-action-group-label">PATROL SEGMENTS</div>
-                  <button
-                    type="button"
-                    className={joinClassNames("nav-route-action-option", patrolReturnCount > 0 && "active")}
-                    disabled={selectedCount === 0 || navState.controlLocked}
-                    title={
-                      navState.controlLocked
-                        ? lockReasonText
-                        : selectedCount === 0
-                          ? "Select one or more waypoints for the return connector"
-                          : "Use selected waypoints as connector back to HOME"
-                    }
-                    onClick={() => {
-                      try {
-                        const count = navService.useSelectedWaypointsAsPatrolSegment("return");
-                        setActionMenuOpen(false);
-                        emitInfo(`Patrol return connector updated (${count} waypoints)`);
-                      } catch (error) {
-                        emitError(`Patrol return connector failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Set RETURN</span>
-                    <small>{selectedCount > 0 ? `${selectedCount} selected` : `${patrolReturnCount} saved`}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="nav-route-action-option danger"
-                    disabled={patrolReturnCount === 0 || navState.controlLocked}
-                    title={navState.controlLocked ? lockReasonText : "Clear the return connector"}
-                    onClick={() => {
-                      try {
-                        navService.clearPatrolSegment("return");
-                        setActionMenuOpen(false);
-                        emitInfo("Patrol return connector cleared");
-                      } catch (error) {
-                        emitError(`Patrol return connector failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Clear RETURN</span>
-                    <small>{patrolReturnCount} waypoint{patrolReturnCount === 1 ? "" : "s"}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={joinClassNames("nav-route-action-option", patrolDepartCount > 0 && "active")}
-                    disabled={selectedCount === 0 || navState.controlLocked}
-                    title={
-                      navState.controlLocked
-                        ? lockReasonText
-                        : selectedCount === 0
-                          ? "Select one or more waypoints for the depart connector"
-                          : "Use selected waypoints as connector from HOME back to the loop"
-                    }
-                    onClick={() => {
-                      try {
-                        const count = navService.useSelectedWaypointsAsPatrolSegment("depart");
-                        setActionMenuOpen(false);
-                        emitInfo(`Patrol depart connector updated (${count} waypoints)`);
-                      } catch (error) {
-                        emitError(`Patrol depart connector failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Set DEPART</span>
-                    <small>{selectedCount > 0 ? `${selectedCount} selected` : `${patrolDepartCount} saved`}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="nav-route-action-option danger"
-                    disabled={patrolDepartCount === 0 || navState.controlLocked}
-                    title={navState.controlLocked ? lockReasonText : "Clear the depart connector"}
-                    onClick={() => {
-                      try {
-                        navService.clearPatrolSegment("depart");
-                        setActionMenuOpen(false);
-                        emitInfo("Patrol depart connector cleared");
-                      } catch (error) {
-                        emitError(`Patrol depart connector failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Clear DEPART</span>
-                    <small>{patrolDepartCount} waypoint{patrolDepartCount === 1 ? "" : "s"}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={joinClassNames(
-                      "nav-route-action-option",
-                      patrolProfile.departEntryLoopIndex >= 0 && "active"
-                    )}
-                    disabled={selectedCount !== 1 || patrolLoopCount < 2 || navState.controlLocked}
-                    title={
-                      navState.controlLocked
-                        ? lockReasonText
-                        : selectedCount !== 1
-                          ? "Select exactly one loop waypoint as re-entry point"
-                          : "Use selected loop waypoint as the re-entry point for DEPART"
-                    }
-                    onClick={() => {
-                      try {
-                        const index = navService.setPatrolDepartEntryFromSelected();
-                        setActionMenuOpen(false);
-                        emitInfo(`Patrol entry set to loop waypoint ${index + 1}`);
-                      } catch (error) {
-                        emitError(`Patrol entry failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Set ENTRY</span>
-                    <small>{patrolProfile.departEntryLoopIndex >= 0 ? `Loop #${patrolProfile.departEntryLoopIndex + 1}` : "Pick 1 loop wp"}</small>
-                  </button>
-                </div>
-                <div className="nav-route-action-group">
-                  <div className="nav-route-action-group-label">ACTIONS</div>
-                <button
-                  type="button"
-                  className={joinClassNames("nav-route-action-option", selectedBrakeHoldEnabled && "active")}
-                  disabled={selectedHasHome || navState.controlLocked}
-                  title={
-                    navState.controlLocked
-                      ? lockReasonText
-                      : selectedHasHome
-                        ? "HOME waypoint cannot have route actions"
-                        : "Set brake action for selected waypoints"
-                  }
-                  onClick={async () => {
-                    const durationRaw = await dialogService.prompt({
-                      title: "Brake action",
-                      message: "Seconds to keep brake before continuing:",
-                      defaultValue: String(Math.max(0.1, selectedBrakeHoldDuration)),
-                      placeholder: "5",
-                      confirmLabel: "Apply",
-                      cancelLabel: "Cancel"
-                    });
-                    if (durationRaw === null) return;
-                    const duration = Number(durationRaw);
-                    if (!Number.isFinite(duration) || duration <= 0 || duration > 600) {
-                      emitError("Brake action duration must be between 0 and 600 seconds");
-                      return;
-                    }
-                    try {
-                      const changed = navService.setBrakeHoldActionForSelected(true, duration, 100);
-                      setActionMenuOpen(false);
-                      emitInfo(`Brake action ${duration}s set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
-                    } catch (error) {
-                      emitError(`Waypoint action failed: ${String(error)}`);
-                    }
-                  }}
-                >
-                  <span>Brake</span>
-                  <small>{selectedBrakeHoldEnabled ? `${selectedBrakeHoldDuration}s` : "Hold before continue"}</small>
-                </button>
-                <button
-                  type="button"
-                  className={joinClassNames("nav-route-action-option", selectedNavigationProfile === "rural" && "active")}
-                  disabled={selectedHasHome || navState.controlLocked}
-                  title={
-                    navState.controlLocked
-                      ? lockReasonText
-                      : selectedHasHome
-                        ? "HOME waypoint cannot have route actions"
-                        : "Activate rural navigation profile at selected waypoints"
-                  }
-                  onClick={() => {
-                    try {
-                      const changed = navService.setNavigationProfileActionForSelected("rural");
-                      setActionMenuOpen(false);
-                      emitInfo(`Rural profile set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
-                    } catch (error) {
-                      emitError(`Waypoint action failed: ${String(error)}`);
-                    }
-                  }}
-                >
-                  <span>Rural profile</span>
-                  <small>{selectedNavigationProfile === "rural" ? "Enabled" : "Narrow dirt road"}</small>
-                </button>
-                <button
-                  type="button"
-                  className={joinClassNames("nav-route-action-option", selectedNavigationProfile === "urban" && "active")}
-                  disabled={selectedHasHome || navState.controlLocked}
-                  title={
-                    navState.controlLocked
-                      ? lockReasonText
-                      : selectedHasHome
-                        ? "HOME waypoint cannot have route actions"
-                        : "Restore urban navigation profile at selected waypoints"
-                  }
-                  onClick={() => {
-                    try {
-                      const changed = navService.setNavigationProfileActionForSelected("urban");
-                      setActionMenuOpen(false);
-                      emitInfo(`Urban profile set on ${changed} waypoint${changed > 1 ? "s" : ""}`);
-                    } catch (error) {
-                      emitError(`Waypoint action failed: ${String(error)}`);
-                    }
-                  }}
-                >
-                  <span>Urban profile</span>
-                  <small>{selectedNavigationProfile === "urban" ? "Enabled" : "Default margins"}</small>
-                </button>
-                {selectedHasAnyAction ? (
-                  <button
-                    type="button"
-                    className="nav-route-action-option danger"
-                    onClick={() => {
-                      try {
-                        const changed = navService.clearWaypointActionsForSelected();
-                        setActionMenuOpen(false);
-                        emitInfo(`Action removed from ${changed} waypoint${changed > 1 ? "s" : ""}`);
-                      } catch (error) {
-                        emitError(`Waypoint action failed: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    <span>Remove action</span>
-                    <small>Selected waypoints</small>
-                  </button>
-                ) : null}
-                </div>
-              </div>
-            ) : null}
-            {routeMission.actionActive ? (
-              <div className="nav-route-action-status">
-                {routeMission.actionType || "action"} · {Math.ceil(Math.max(0, routeMission.actionRemainingS))}s
-              </div>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className={joinClassNames("ncb-wide prim-btn", wps > 0 && !navState.controlLocked && "active")}
-            disabled={navState.controlLocked}
-            title={navState.controlLocked ? lockReasonText : "Activar colocación de waypoint en el mapa"}
-            onClick={() => {
-              void enableMapWaypointPlacement();
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="ADD WAYPOINT" meta={goalModeSelected ? "Click map to place" : "Place on map"} />
-          </button>
-        </div>
-      </NavSidebarCollapsibleSection>
-
-      {/* ── 4. FILE ───────────────────────────────────────────────────── */}
-      <NavSidebarCollapsibleSection
-        title="GESTIÓN DE RUTAS"
-        className="nav-sidebar-compact-section nav-sidebar-file-section"
-        defaultCollapsed
-      >
-        <div className="nav-routes-tools">
-          {navState.routeEditor.activeRouteName ? (
-            <button
-              type="button"
-              className={joinClassNames("ncb-wide prim-btn", navState.routeEditor.dirty && "active")}
-              disabled={!navState.routeEditor.dirty || navState.controlLocked || wps === 0}
-              title={navState.routeEditor.dirty ? `Guardar cambios en ${navState.routeEditor.activeRouteName}` : "La ruta no tiene cambios pendientes"}
-              onClick={() => {
-                try {
-                  const count = navService.saveCurrentNamedRoute();
-                  emitInfo(`Ruta "${navState.routeEditor.activeRouteName}" actualizada (${count} waypoints)`);
-                } catch (error) {
-                  emitError(`Guardar cambios falló: ${String(error)}`);
-                }
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="save" />} label="GUARDAR CAMBIOS" meta={navState.routeEditor.activeRouteName} />
-            </button>
+          ) : patrolProfileConfigured ? (
+            <span>Patrulla: {patrolReady ? "lista" : patrolStartMeta}</span>
+          ) : wps < 2 ? (
+            <span>Añade al menos 2 puntos para poder iniciar una ruta.</span>
           ) : null}
-          <button
-            type="button"
-            className="ncb-wide danger-btn"
-            disabled={wps === 0 || navState.controlLocked}
-            title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
-            onClick={async () => {
-              if (!(await confirmDiscardRouteChanges("limpiar la ruta"))) return;
-              navService.clearWaypoints();
-              emitInfo("Waypoints cleared");
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="clear" />} label="CLEAR" meta="All waypoints" />
-          </button>
+          {routeStartError || patrolStartError ? <p className="ps-status-error" role="alert">{routeStartError || patrolStartError}</p> : null}
         </div>
+      </NavSidebarCollapsibleSection>
 
-        <div className="nav-saved-routes">
-          <button
-            type="button"
-            className="ncb sec-btn nav-saved-routes-add"
-            title="Guardar la ruta actual con un nombre (se guarda en el cockpit, funciona sin conexión)"
-            disabled={wps === 0}
-            onClick={async () => {
-              const name = await dialogService.prompt({
-                title: "Guardar ruta",
-                message: "Nombre para esta ruta:",
-                confirmLabel: "Guardar",
-                placeholder: "ej: Ronda noche"
-              });
-              if (name === null) return;
-              try {
-                const trimmedName = name.trim();
-                if (navState.savedRouteNames.includes(trimmedName) && trimmedName !== navState.routeEditor.activeRouteName) {
-                  const overwrite = await dialogService.confirm({
-                    title: "Sobrescribir ruta",
-                    message: `¿Sobrescribir la ruta "${trimmedName}"?`,
-                    confirmLabel: "Sobrescribir",
-                    danger: true
-                  });
-                  if (!overwrite) return;
-                }
-                const count = navService.saveNamedRoute(name);
-                emitInfo(`Ruta "${trimmedName}" guardada (${count} waypoints)`);
-              } catch (error) {
-                emitError(`Guardar ruta falló: ${String(error)}`);
-              }
-            }}
-          >
-            <ButtonFace icon={<NavGlyph kind="save" />} label="GUARDAR RUTA" meta="Con nombre · local" compact />
-          </button>
-
-          {navState.savedRouteNames.length > 0 ? (
-            <ul className="nav-saved-routes-list">
-              {navState.savedRouteNames.map((routeName) => (
-                <li key={routeName} className="nav-saved-route-item">
-                  <button
-                    type="button"
-                    className="nav-saved-route-load"
-                    aria-current={navState.routeEditor.activeRouteName === routeName ? "true" : undefined}
-                    title={`Cargar "${routeName}"`}
-                    onClick={async () => {
-                      if (!(await confirmDiscardRouteChanges(`cargar "${routeName}"`))) return;
-                      try {
-                        const count = navService.loadNamedRoute(routeName);
-                        emitInfo(`Ruta "${routeName}" cargada (${count} waypoints)`);
-                      } catch (error) {
-                        emitError(`Cargar ruta falló: ${String(error)}`);
-                      }
-                    }}
-                  >
-                    {routeName}
-                  </button>
-                  <button
-                    type="button"
-                    className="nav-saved-route-delete"
-                    aria-label={`Eliminar "${routeName}"`}
-                    title={`Eliminar "${routeName}"`}
-                    onClick={async () => {
-                      const ok = await dialogService.confirm({
-                        title: "Eliminar ruta",
-                        message: `¿Eliminar la ruta "${routeName}"?`,
-                        confirmLabel: "Eliminar",
-                        danger: true
-                      });
-                      if (!ok) return;
-                      navService.deleteNamedRoute(routeName);
-                      emitInfo(`Ruta "${routeName}" eliminada`);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
+      <NavSidebarCollapsibleSection
+        title="PERFIL DE NAVEGACIÓN"
+        className="nav-sidebar-automatic-section nav-sidebar-route-section"
+        defaultCollapsed={true}
+      >
+        <div className="nav-route-subsection nav-navigation-profile-section">
+          <div className="nav-route-subhead">
+            <span>Perfil para próximas misiones</span>
+            <small>{navigationProfileLocked ? "No disponible ahora" : "Aplicar ahora"}</small>
+          </div>
+          {navigationProfileLocked ? (
+            <p className="nav-sidebar-execution-hint">Perfil actual: {navState.navigationStartProfile === "urban" ? "urbano" : "rural"}.</p>
           ) : (
-            <p className="nav-saved-routes-empty muted">No hay rutas guardadas todavía.</p>
+            <div className="nav-navigation-profile-switch" role="group" aria-label="Perfil de navegación">
+              {(["urban", "rural"] as const).map((profile) => (
+                <button
+                  key={profile}
+                  type="button"
+                  className={joinClassNames(
+                    "nav-navigation-profile-option",
+                    navState.navigationStartProfile === profile && "active"
+                  )}
+                  disabled={navigationProfilePending}
+                  onClick={async () => {
+                    setNavigationProfilePending(true);
+                    try {
+                      await navService.setNavigationStartProfile(profile);
+                      emitInfo(`Perfil de navegación aplicado: ${profile === "urban" ? "urbano" : "rural"}`);
+                    } catch (error) {
+                      emitError(`No se pudo aplicar el perfil de navegación: ${String(error)}`);
+                    } finally {
+                      setNavigationProfilePending(false);
+                    }
+                  }}
+                >
+                  <span>{profile === "urban" ? "URBANO" : "RURAL"}</span>
+                  <small>{profile === "urban" ? "Márgenes predeterminados" : "Camino de tierra angosto"}</small>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </NavSidebarCollapsibleSection>
@@ -3250,6 +2450,13 @@ function registerSidebarPanels(ctx: ModuleContext): void {
     label: "Navigation",
     icon: "🧭",
     render: () => <NavigationSidebarPanel runtime={ctx} />
+  });
+  ctx.contributions.register({
+    id: "workspace.route-editor",
+    slot: "workspace",
+    label: "Editor de rutas",
+    order: 25,
+    render: () => <RouteEditorWorkspace runtime={ctx} />
   });
 }
 

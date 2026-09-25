@@ -6,6 +6,7 @@ import "leaflet-draw/dist/leaflet.draw.css";
 import "./styles.css";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
+import { ShellCommands } from "../../../../../app/shellCommands";
 import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
 import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
@@ -612,6 +613,9 @@ function LeafletMapCanvas({
   waypoints,
   patrolMissionProfile,
   selectedWaypointIndexes,
+  insertionAfterIndex,
+  insertionSegment,
+  insertionSegmentIndex,
   robotPose,
   datumPose,
   centerRequestKey,
@@ -636,6 +640,9 @@ function LeafletMapCanvas({
   waypoints: NavigationState["waypoints"];
   patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
+  insertionAfterIndex: number | null;
+  insertionSegment: NavigationState["routeEditor"]["insertionSegment"];
+  insertionSegmentIndex: number | null;
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
@@ -1649,12 +1656,12 @@ function LeafletMapCanvas({
                 `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}:${entry.patrolSegment ?? "-"}`
                 + `:${entry.displayBadge}`
             )
-            .join("|");
+            .join("|") + `|insert:${insertionAfterIndex ?? "-"}:${insertionSegment ?? "-"}:${insertionSegmentIndex ?? "-"}`;
     if (renderKey === waypointRenderKeyRef.current) return;
     waypointRenderKeyRef.current = renderKey;
     layer.clearLayers();
     if (displayPoints.length === 0) return;
-      displayPoints.forEach((entry) => {
+    displayPoints.forEach((entry) => {
         const marker = L.marker([entry.lat, entry.lon], {
           icon: buildWaypointIcon(
             entry.displayBadge,
@@ -1690,7 +1697,7 @@ function LeafletMapCanvas({
       });
       marker.addTo(layer);
     });
-  }, [loopRoute, patrolMissionProfile, robotPose, selectedWaypointIndexes, waypoints]);
+  }, [insertionAfterIndex, insertionSegment, insertionSegmentIndex, loopRoute, patrolMissionProfile, robotPose, selectedWaypointIndexes, waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2454,6 +2461,34 @@ function CockpitMapCanvas({
   );
 }
 
+function describePendingWaypointInsertion(state: NavigationState): string {
+  const afterIndex = state.routeEditor.insertionAfterIndex;
+  if (afterIndex === null) return "";
+  if (afterIndex < 0) return "Colocando el primer punto";
+  const segment = state.routeEditor.insertionSegment;
+  const segmentIndex = state.routeEditor.insertionSegmentIndex;
+  if (segment && segmentIndex !== null) {
+    const points = state.patrolMissionProfile[`${segment}Waypoints`];
+    const before = points[segmentIndex - 1];
+    const after = points[segmentIndex] ?? (segment === "loop" ? points[0] : undefined);
+    const beforeIndex = before ? state.waypoints.findIndex((waypoint) => waypoint.localId === before.localId) : -1;
+    const afterWaypointIndex = after ? state.waypoints.findIndex((waypoint) => waypoint.localId === after.localId) : -1;
+    const labels: Record<typeof segment, string> = {
+      loop: "recorrido principal",
+      depart: "salida desde HOME",
+      return: "regreso a HOME"
+    };
+    if (beforeIndex >= 0 && afterWaypointIndex >= 0) {
+      return `Insertando en ${labels[segment]} entre los puntos ${beforeIndex + 1} y ${afterWaypointIndex + 1}`;
+    }
+    if (beforeIndex >= 0) return `Añadiendo al final de ${labels[segment]}, después del punto ${beforeIndex + 1}`;
+  }
+  if (afterIndex + 1 < state.waypoints.length) {
+    return `Insertando entre los puntos ${afterIndex + 1} y ${afterIndex + 2}`;
+  }
+  return `Añadiendo después del punto ${afterIndex + 1}`;
+}
+
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
   const mapService = runtime.services.getService<MapService>(SERVICE_ID);
@@ -2960,6 +2995,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
             yawDeg
           };
     const insertionAfterIndex = navigationState.routeEditor.insertionAfterIndex;
+    const insertedIndex = insertionAfterIndex !== null ? insertionAfterIndex + 1 : navigationState.waypoints.length;
     if (insertionAfterIndex !== null) {
       const insertionSegment = navigationState.routeEditor.insertionSegment;
       const insertionSegmentIndex = navigationState.routeEditor.insertionSegmentIndex;
@@ -2973,6 +3009,8 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     } else {
       navigationService.queueWaypoint(waypoint);
     }
+    navigationService.setWaypointSelection([insertedIndex]);
+    void navigationService.setGoalMode(false).catch(() => undefined);
     runtime.eventBus.emit("console.event", {
       level: "info",
       text: `${insertionAfterIndex !== null ? "Waypoint inserted" : "Waypoint queued"} from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
@@ -2980,6 +3018,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
       }`,
       timestamp: Date.now()
     });
+    runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
   };
 
   const toggleWaypointSelectionFromMap = (index: number): void => {
@@ -3005,13 +3044,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!mainIsMap || !mapToolsEnabled || isEditingTarget(event.target)) return;
-      if (event.key === "Escape" && (state.toolMode !== "idle" || leafletZoneToolActive)) {
-        closeMapTools();
+      if (event.key === "Escape" && navigationService && navigationState?.routeEditor.insertionAfterIndex !== null) {
+        navigationService.cancelWaypointInsertion();
+        void navigationService.setGoalMode(false).catch(() => undefined);
+        runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
         event.preventDefault();
         return;
       }
-      if (event.key === "Escape" && navigationService && navigationState?.routeEditor.insertionAfterIndex !== null) {
-        navigationService.cancelWaypointInsertion();
+      if (event.key === "Escape" && (state.toolMode !== "idle" || leafletZoneToolActive)) {
+        closeMapTools();
         event.preventDefault();
         return;
       }
@@ -3049,6 +3090,19 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
 
   return (
     <div className="map-workspace-root map-html-root">
+      {navigationState?.routeEditor.insertionAfterIndex !== null && navigationState?.routeEditor.insertionAfterIndex !== undefined ? (
+        <div className="map-route-insertion-banner" role="status">
+          <div>
+            <strong>{describePendingWaypointInsertion(navigationState)}</strong>
+            <span>Haz clic en el mapa para colocar el punto. Después volverás al editor.</span>
+          </div>
+          <button type="button" onClick={() => {
+            navigationService?.cancelWaypointInsertion();
+            void navigationService?.setGoalMode(false).catch(() => undefined);
+            runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
+          }}>Cancelar y volver al editor</button>
+        </div>
+      ) : null}
       <div className={`stage map-stage map-html-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
         {mainIsMap ? (
           <section className="stage-pane main map-stage-pane">
@@ -3071,6 +3125,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   }
                 }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                insertionAfterIndex={navigationState?.routeEditor.insertionAfterIndex ?? null}
+                insertionSegment={navigationState?.routeEditor.insertionSegment ?? null}
+                insertionSegmentIndex={navigationState?.routeEditor.insertionSegmentIndex ?? null}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
@@ -3152,6 +3209,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   }
                 }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                insertionAfterIndex={navigationState?.routeEditor.insertionAfterIndex ?? null}
+                insertionSegment={navigationState?.routeEditor.insertionSegment ?? null}
+                insertionSegmentIndex={navigationState?.routeEditor.insertionSegmentIndex ?? null}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}

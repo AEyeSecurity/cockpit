@@ -8267,3 +8267,66 @@ pre {
   background: rgba(223, 233, 201, 0.9);
   color: #3f5a23;
 }
+.nav-sidebar-route-summary {
+  display: grid;
+  gap: 6px;
+  padding: 5px 2px 3px;
+}
+.nav-sidebar-route-summary > strong {
+  overflow: hidden;
+  color: var(--vscode-foreground, #e6edf6);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-sidebar-route-summary > span { color: #a9b9c8; font-size: 12px; }
+.nav-sidebar-route-summary > span.pending { color: #edbd69; font-weight: 650; }
+.nav-sidebar-route-summary > span.saved { color: #91d8a9; }
+.nav-sidebar-route-summary > p {
+  margin: 3px 0 5px;
+  padding: 8px 9px;
+  border: 1px solid #715c3d;
+  border-radius: 7px;
+  color: #f0cc8d;
+  background: #2c271e;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.nav-sidebar-open-route-editor { margin-top: 4px; }
+.nav-sidebar-execution-hint {
+  margin: 2px 0 0;
+  color: #c3d0da;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.nav-sidebar > .nav-sidebar-connection-section { order: 1; }
+.nav-sidebar > .nav-sidebar-manual-section { order: 2; }
+.nav-sidebar > .nav-sidebar-route-summary-section { order: 3; }
+.nav-sidebar > .nav-sidebar-automatic-section { order: 4; }
+.nav-sidebar > .nav-sidebar-datum-section { order: 5; }
+
+/* The route summary carries the lock reason once; disabled controls stay text-first. */
+#root .nav-sidebar .nav-sidebar-section-content button:disabled:not(.active)::before,
+#root .nav-sidebar .nav-sidebar-section-content button:disabled:not(.active)::after,
+#root .nav-sidebar .nav-sidebar-section-content .ncb:disabled:not(.active)::before,
+#root .nav-sidebar .nav-sidebar-section-content .ncb:disabled:not(.active)::after,
+#root .nav-sidebar .nav-sidebar-section-content .ncb-wide:disabled:not(.active)::before,
+#root .nav-sidebar .nav-sidebar-section-content .ncb-wide:disabled:not(.active)::after {
+  display: none !important;
+  content: none !important;
+}
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content button:not(.nav-sidebar-section-header):disabled:not(.active)::before,
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content button:not(.nav-sidebar-section-header):disabled:not(.active)::after,
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content .ncb:disabled:not(.active)::before,
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content .ncb:disabled:not(.active)::after,
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content .ncb-wide:disabled:not(.active)::before,
+#root .nav-sidebar.nav-sidebar .nav-sidebar-section-content .ncb-wide:disabled:not(.active)::after {
+  display: none !important;
+  content: none !important;
+}
+#root .nav-sidebar .nav-sidebar-section-content button:disabled:not(.active),
+#root .nav-sidebar .nav-sidebar-section-content .ncb:disabled:not(.active),
+#root .nav-sidebar .nav-sidebar-section-content .ncb-wide:disabled:not(.active) {
+  padding-right: 12px !important;
+}

@@ -1481,7 +1481,10 @@ export class NavigationService {
     this.emit();
   }
 
-  beginWaypointInsertion(afterIndex: number): void {
+  beginWaypointInsertion(
+    afterIndex: number,
+    segmentOptions?: { segment: PatrolRouteSegment; segmentIndex: number }
+  ): void {
     const target = Math.trunc(Number(afterIndex));
     if (target < -1 || target >= this.state.waypoints.length) {
       throw new Error("Waypoint insertion position is unavailable");
@@ -1496,9 +1499,30 @@ export class NavigationService {
       { segment: "return", index: this.state.patrolMissionProfile.returnWaypoints.findIndex((waypoint) => waypointLocalId(waypoint) === anchorId) },
       { segment: "depart", index: this.state.patrolMissionProfile.departWaypoints.findIndex((waypoint) => waypointLocalId(waypoint) === anchorId) }
     ];
-    const segmentMatch = segmentCandidates.find((candidate) => candidate.index >= 0) ?? null;
+    const segmentMatch = segmentOptions
+      ? { segment: segmentOptions.segment, index: Math.max(0, Math.min(
+        this.state.patrolMissionProfile[`${segmentOptions.segment}Waypoints`].length,
+        Math.trunc(Number(segmentOptions.segmentIndex))
+      )) - 1 }
+      : segmentCandidates.find((candidate) => candidate.index >= 0) ?? null;
+    const segmentPoints = segmentMatch
+      ? this.state.patrolMissionProfile[`${segmentMatch.segment}Waypoints`]
+      : [];
+    const segmentBefore = segmentMatch ? segmentPoints[segmentMatch.index] : undefined;
+    const segmentAfter = segmentMatch
+      ? segmentPoints[segmentMatch.index + 1] ?? (segmentMatch.segment === "loop" ? segmentPoints[0] : undefined)
+      : undefined;
+    const routeIndexFor = (waypoint: GoalInput | undefined): number =>
+      waypoint ? this.state.waypoints.findIndex((entry) => waypointLocalId(entry) === waypointLocalId(waypoint)) : -1;
+    const beforeIndex = routeIndexFor(segmentBefore);
+    const afterSegmentIndex = routeIndexFor(segmentAfter);
     this.state = {
       ...this.state,
+      selectedWaypointIndexes: segmentMatch
+        ? [...new Set([beforeIndex, afterSegmentIndex].filter((index) => index >= 0))]
+        : target >= 0
+          ? [target, ...(target + 1 < this.state.waypoints.length ? [target + 1] : [])]
+          : [],
       goalMode: true,
       manualMode: false,
       manualWaypointDirection: true,
@@ -1634,6 +1658,36 @@ export class NavigationService {
         patrolMissionProfile: reconcilePatrolMissionProfile(waypoints, this.state.patrolMissionProfile),
         selectedWaypointIndexes: sanitizeSelection(selected, waypoints.length),
         lastStatus: `Waypoint moved to ${to + 1}`
+      };
+    });
+    this.emit();
+    return true;
+  }
+
+  reorderPatrolSegment(segment: PatrolRouteSegment, fromIndex: number, toIndex: number): boolean {
+    const key = `${segment}Waypoints` as const;
+    const points = [...this.state.patrolMissionProfile[key]];
+    const from = Math.trunc(Number(fromIndex));
+    const to = Math.trunc(Number(toIndex));
+    if (from < 0 || from >= points.length || to < 0 || to >= points.length || from === to) return false;
+    const entryId = segment === "loop" && this.state.patrolMissionProfile.departEntryLoopIndex >= 0
+      ? waypointLocalId(this.state.patrolMissionProfile.loopWaypoints[this.state.patrolMissionProfile.departEntryLoopIndex]!)
+      : null;
+    const [moved] = points.splice(from, 1);
+    if (!moved) return false;
+    points.splice(to, 0, moved);
+    this.commitRouteEdit(() => {
+      const patrolMissionProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+        ...this.state.patrolMissionProfile,
+        [key]: points,
+        ...(segment === "loop" && entryId
+          ? { departEntryLoopIndex: points.findIndex((waypoint) => waypointLocalId(waypoint) === entryId) }
+          : {})
+      });
+      this.state = {
+        ...this.state,
+        patrolMissionProfile,
+        lastStatus: `Patrol ${segment} waypoint order updated`
       };
     });
     this.emit();

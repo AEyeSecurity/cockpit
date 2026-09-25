@@ -7492,3 +7492,25 @@ input[type="range"]::-moz-range-track {
     transition: none;
   }
 }
+.map-route-insertion-banner {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 10px 12px 0;
+  padding: 12px 15px;
+  border: 1px solid #5482a6;
+  border-radius: 10px;
+  color: #e4f2ff;
+  background: #1c3448;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+.map-route-insertion-banner > div { display: grid; gap: 3px; }
+.map-route-insertion-banner strong { font-size: 14px; }
+.map-route-insertion-banner span { color: #b5cbe0; font-size: 12px; }
+.map-route-insertion-banner button { flex: 0 0 auto; }
+@media (max-width: 620px) {
+  .map-route-insertion-banner { align-items: flex-start; flex-direction: column; }
+}
