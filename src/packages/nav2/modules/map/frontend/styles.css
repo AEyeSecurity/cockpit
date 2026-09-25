@@ -7394,3 +7394,75 @@ input[type="range"]::-moz-range-track {
   font-size: 10px !important;
   line-height: 1.25 !important;
 }
+
+/* Keep camera controls clear of the frame and give the live preview more room. */
+.map-right-stack .map-camera-stage-pane-mini.is-video-active {
+  align-self: flex-end !important;
+  width: min(390px, calc(100vw - 96px)) !important;
+  height: clamp(220px, 30vh, 280px) !important;
+  min-height: 220px !important;
+  max-width: calc(100vw - 96px) !important;
+  transform: none !important;
+  transition: width 180ms ease, height 180ms ease;
+}
+
+.map-camera-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 7px;
+  background: rgba(20, 20, 20, 0.9);
+  color: #f1f1f1;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.map-camera-stop-btn:hover {
+  background: rgba(58, 25, 25, 0.96);
+  border-color: rgba(255, 160, 160, 0.55);
+}
+
+.map-camera-stop-btn:focus-visible,
+.map-camera-request-btn:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.map-camera-full-card .map-camera-request-btn.is-active {
+  top: 12px;
+  right: 12px;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  min-width: 48px;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(18, 18, 18, 0.82);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 900px), (max-height: 760px) {
+  .map-right-stack .map-camera-stage-pane-mini.is-video-active {
+    width: min(350px, calc(100vw - 86px)) !important;
+    height: clamp(190px, 28vh, 230px) !important;
+    min-height: 190px !important;
+    max-width: calc(100vw - 86px) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-right-stack .map-camera-stage-pane-mini.is-video-active {
+    transition: none;
+  }
+}

@@ -3085,8 +3085,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   />
                 ) : null}
                 {cameraEnabled ? (
-                  <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
-                    {videoRequested ? "Stop video" : "Start video"}
+                  <button
+                    type="button"
+                    className={`map-camera-request-btn${videoRequested ? " is-active" : ""}`}
+                    onClick={() => setVideoRequested((current) => !current)}
+                    aria-label={videoRequested ? "Stop video" : "Start video"}
+                    title={videoRequested ? "Stop video" : "Start video"}
+                  >
+                    {videoRequested ? "Stop" : "Start video"}
                   </button>
                 ) : null}
                 {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
@@ -3148,10 +3154,21 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           <>
             <div className="map-right-stack">
               {showMiniCameraPane ? (
-                <section className="map-camera-stage-pane map-camera-stage-pane-mini">
+                <section className={`map-camera-stage-pane map-camera-stage-pane-mini${showVideo ? " is-video-active" : ""}`}>
                   <div className="map-camera-mini-head">
                     <span>Camera</span>
                     <div className="map-camera-mini-head-right">
+                      {cameraEnabled && videoRequested ? (
+                        <button
+                          type="button"
+                          className="map-camera-stop-btn"
+                          onClick={() => setVideoRequested(false)}
+                          aria-label="Stop video"
+                          title="Stop video"
+                        >
+                          Stop
+                        </button>
+                      ) : null}
                       {cameraPaneAvailable ? (
                         <button type="button" className="map-camera-expand-btn" onClick={() => setMainPane("camera")} title="Abrir cámara">
                           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3175,9 +3192,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                         onStatusChange={setCameraStreamStatus}
                       />
                     ) : null}
-                    {cameraEnabled ? (
-                      <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
-                        {videoRequested ? "Stop video" : "Start video"}
+                    {cameraEnabled && !videoRequested ? (
+                      <button
+                        type="button"
+                        className="map-camera-request-btn"
+                        onClick={() => setVideoRequested(true)}
+                        aria-label="Start video"
+                        title="Start video"
+                      >
+                        Start video
                       </button>
                     ) : null}
                     {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
