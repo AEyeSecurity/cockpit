@@ -147,6 +147,19 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   ];
   const indexForId = (id: string | undefined): number =>
     state.waypoints.findIndex((waypoint) => waypoint.localId === id);
+  const selectedSegmentInsertions = selectedWaypoint ? segmentRows.flatMap((segment) => {
+    const segmentIndex = segment.points.findIndex((point) => point.localId === selectedWaypoint.localId);
+    if (segmentIndex < 0) return [];
+    const nextPoint = segment.points[segmentIndex + 1] ?? (segment.key === "loop" ? segment.points[0] : null);
+    const nextIndex = nextPoint ? indexForId(nextPoint.localId) : -1;
+    return [{
+      segment: segment.key,
+      segmentIndex: segmentIndex + 1,
+      label: nextIndex >= 0
+        ? `Insertar entre ${selectedIndex! + 1} y ${nextIndex + 1} en ${segment.label}`
+        : `Añadir después del punto ${selectedIndex! + 1} en ${segment.label}`
+    }];
+  }) : [];
 
   return (
     <main className="route-editor" aria-label="Editor de rutas">
@@ -205,7 +218,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
       </section>
 
       {state.savedRouteNames.length ? (
-        <details className="route-editor-card route-editor-saved-routes" open>
+        <details className="route-editor-card route-editor-saved-routes">
           <summary>Rutas guardadas en Cockpit ({state.savedRouteNames.length})</summary>
           <ul>
             {state.savedRouteNames.map((name) => <li key={name}>
@@ -225,7 +238,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         <div className="route-editor-card-heading route-editor-waypoints-heading">
           <div>
             <h2 id="route-waypoints-title">Puntos de la ruta</h2>
-            <p>Selecciona un punto para ver sus opciones. Usa «Insertar después» para ajustar un tramo en el mapa.</p>
+            <p>Selecciona un punto para ver sus opciones e insertar otro entre tramos en el mapa.</p>
           </div>
           <div className="route-editor-history-actions">
             <button type="button" className="route-editor-button" disabled={!count || editingDisabled} onClick={() => navigation.selectAllWaypoints()}>Seleccionar todos</button>
@@ -249,89 +262,108 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             </div>
           </div>
         ) : (
-          <ol className="route-editor-list">
-            {state.waypoints.map((waypoint, index) => {
-              const selected = state.selectedWaypointIndexes.includes(index);
-              const yaw = waypoint.yawDeg;
-              const tags = waypointTags(waypoint, state);
-              return (
-                <li key={waypoint.localId ?? `${waypoint.x}-${waypoint.y}-${index}`} className="route-editor-list-item">
-                  <div className={`route-editor-waypoint ${selected ? "selected" : ""}`}>
-                    <button type="button" className="route-editor-waypoint-select" aria-pressed={selected} disabled={editingDisabled}
-                      onClick={(event) => selectWaypoint(index, event.shiftKey)}>
-                      <span className="route-editor-waypoint-number">{index + 1}</span>
-                      <span className="route-editor-waypoint-main">
-                        <strong>{waypoint.role === "home" ? `Punto ${index + 1} · HOME` : `Punto ${index + 1}`}</strong>
-                        <small>{Number(waypoint.x).toFixed(6)}, {Number(waypoint.y).toFixed(6)} · {yaw === undefined ? "Orientación automática" : `Orientación ${Number(yaw).toFixed(1)}°`}</small>
-                      </span>
-                      <span className="route-editor-waypoint-tags">
-                        {tags.map((tag) => <span key={tag} className="route-editor-tag">{tag}</span>)}
-                        {(waypoint.actions ?? []).map((action, actionIndex) => (
-                          <span key={`${action.type}-${actionIndex}`} className="route-editor-tag action">
-                            {action.type === "brake_hold" ? `Pausa ${action.duration_s}s` : action.profile === "rural" ? "Perfil rural" : "Perfil urbano"}
-                          </span>
-                        ))}
-                      </span>
-                    </button>
+          <div className="route-editor-waypoint-layout">
+            <ol className="route-editor-list" aria-label="Puntos de la ruta">
+              {state.waypoints.map((waypoint, index) => {
+                const selected = state.selectedWaypointIndexes.includes(index);
+                const yaw = waypoint.yawDeg;
+                const tags = waypointTags(waypoint, state);
+                return (
+                  <li key={waypoint.localId ?? `${waypoint.x}-${waypoint.y}-${index}`} className="route-editor-list-item">
+                    <div className={`route-editor-waypoint ${selected ? "selected" : ""}`}>
+                      <button type="button" className="route-editor-waypoint-select" aria-pressed={selected}
+                        onClick={(event) => selectWaypoint(index, event.shiftKey)}>
+                        <span className="route-editor-waypoint-number">{index + 1}</span>
+                        <span className="route-editor-waypoint-main">
+                          <strong>{waypoint.role === "home" ? `Punto ${index + 1} · HOME` : `Punto ${index + 1}`}</strong>
+                          <small>{Number(waypoint.x).toFixed(6)}, {Number(waypoint.y).toFixed(6)} · {yaw === undefined ? "Orientación automática" : `Orientación ${Number(yaw).toFixed(1)}°`}</small>
+                        </span>
+                        <span className="route-editor-waypoint-tags">
+                          {tags.map((tag) => <span key={tag} className="route-editor-tag">{tag}</span>)}
+                          {(waypoint.actions ?? []).map((action, actionIndex) => (
+                            <span key={`${action.type}-${actionIndex}`} className="route-editor-tag action">
+                              {action.type === "brake_hold" ? `Pausa ${action.duration_s}s` : action.profile === "rural" ? "Perfil rural" : "Perfil urbano"}
+                            </span>
+                          ))}
+                        </span>
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            <aside className="route-editor-selected-tools" aria-label={selectedWaypoint ? `Opciones del punto ${selectedIndex! + 1}` : "Opciones del punto"}>
+              {selectedWaypoint ? (
+              <>
+                <div>
+                  <h3>Opciones del punto {selectedIndex! + 1}</h3>
+                  <p>Las opciones se aplican al punto seleccionado.</p>
+                </div>
+                {!structuredPatrol ? (
+                  <button type="button" className="route-editor-button primary route-editor-insert-action" disabled={editingDisabled}
+                    onClick={() => void openMap(selectedIndex!)}>
+                    {selectedIndex! < count - 1
+                      ? `Insertar entre ${selectedIndex! + 1} y ${selectedIndex! + 2} en el mapa`
+                      : `Añadir después del punto ${selectedIndex! + 1} en el mapa`}
+                  </button>
+                ) : selectedSegmentInsertions.length ? (
+                  <div className="route-editor-insert-choices">
+                    {selectedSegmentInsertions.map((choice) => (
+                      <button key={choice.segment} type="button" className="route-editor-button primary"
+                        disabled={editingDisabled}
+                        onClick={() => void openMap(selectedIndex!, { segment: choice.segment, segmentIndex: choice.segmentIndex })}>
+                        {choice.label}
+                      </button>
+                    ))}
                   </div>
-                  {!structuredPatrol && index < count - 1 ? <div className="route-editor-insertion-slot">
-                    <span aria-hidden="true" />
-                    <button type="button" disabled={editingDisabled} onClick={() => void openMap(index)}>
-                      + Insertar punto entre {index + 1} y {index + 2}
-                    </button>
-                    <span aria-hidden="true" />
-                  </div> : null}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-
-        {selectedWaypoint ? (
-          <div className="route-editor-selected-tools" aria-label={`Opciones del punto ${selectedIndex! + 1}`}>
-            <div>
-              <h3>Opciones del punto {selectedIndex! + 1}</h3>
-              <p>Las opciones se aplican solo al punto seleccionado.</p>
-            </div>
-            <div className="route-editor-tool-buttons">
-              <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === 0}
-                aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}
-                onClick={() => navigation.reorderWaypoint(selectedIndex!, selectedIndex! - 1)}>Mover arriba en la lista</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === count - 1}
-                aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}
-                onClick={() => navigation.reorderWaypoint(selectedIndex!, selectedIndex! + 1)}>Mover abajo en la lista</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled}
-                onClick={() => withError(() => navigation.setHomeForSelected(), "Punto marcado como HOME.")}>Marcar como HOME</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role !== "home"}
-                onClick={() => withError(() => navigation.clearHomeForSelected(), "Marca HOME quitada.")}>Quitar marca HOME</button>
-              <button type="button" className="route-editor-button danger" disabled={editingDisabled}
-                onClick={async () => {
-                  const ok = await dialogs.confirm({ title: "Eliminar punto", message: `¿Eliminar el punto ${selectedIndex! + 1}?`, confirmLabel: "Eliminar", danger: true });
-                  if (ok) withError(() => navigation.removeWaypoint(selectedIndex!), "Punto eliminado.");
-                }}>Eliminar punto</button>
-            </div>
-            {structuredPatrol ? (
-              <p id="route-editor-segment-order-hint" className="route-editor-hint">Para cambiar el orden de ejecución de la patrulla, usa Subir y Bajar en los segmentos. El orden de la lista general se conserva por separado.</p>
-            ) : null}
-            <div className="route-editor-tool-buttons route-editor-action-buttons">
-              <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
-                onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("urban"), "Perfil urbano asignado.")}>Usar perfil urbano</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
-                onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("rural"), "Perfil rural asignado.")}>Usar perfil rural</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
-                onClick={async () => {
-                  const value = await dialogs.prompt({ title: "Pausa en el punto", message: "Segundos que debe esperar el robot:", defaultValue: "5", confirmLabel: "Aplicar" });
-                  if (value === null) return;
-                  const seconds = Number(value);
-                  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) { setMessage("Escribe una duración entre 0 y 600 segundos."); return; }
-                  withError(() => navigation.setBrakeHoldActionForSelected(true, seconds), `Pausa de ${seconds} segundos asignada.`);
-                }}>Añadir pausa…</button>
-              <button type="button" className="route-editor-button" disabled={editingDisabled || !(selectedWaypoint.actions?.length)}
-                onClick={() => withError(() => navigation.clearWaypointActionsForSelected(), "Acciones quitadas del punto.")}>Quitar acciones</button>
-            </div>
-            <p className="route-editor-hint">Consejo: mantén Shift al seleccionar para elegir varios puntos y asignarlos juntos a un segmento.</p>
+                ) : <p className="route-editor-hint">Este punto no pertenece a un tramo de patrulla.</p>}
+                <div className="route-editor-tool-buttons">
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === 0}
+                    aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}
+                    onClick={() => navigation.reorderWaypoint(selectedIndex!, selectedIndex! - 1)}>Mover arriba en la lista</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === count - 1}
+                    aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}
+                    onClick={() => navigation.reorderWaypoint(selectedIndex!, selectedIndex! + 1)}>Mover abajo en la lista</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled}
+                    onClick={() => withError(() => navigation.setHomeForSelected(), "Punto marcado como HOME.")}>Marcar como HOME</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role !== "home"}
+                    onClick={() => withError(() => navigation.clearHomeForSelected(), "Marca HOME quitada.")}>Quitar marca HOME</button>
+                  <button type="button" className="route-editor-button danger" disabled={editingDisabled}
+                    onClick={async () => {
+                      const ok = await dialogs.confirm({ title: "Eliminar punto", message: `¿Eliminar el punto ${selectedIndex! + 1}?`, confirmLabel: "Eliminar", danger: true });
+                      if (ok) withError(() => navigation.removeWaypoint(selectedIndex!), "Punto eliminado.");
+                    }}>Eliminar punto</button>
+                </div>
+                {structuredPatrol ? (
+                  <p id="route-editor-segment-order-hint" className="route-editor-hint">Para cambiar el orden de ejecución de la patrulla, usa Subir y Bajar en los segmentos. El orden de la lista general se conserva por separado.</p>
+                ) : null}
+                <div className="route-editor-tool-buttons route-editor-action-buttons">
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
+                    onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("urban"), "Perfil urbano asignado.")}>Usar perfil urbano</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
+                    onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("rural"), "Perfil rural asignado.")}>Usar perfil rural</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
+                    onClick={async () => {
+                      const value = await dialogs.prompt({ title: "Pausa en el punto", message: "Segundos que debe esperar el robot:", defaultValue: "5", confirmLabel: "Aplicar" });
+                      if (value === null) return;
+                      const seconds = Number(value);
+                      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) { setMessage("Escribe una duración entre 0 y 600 segundos."); return; }
+                      withError(() => navigation.setBrakeHoldActionForSelected(true, seconds), `Pausa de ${seconds} segundos asignada.`);
+                    }}>Añadir pausa…</button>
+                  <button type="button" className="route-editor-button" disabled={editingDisabled || !(selectedWaypoint.actions?.length)}
+                    onClick={() => withError(() => navigation.clearWaypointActionsForSelected(), "Acciones quitadas del punto.")}>Quitar acciones</button>
+                </div>
+                <p className="route-editor-hint">Mantén Shift para seleccionar varios puntos y asignarlos juntos a un segmento.</p>
+              </>
+              ) : (
+                <div className="route-editor-select-prompt">
+                  <h3>Selecciona un punto</h3>
+                  <p>Elige un punto de la lista para ver aquí sus opciones y añadir puntos entre tramos.</p>
+                </div>
+              )}
+            </aside>
           </div>
-        ) : null}
+        )}
       </section>
 
       <section className="route-editor-card" aria-labelledby="patrol-setup-title">

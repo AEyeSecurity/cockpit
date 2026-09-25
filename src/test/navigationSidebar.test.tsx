@@ -73,7 +73,8 @@ describe("navigation sidebar and route editor", () => {
     render(<>{editor.render()}</>);
 
     const savedRoutes = screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`).closest("details");
-    expect(savedRoutes).toHaveAttribute("open");
+    expect(savedRoutes).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`));
     for (const name of routeNames) expect(savedRoutes).toHaveTextContent(name);
     const routePicker = screen.getByRole("combobox", { name: "Abrir ruta guardada" }) as HTMLSelectElement;
     expect(Array.from(routePicker.options).map((option) => option.value).filter(Boolean)).toEqual(routeNames);
@@ -138,7 +139,7 @@ describe("navigation sidebar and route editor", () => {
     expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
   });
 
-  it("starts insertion from the visible gap and selects the inserted point", async () => {
+  it("keeps point actions beside a compact list and inserts after the selection", async () => {
     const runtime = await bootstrapApp();
     const editor = runtime.contributions.get("nav2.workspace.route-editor");
     if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
@@ -152,7 +153,12 @@ describe("navigation sidebar and route editor", () => {
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
 
     render(<>{editor.render()}</>);
-    fireEvent.click(screen.getByRole("button", { name: "+ Insertar punto entre 1 y 2" }));
+    expect(screen.queryByText("Opciones del punto 1")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".route-editor-insertion-slot")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /Punto 1.*10\.000000/ }));
+    const panel = screen.getByLabelText("Opciones del punto 1");
+    expect(panel.parentElement).toHaveClass("route-editor-waypoint-layout");
+    fireEvent.click(screen.getByRole("button", { name: "Insertar entre 1 y 2 en el mapa" }));
     await waitFor(() => expect(navigationService.getState().routeEditor.insertionAfterIndex).toBe(0));
     expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
 
@@ -182,7 +188,8 @@ describe("navigation sidebar and route editor", () => {
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
 
     render(<>{editor.render()}</>);
-    fireEvent.click(screen.getByRole("button", { name: "Insertar entre 3 y 2" }));
+    fireEvent.click(screen.getByRole("list", { name: "Puntos de la ruta" }).querySelectorAll("button")[2]);
+    fireEvent.click(screen.getByRole("button", { name: "Insertar entre 3 y 2 en Recorrido principal" }));
 
     await waitFor(() => expect(navigationService.getState().routeEditor.insertionSegmentIndex).toBe(3));
     expect(navigationService.getState().routeEditor.insertionSegment).toBe("loop");
