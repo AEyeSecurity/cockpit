@@ -110,6 +110,15 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
       reportError(error);
     }
   };
+  const createNewRoute = async (): Promise<void> => {
+    if (!(await confirmDiscard("crear una ruta nueva"))) return;
+    try {
+      navigation.createNewRouteDraft();
+      setMessage("Ruta nueva preparada. Añade el primer punto en el mapa y guárdala cuando termines.");
+    } catch (error) {
+      reportError(error);
+    }
+  };
   const selectWaypoint = (index: number, additive = false): void => {
     if (additive) {
       navigation.toggleWaypointSelection(index);
@@ -135,6 +144,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   const patrolReadiness = getPatrolProfileReadiness(state.patrolMissionProfile);
   const structuredPatrol = patrolReadiness.profileConfigured;
   const editingDisabled = state.controlLocked || state.routeMission.active || state.patrolMission.active;
+  const missionEditingDisabled = state.routeMission.active || state.routeMission.paused || state.patrolMission.active;
   const missionReadOnlyMessage = state.controlLocked
     ? `Edición bloqueada: ${state.controlLockReason || "desbloquea el control para modificar la ruta"}.`
     : state.routeMission.active || state.patrolMission.active
@@ -180,6 +190,16 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
       {missionReadOnlyMessage ? <div className="route-editor-notice" role="status">{missionReadOnlyMessage}</div> : null}
       {message ? <div className="route-editor-message" role="status">{message}</div> : null}
 
+      {count === 0 ? (
+        <section className="route-editor-start-guide" aria-label="Cómo crear una ruta">
+          <strong>Para crear una ruta</strong>
+          <span>1. Añade el primer punto en el mapa.</span>
+          <span>2. Haz clic donde quieras colocarlo; volverás al editor.</span>
+          <span>3. Añade los demás puntos y pulsa «Guardar como…».</span>
+          {state.controlLocked ? <p>Para colocar puntos, conecta el robot o simulador desde «Conexión» y desbloquea los controles.</p> : null}
+        </section>
+      ) : null}
+
       <section className="route-editor-card route-editor-route-card" aria-labelledby="route-document-title">
         <div className="route-editor-card-heading">
           <div>
@@ -187,6 +207,8 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             <p>{state.routeEditor.activeRouteName ? `Editando «${state.routeEditor.activeRouteName}»` : "Este borrador todavía no tiene nombre."}</p>
           </div>
           <div className="route-editor-document-actions">
+            <button type="button" className="route-editor-button route-editor-new-route" disabled={missionEditingDisabled}
+              onClick={() => void createNewRoute()}>Nueva ruta</button>
             <button
               type="button"
               className="route-editor-button primary"

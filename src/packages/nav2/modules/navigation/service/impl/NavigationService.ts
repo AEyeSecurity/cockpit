@@ -2092,6 +2092,24 @@ export class NavigationService {
     return [...this.state.savedRouteNames];
   }
 
+  createNewRouteDraft(): void {
+    if (this.state.routeMission.active || this.state.routeMission.paused || this.state.patrolMission.active) {
+      throw new Error("No se puede crear una ruta nueva durante una misión");
+    }
+    this.state = {
+      ...this.state,
+      waypoints: [],
+      patrolMissionProfile: createDefaultPatrolMissionProfile(),
+      loopRoute: true,
+      goalMode: false,
+      selectedWaypointIndexes: [],
+      waypointSelectionMode: false,
+      lastStatus: "Nuevo borrador de ruta"
+    };
+    this.setRouteBaseline(null);
+    this.emit();
+  }
+
   saveNamedRoute(name: string): number {
     const trimmed = name.trim();
     if (!trimmed) {

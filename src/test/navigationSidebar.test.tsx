@@ -133,10 +133,31 @@ describe("navigation sidebar and route editor", () => {
 
     render(<>{editor.render()}</>);
     expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument();
+    expect(screen.getByText("Para crear una ruta")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Añadir primer punto en el mapa" }));
 
     await waitFor(() => expect(navigationService.getState().routeEditor.insertionAfterIndex).toBe(-1));
     expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+  });
+
+  it("starts a new route draft without deleting or overwriting the saved route", async () => {
+    installLocalStorageMock();
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.queueWaypoint({ x: 10, y: 20 });
+      navigationService.saveNamedRoute("Ruta original");
+    });
+    render(<>{editor.render()}</>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Nueva ruta" }));
+    await waitFor(() => expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument());
+    expect(navigationService.getState().routeEditor.activeRouteName).toBeNull();
+    expect(navigationService.getState().savedRouteNames).toContain("Ruta original");
+    expect(navigationService.getState().routeEditor.dirty).toBe(false);
+    expect(screen.getByRole("combobox", { name: "Abrir ruta guardada" })).toHaveTextContent("Ruta original");
   });
 
   it("keeps point actions beside a compact list and inserts after the selection", async () => {

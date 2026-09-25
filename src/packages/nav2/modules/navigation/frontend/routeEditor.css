@@ -45,6 +45,13 @@
   color: #275577; background: #eaf4fd; font-size: 13px;
 }
 .route-editor-message { border-color: #a9d7b8; color: #2d6945; background: #ecf8ef; }
+.route-editor-start-guide {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 12px 16px;
+  border: 1px solid #b7d0e6; border-radius: 10px; color: #31546f;
+  background: #eaf4fd; font-size: 12px;
+}
+.route-editor-start-guide strong { color: #183c5b; font-size: 13px; }
+.route-editor-start-guide p { flex-basis: 100%; margin: 0; color: #8a4c1d; font-weight: 650; }
 .route-editor-card {
   min-width: 0; padding: 18px; border: 1px solid var(--route-line); border-radius: 12px;
   background: var(--route-surface); box-shadow: 0 3px 12px rgb(27 46 65 / 6%);
@@ -64,6 +71,7 @@
   border-color: #8fb4d9; background: var(--route-accent-soft);
 }
 .route-editor-button.primary { border-color: var(--route-accent); color: #fff; background: var(--route-accent); }
+.route-editor-new-route { border-color: #88add0; color: var(--route-accent); background: var(--route-accent-soft); }
 .route-editor-button.primary:hover:not(:disabled) { background: #3477b8; }
 .route-editor-button.danger { color: #8a342d; border-color: #e3c0bb; background: #fff8f7; }
 .route-editor-button:disabled,.route-editor-segment-actions button:disabled,.route-editor-row-action:disabled {
