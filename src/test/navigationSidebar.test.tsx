@@ -3,6 +3,21 @@ import { describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
 
+function installLocalStorageMock(): void {
+  const values = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      get length() { return values.size; }
+    }
+  });
+}
+
 describe("navigation sidebar and route editor", () => {
   it("keeps the sidebar focused on the current route and mission controls", async () => {
     const runtime = await bootstrapApp();
@@ -36,6 +51,27 @@ describe("navigation sidebar and route editor", () => {
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     expect(navigationService.getState().manualLinearSpeed).toBe(2.4);
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
+  });
+
+  it("shows the complete saved-route list above the waypoint editor", async () => {
+    installLocalStorageMock();
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const routeNames = ["PatrullaSencillaPolo", "Ruta bien1", "test real polo", "test1", "test2", "test3", "test4"];
+    act(() => {
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      for (const name of routeNames) navigationService.saveNamedRoute(name);
+    });
+
+    render(<>{editor.render()}</>);
+
+    const savedRoutes = screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`).closest("details");
+    expect(savedRoutes).toHaveAttribute("open");
+    for (const name of routeNames) expect(savedRoutes).toHaveTextContent(name);
+    const routePicker = screen.getByRole("combobox", { name: "Abrir ruta guardada" }) as HTMLSelectElement;
+    expect(Array.from(routePicker.options).map((option) => option.value).filter(Boolean)).toEqual(routeNames);
   });
 
   it("restores the connected operator control-lock toggle", async () => {

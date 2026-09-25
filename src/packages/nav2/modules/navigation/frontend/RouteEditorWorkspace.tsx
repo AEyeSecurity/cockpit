@@ -204,6 +204,23 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         </div>
       </section>
 
+      {state.savedRouteNames.length ? (
+        <details className="route-editor-card route-editor-saved-routes" open>
+          <summary>Rutas guardadas en Cockpit ({state.savedRouteNames.length})</summary>
+          <ul>
+            {state.savedRouteNames.map((name) => <li key={name}>
+              <span>{name}{name === state.routeEditor.activeRouteName ? " · abierta" : ""}</span>
+              <button type="button" className="route-editor-button" onClick={() => void loadRoute(name)}>Abrir</button>
+              <button type="button" className="route-editor-button danger" onClick={async () => {
+                if (!(await dialogs.confirm({ title: "Eliminar ruta guardada", message: `¿Eliminar «${name}» de Cockpit?`, confirmLabel: "Eliminar", danger: true }))) return;
+                navigation.deleteNamedRoute(name);
+                setMessage(`Ruta «${name}» eliminada de Cockpit.`);
+              }}>Eliminar</button>
+            </li>)}
+          </ul>
+        </details>
+      ) : null}
+
       <section className="route-editor-card" aria-labelledby="route-waypoints-title">
         <div className="route-editor-card-heading route-editor-waypoints-heading">
           <div>
@@ -398,22 +415,6 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         </label>
       </section>
 
-      {state.savedRouteNames.length ? (
-        <details className="route-editor-card route-editor-saved-routes">
-          <summary>Rutas guardadas en Cockpit ({state.savedRouteNames.length})</summary>
-          <ul>
-            {state.savedRouteNames.map((name) => <li key={name}>
-              <span>{name}{name === state.routeEditor.activeRouteName ? " · abierta" : ""}</span>
-              <button type="button" className="route-editor-button" onClick={() => void loadRoute(name)}>Abrir</button>
-              <button type="button" className="route-editor-button danger" onClick={async () => {
-                if (!(await dialogs.confirm({ title: "Eliminar ruta guardada", message: `¿Eliminar «${name}» de Cockpit?`, confirmLabel: "Eliminar", danger: true }))) return;
-                navigation.deleteNamedRoute(name);
-                setMessage(`Ruta «${name}» eliminada de Cockpit.`);
-              }}>Eliminar</button>
-            </li>)}
-          </ul>
-        </details>
-      ) : null}
     </main>
   );
 }
