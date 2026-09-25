@@ -35,16 +35,21 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.getByText("CONTROL MANUAL")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "PERFIL DE NAVEGACIÓN" })).toBeInTheDocument();
     expect(screen.getByText("RUTA ACTUAL")).toBeInTheDocument();
+    expect(screen.getByText("RUTA AUTOMÁTICA")).toBeInTheDocument();
     expect(screen.getByText("Borrador nuevo")).toBeInTheDocument();
-    expect(screen.getByText("EDITAR RUTA")).toBeInTheDocument();
-    expect(screen.getByText("Añade al menos 2 puntos para poder iniciar una ruta.")).toBeInTheDocument();
-    expect(screen.queryByText("INICIAR RUTA")).not.toBeInTheDocument();
+    expect(screen.getByText("EDITAR / AÑADIR PUNTOS")).toBeInTheDocument();
+    expect(screen.getByText("Añade al menos 2 puntos desde el editor.")).toBeInTheDocument();
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
     expect(screen.queryByText("INICIAR PATRULLA")).not.toBeInTheDocument();
     expect(screen.queryByText("CANCELAR MISIÓN")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINT TOOLS")).not.toBeInTheDocument();
     expect(screen.queryByText("ADD WAYPOINT")).not.toBeInTheDocument();
     expect(screen.queryByText("SELECT ALL")).not.toBeInTheDocument();
+
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+    fireEvent.click(screen.getByText("EDITAR / AÑADIR PUNTOS").closest("button") as HTMLButtonElement);
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.route-editor");
 
     fireEvent.change(screen.getByLabelText("Velocidad lineal"), { target: { value: "2.4" } });
     fireEvent.change(screen.getByLabelText("Ángulo de giro / radio de giro"), { target: { value: "24" } });

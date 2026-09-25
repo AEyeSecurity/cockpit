@@ -8274,28 +8274,30 @@ pre {
 }
 .nav-sidebar-route-summary > strong {
   overflow: hidden;
-  color: var(--vscode-foreground, #e6edf6);
+  color: #1a2c3b;
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.nav-sidebar-route-summary > span { color: #a9b9c8; font-size: 12px; }
-.nav-sidebar-route-summary > span.pending { color: #edbd69; font-weight: 650; }
-.nav-sidebar-route-summary > span.saved { color: #91d8a9; }
+.nav-sidebar-route-summary > span { color: #4b5e6f; font-size: 12px; }
+.nav-sidebar-route-summary > span.pending { color: #8b571b; font-weight: 650; }
+.nav-sidebar-route-summary > span.saved { color: #2f7047; }
 .nav-sidebar-route-summary > p {
   margin: 3px 0 5px;
   padding: 8px 9px;
-  border: 1px solid #715c3d;
+  border: 1px solid #d8c69d;
   border-radius: 7px;
-  color: #f0cc8d;
-  background: #2c271e;
+  color: #674717;
+  background: #fff8e9;
   font-size: 11px;
   line-height: 1.4;
 }
 .nav-sidebar-open-route-editor { margin-top: 4px; }
+.nav-sidebar-execution { display: grid; gap: 8px; padding: 5px 2px 3px; }
+.nav-sidebar-execution > span { color: #3e5467; font-size: 12px; font-weight: 650; }
 .nav-sidebar-execution-hint {
   margin: 2px 0 0;
-  color: #c3d0da;
+  color: #4b5e6f;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -8304,7 +8306,13 @@ pre {
 .nav-sidebar > .nav-sidebar-manual-section { order: 2; }
 .nav-sidebar > .nav-sidebar-route-summary-section { order: 3; }
 .nav-sidebar > .nav-sidebar-automatic-section { order: 4; }
-.nav-sidebar > .nav-sidebar-datum-section { order: 5; }
+.nav-sidebar > .nav-sidebar-profile-section { order: 5; }
+.nav-sidebar > .nav-sidebar-datum-section { order: 6; }
+
+#root .nav-sidebar .nav-sidebar-section-content .nav-sidebar-execution .ncb-wide:disabled:not(.active),
+#root .nav-sidebar .nav-sidebar-section-content .nav-sidebar-execution .ncb-wide:disabled:not(.active) * {
+  color: #506273 !important;
+}
 
 /* The route summary carries the lock reason once; disabled controls stay text-first. */
 #root .nav-sidebar .nav-sidebar-section-content button:disabled:not(.active)::before,

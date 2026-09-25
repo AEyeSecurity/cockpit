@@ -889,9 +889,18 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const patrolStartMeta = patrolReady
     ? `${patrolProfile.loopWaypoints.length} puntos en el recorrido`
     : `Falta: ${patrolReadiness.missingRequirements.map((item) => patrolRequirementLabels[item] ?? item.toLowerCase()).join(", ")}`;
-  const routeStartBlockedByPatrol = patrolProfileConfigured;
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
+  const missionInProgress = missionActive || patrolMission.active || routeMission.paused;
+  const startPending = patrolProfileConfigured ? patrolStartPending : routeStartPending;
+  const startBlockedReason = patrolProfileConfigured && !patrolReady
+    ? patrolStartMeta
+    : !patrolProfileConfigured && wps < 2
+      ? "Añade al menos 2 puntos desde el editor."
+      : navState.controlLocked
+        ? "Conecta y desbloquea los controles para iniciar."
+        : `${patrolProfileConfigured ? "Patrulla" : "Ruta"} lista para iniciar.`;
+  const startDisabled = navState.controlLocked || startPending || (patrolProfileConfigured ? !patrolReady : wps < 2);
   const goalModeSelected = navState.goalMode;
   const navigationProfileLocked =
     navState.controlLocked ||
@@ -931,6 +940,37 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   };
   const emitError = (text: string): void => {
     runtime.eventBus.emit("console.event", { level: "error", text, timestamp: Date.now() });
+  };
+  const startMission = async (): Promise<void> => {
+    if (patrolProfileConfigured) {
+      if (patrolStartPending) return;
+      setPatrolStartPending(true);
+      setPatrolStartError("");
+      try {
+        const started = await navService.sendPatrolMission();
+        emitInfo(`Patrulla iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
+      } catch (error) {
+        const errorMessage = `No se pudo iniciar la patrulla: ${String(error)}`;
+        setPatrolStartError(errorMessage);
+        emitError(errorMessage);
+      } finally {
+        setPatrolStartPending(false);
+      }
+      return;
+    }
+    if (routeStartPending) return;
+    setRouteStartPending(true);
+    setRouteStartError("");
+    try {
+      const started = await navService.sendRouteMission();
+      emitInfo(`Ruta iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
+    } catch (error) {
+      const errorMessage = `No se pudo iniciar la ruta: ${String(error)}`;
+      setRouteStartError(errorMessage);
+      emitError(errorMessage);
+    } finally {
+      setRouteStartPending(false);
+    }
   };
   return (
     <div className="nav-sidebar">
@@ -1086,9 +1126,18 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             className="ncb-wide prim-btn nav-sidebar-open-route-editor"
             onClick={() => runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor")}
           >
-            <ButtonFace icon={<NavGlyph kind="route" />} label="EDITAR RUTA" meta="Abrir editor de puntos y patrulla" />
+            <ButtonFace icon={<NavGlyph kind="route" />} label="EDITAR / AÑADIR PUNTOS" meta="Abrir editor y colocar puntos en el mapa" />
           </button>
-          {missionActive || patrolMission.active ? (
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      <NavSidebarCollapsibleSection
+        title="RUTA AUTOMÁTICA"
+        className="nav-sidebar-automatic-section nav-sidebar-execution-section"
+        defaultCollapsed={false}
+      >
+        <div className="nav-sidebar-execution">
+          {missionInProgress ? (
             <>
               <span>{patrolMission.active ? formatPatrolMissionPhase(patrolMission.phase) : formatRouteStatus(routeMission.status)}</span>
               <button type="button" className="ncb-wide cancel-btn" onClick={async () => {
@@ -1114,54 +1163,23 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 </button>
               ) : null}
             </>
-          ) : !navState.controlLocked && patrolProfileConfigured && patrolReady ? (
-            <button type="button" className="ncb-wide send-btn" disabled={patrolStartPending} onClick={async () => {
-              if (patrolStartPending) return;
-              setPatrolStartPending(true);
-              setPatrolStartError("");
-              try {
-                const started = await navService.sendPatrolMission();
-                emitInfo(`Patrulla iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
-              } catch (error) {
-                const errorMessage = `No se pudo iniciar la patrulla: ${String(error)}`;
-                setPatrolStartError(errorMessage);
-                emitError(errorMessage);
-              } finally {
-                setPatrolStartPending(false);
-              }
-            }}>
-              <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR PATRULLA" meta={patrolStartPending ? "Iniciando…" : patrolStartMeta} />
-            </button>
-          ) : !navState.controlLocked && !routeStartBlockedByPatrol && wps >= 2 ? (
-            <button type="button" className="ncb-wide send-btn" disabled={routeStartPending} onClick={async () => {
-              if (routeStartPending) return;
-              setRouteStartPending(true);
-              setRouteStartError("");
-              try {
-                const started = await navService.sendRouteMission();
-                emitInfo(`Ruta iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
-              } catch (error) {
-                const errorMessage = `No se pudo iniciar la ruta: ${String(error)}`;
-                setRouteStartError(errorMessage);
-                emitError(errorMessage);
-              } finally {
-                setRouteStartPending(false);
-              }
-            }}>
-              <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR RUTA" meta={routeStartPending ? "Iniciando…" : "Usar los puntos actuales"} />
-            </button>
-          ) : patrolProfileConfigured ? (
-            <span>Patrulla: {patrolReady ? "lista" : patrolStartMeta}</span>
-          ) : wps < 2 ? (
-            <span>Añade al menos 2 puntos para poder iniciar una ruta.</span>
-          ) : null}
+          ) : (
+            <>
+              <button type="button" className="ncb-wide send-btn" disabled={startDisabled} onClick={() => void startMission()}>
+                <ButtonFace icon={<NavGlyph kind="route" />}
+                  label={patrolProfileConfigured ? "INICIAR PATRULLA" : "INICIAR RUTA"}
+                  meta={startPending ? "Iniciando…" : patrolProfileConfigured ? "Recorrer la patrulla" : "Usar los puntos actuales"} />
+              </button>
+              <p className="nav-sidebar-execution-hint">{startBlockedReason}</p>
+            </>
+          )}
           {routeStartError || patrolStartError ? <p className="ps-status-error" role="alert">{routeStartError || patrolStartError}</p> : null}
         </div>
       </NavSidebarCollapsibleSection>
 
       <NavSidebarCollapsibleSection
         title="PERFIL DE NAVEGACIÓN"
-        className="nav-sidebar-automatic-section nav-sidebar-route-section"
+        className="nav-sidebar-profile-section nav-sidebar-route-section"
         defaultCollapsed={true}
       >
         <div className="nav-route-subsection nav-navigation-profile-section">
