@@ -744,6 +744,30 @@ describe("services", () => {
     expect(profile.departEntryLoopIndex).toBe(-1);
   });
 
+  it("switches waypoint orientation without changing its patrol role or arrival actions", () => {
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.toggleWaypointSelection(1);
+    service.setBrakeHoldActionForSelected(true, 5);
+    service.useQueuedWaypointsAsPatrolLoop();
+
+    service.setWaypointOrientation(1, 135);
+    let waypoint = service.getState().waypoints[1];
+    expect(waypoint.yawDeg).toBe(135);
+    expect(waypoint.actions?.[0]?.type).toBe("brake_hold");
+    expect(service.getState().patrolMissionProfile.loopWaypoints[1].yawDeg).toBe(135);
+
+    service.setWaypointOrientation(1);
+    waypoint = service.getState().waypoints[1];
+    expect(waypoint.yawDeg).toBeUndefined();
+    expect(waypoint.actions?.[0]?.type).toBe("brake_hold");
+    expect(service.getState().patrolMissionProfile.loopWaypoints[1].yawDeg).toBeUndefined();
+    service.undoRouteEdit();
+    expect(service.getState().waypoints[1].yawDeg).toBe(135);
+    expect(() => service.setWaypointOrientation(1, Number.NaN)).toThrow(/orientación/i);
+  });
+
   it("rejects selecting HOME or connector waypoints as patrol entry", () => {
     const service = new NavigationService({} as never);
 

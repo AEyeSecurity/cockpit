@@ -40,6 +40,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   const dialogs = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const [state, setState] = useState<NavigationState>(navigation.getState());
   const [message, setMessage] = useState("");
+  const [fixedYawDraft, setFixedYawDraft] = useState("0");
 
   useEffect(() => navigation.subscribe(setState), [navigation]);
 
@@ -142,6 +143,9 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   const count = state.waypoints.length;
   const selectedIndex = state.selectedWaypointIndexes.length === 1 ? state.selectedWaypointIndexes[0] : null;
   const selectedWaypoint = selectedIndex === null ? null : state.waypoints[selectedIndex] ?? null;
+  useEffect(() => {
+    setFixedYawDraft(String(selectedWaypoint?.yawDeg ?? 0));
+  }, [selectedWaypoint?.localId, selectedWaypoint?.yawDeg]);
   const selectionIncludesHome = state.selectedWaypointIndexes.some((index) => state.waypoints[index]?.role === "home");
   const patrolReadiness = getPatrolProfileReadiness(state.patrolMissionProfile);
   const structuredPatrol = patrolReadiness.profileConfigured;
@@ -372,6 +376,30 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                     ))}
                   </div>
                 ) : <p className="route-editor-hint">Este punto no pertenece a un tramo de patrulla.</p>}
+                <div className="route-editor-orientation" role="group" aria-label="Orientación del punto">
+                  <strong>Orientación</strong>
+                  <span>Actual: {selectedWaypoint.yawDeg === undefined ? "automática" : `${selectedWaypoint.yawDeg}° fija`}</span>
+                  <div>
+                    <button type="button" className="route-editor-button" aria-pressed={selectedWaypoint.yawDeg === undefined}
+                      disabled={editingDisabled || selectedWaypoint.yawDeg === undefined}
+                      onClick={() => withError(() => navigation.setWaypointOrientation(selectedIndex!), "Orientación automática aplicada.")}>Usar orientación automática</button>
+                    <label>
+                      Ángulo fijo (°)
+                      <input type="number" step="0.1" value={fixedYawDraft} disabled={editingDisabled}
+                        aria-label="Ángulo de orientación fija en grados"
+                        onChange={(event) => setFixedYawDraft(event.target.value)} />
+                    </label>
+                    <button type="button" className="route-editor-button" disabled={editingDisabled}
+                      onClick={() => {
+                        const angle = Number(fixedYawDraft);
+                        if (!fixedYawDraft.trim() || !Number.isFinite(angle)) {
+                          setMessage("Escribe un ángulo válido en grados.");
+                          return;
+                        }
+                        withError(() => navigation.setWaypointOrientation(selectedIndex!, angle), `Orientación fija de ${angle}° aplicada.`);
+                      }}>Aplicar orientación fija</button>
+                  </div>
+                </div>
                 <div className="route-editor-tool-buttons">
                   <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === 0}
                     aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}

@@ -137,6 +137,12 @@
 .route-editor-option-group { display: grid; gap: 9px; padding-top: 12px; border-top: 1px solid #d9e4ef; }
 .route-editor-option-group h4 { margin: 0; color: #315e82; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 .route-editor-option-group p { margin: 0; }
+.route-editor-orientation { display: grid; gap: 7px; padding: 10px; border: 1px solid #d8e3ed; border-radius: 8px; background: #fff; }
+.route-editor-orientation > strong { font-size: 12px; }
+.route-editor-orientation > span { color: var(--route-muted); font-size: 12px; }
+.route-editor-orientation > div { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
+.route-editor-orientation label { display: grid; gap: 4px; color: var(--route-muted); font-size: 11px; font-weight: 650; }
+.route-editor-orientation input { width: 108px; min-height: 38px; padding: 6px 8px; border: 1px solid var(--route-line); border-radius: 8px; color: var(--route-text); background: #fff; font: inherit; font-size: 13px; }
 .route-editor-patrol-order { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .route-editor-patrol-order span { flex: 1 1 100%; color: var(--route-muted); font-size: 12px; }
 .route-editor-patrol-order .route-editor-button { min-height: 30px; padding: 5px 9px; }

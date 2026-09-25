@@ -179,6 +179,11 @@ describe("navigation sidebar and route editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Punto 1.*10\.000000/ }));
     const panel = screen.getByLabelText("Opciones del punto 1");
     expect(panel.parentElement).toHaveClass("route-editor-waypoint-layout");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Ángulo de orientación fija en grados" }), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar orientación fija" }));
+    expect(navigationService.getState().waypoints[0].yawDeg).toBe(90);
+    fireEvent.click(screen.getByRole("button", { name: "Usar orientación automática" }));
+    expect(navigationService.getState().waypoints[0].yawDeg).toBeUndefined();
     fireEvent.click(screen.getByRole("button", { name: "Insertar entre 1 y 2 en el mapa" }));
     await waitFor(() => expect(navigationService.getState().routeEditor.insertionAfterIndex).toBe(0));
     expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");

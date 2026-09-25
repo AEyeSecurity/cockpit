@@ -1737,6 +1737,30 @@ export class NavigationService {
     this.emit();
   }
 
+  setWaypointOrientation(index: number, yawDeg?: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= this.state.waypoints.length) {
+      throw new Error("Selecciona un punto válido");
+    }
+    if (yawDeg !== undefined && !Number.isFinite(yawDeg)) {
+      throw new Error("La orientación debe ser un número válido");
+    }
+    this.commitRouteEdit(() => {
+      const current = cloneGoal(this.state.waypoints[index]!);
+      const { yawDeg: _previousYaw, ...base } = current;
+      const updated = parseGoal(yawDeg === undefined ? base : { ...base, yawDeg });
+      const waypoints = this.state.waypoints.map((waypoint, position) => position === index ? updated : waypoint);
+      this.state = {
+        ...this.state,
+        waypoints,
+        patrolMissionProfile: reconcilePatrolMissionProfile(waypoints, this.state.patrolMissionProfile),
+        lastStatus: yawDeg === undefined
+          ? `Waypoint ${index + 1} orientation automatic`
+          : `Waypoint ${index + 1} orientation ${yawDeg}°`
+      };
+    });
+    this.emit();
+  }
+
   removeLastWaypoint(): void {
     if (this.state.waypoints.length === 0) return;
     this.removeWaypoint(this.state.waypoints.length - 1);
