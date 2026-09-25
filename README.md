@@ -37,19 +37,41 @@ npm run tauri:build # Build desktop
 npm run test        # Tests
 ```
 
-## Navegación: Action Waypoints
+## Navegación: rutas y patrullas
 
-El módulo Nav2 permite programar acciones sobre waypoints de ruta. Desde la barra
-de ruta, seleccionar uno o más waypoints y usar `ACTION WAYPOINT`.
+El sidebar muestra la ruta actual y separa **Iniciar ruta** (recorrido simple) de
+**Iniciar patrulla** (HOME, recorrido principal, salida, regreso y reingreso).
+Durante una misión permite **Cancelar misión** y, cuando corresponde,
+**Volver a HOME**. El editor se abre desde **Ruta actual → Editar / añadir puntos**.
 
-Acciones disponibles:
+En **Editor de rutas**:
 
-- `Brake`: agrega `brake_hold` al waypoint seleccionado.
-- La UI pide `duration_s` para definir cuántos segundos frena antes de continuar.
-- `brake_pct` se envía como `100`.
-- `Rural profile`: activa el perfil rural al alcanzar el waypoint; reduce la
-  inflación del costmap sin desactivar la detección de obstáculos.
-- `Urban profile`: restaura el perfil urbano, que es el valor predeterminado.
+1. Pulsa **Nueva ruta** o **Abrir ruta guardada…**. Las rutas con nombre se guardan
+   localmente en Cockpit, dentro del almacenamiento del origen del navegador;
+   `localhost` y `127.0.0.1` tienen listas independientes.
+2. Usa **Añadir primer punto en el mapa** o **Añadir punto al final**. Para insertar
+   entre dos puntos, selecciona el anterior y pulsa **Insertar entre…**. El mapa
+   señala el tramo; un clic coloca el punto y devuelve al editor. Puedes cancelar
+   la colocación sin modificar la ruta.
+3. Selecciona un punto para ajustar orientación automática o fija, moverlo,
+   eliminarlo, marcar HOME, asignarlo a un segmento de patrulla o configurar sus
+   **Acciones al llegar**. Mantén Shift para seleccionar varios o usa
+   **Seleccionar área en el mapa**. Deshacer y rehacer operan sobre las ediciones.
+4. Configura **Patrulla** con recorrido principal, HOME y reingreso. El editor
+   indica qué falta para poder iniciarla. Salida y regreso pueden editarse o
+   vaciarse por separado.
+5. Pulsa **Guardar cambios** para actualizar la ruta abierta o **Guardar como…**
+   para crear otra. El editor indica si hay cambios pendientes y pide confirmación
+   antes de descartarlos.
+
+En el mapa, **Seguir al robot** mantiene su posición centrada mientras llegan
+nuevas coordenadas. Pulsa el botón de nuevo o arrastra el mapa para detener el
+seguimiento.
+
+Las acciones al llegar a un waypoint incluyen una pausa (`brake_hold`) y cambios
+de perfil rural o urbano. La pausa solicita su duración en segundos y envía
+`brake_pct: 100`; el perfil rural reduce la inflación del costmap sin desactivar
+la detección de obstáculos, y el urbano restaura el perfil predeterminado.
 
 Formato enviado al bridge WebSocket de SALUS:
 
