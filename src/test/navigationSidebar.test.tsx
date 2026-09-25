@@ -40,7 +40,7 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.getByText("EDITAR / AÑADIR PUNTOS")).toBeInTheDocument();
     expect(screen.getByText("Añade al menos 2 puntos desde el editor.")).toBeInTheDocument();
     expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
-    expect(screen.queryByText("INICIAR PATRULLA")).not.toBeInTheDocument();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
     expect(screen.queryByText("CANCELAR MISIÓN")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();
     expect(screen.queryByText("WAYPOINT TOOLS")).not.toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("navigation sidebar and route editor", () => {
     render(<>{navigationSidebar.render()}</>);
 
     expect(screen.getByText("INICIAR RUTA").closest("button")).toBeEnabled();
-    expect(screen.queryByText("INICIAR PATRULLA")).not.toBeInTheDocument();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
     expect(screen.queryByText("CANCELAR MISIÓN")).not.toBeInTheDocument();
     expect(screen.queryByText("VOLVER A HOME")).not.toBeInTheDocument();
   });
@@ -268,7 +268,39 @@ describe("navigation sidebar and route editor", () => {
       navigationService.toggleWaypointSelection(1);
       navigationService.setPatrolDepartEntryFromSelected();
     });
-    expect(screen.queryByText("INICIAR RUTA")).not.toBeInTheDocument();
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
     expect(screen.getByText("INICIAR PATRULLA").closest("button")).not.toBeDisabled();
+  });
+
+  it("shows missing patrol requirements and lets the selected point lose its re-entry role", async () => {
+    const runtime = await bootstrapApp();
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!sidebar || sidebar.slot !== "sidebar" || !editor || editor.slot !== "workspace") throw new Error("Navigation UI not registered");
+    const service = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      service.applyLocalControlLock(false, "SIM_BACKEND");
+      service.queueWaypoint({ x: 10, y: 10 });
+      service.queueWaypoint({ x: 20, y: 20 });
+      service.queueWaypoint({ x: 30, y: 30 });
+      service.toggleWaypointSelection(2);
+      service.setPatrolHomeFromSelected();
+      service.clearWaypointSelection();
+      service.useQueuedWaypointsAsPatrolLoop();
+    });
+    render(<>{sidebar.render()}{editor.render()}</>);
+    const patrolOverview = screen.getByText("Patrulla", { selector: "strong" }).closest("details");
+    expect(patrolOverview?.closest("section.route-editor-card")).toBe(screen.getByText("Puntos de la ruta").closest("section.route-editor-card"));
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
+    expect(screen.getAllByText(/Falta: punto de reingreso/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("list", { name: "Puntos de la ruta" }).querySelectorAll("button")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como reingreso" }));
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(1);
+    expect(screen.getByRole("button", { name: "Quitar reingreso" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quitar reingreso" }));
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(-1);
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
   });
 });

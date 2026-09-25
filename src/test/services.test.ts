@@ -719,6 +719,31 @@ describe("services", () => {
     expect(profile.homeWaypoint).toBeNull();
   });
 
+  it("removes patrol roles from selected points while preserving the re-entry point", () => {
+    const service = new NavigationService({} as never);
+    for (let index = 0; index < 4; index += 1) service.queueWaypoint({ x: index, y: index });
+    service.toggleWaypointSelection(0);
+    service.setPatrolHomeFromSelected();
+    service.clearWaypointSelection();
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.toggleWaypointSelection(2);
+    service.setPatrolDepartEntryFromSelected();
+
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    expect(service.removeSelectedWaypointsFromPatrolSegment("loop")).toBe(1);
+    let profile = service.getState().patrolMissionProfile;
+    expect(profile.loopWaypoints.map((waypoint) => waypoint.x)).toEqual([2, 3]);
+    expect(profile.departEntryLoopIndex).toBe(0);
+
+    service.clearPatrolDepartEntry();
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(-1);
+    service.addSelectedWaypointsToPatrolLoop();
+    profile = service.getState().patrolMissionProfile;
+    expect(profile.loopWaypoints.map((waypoint) => waypoint.x)).toEqual([2, 3, 1]);
+    expect(profile.departEntryLoopIndex).toBe(-1);
+  });
+
   it("rejects selecting HOME or connector waypoints as patrol entry", () => {
     const service = new NavigationService({} as never);
 

@@ -22,7 +22,7 @@
 .route-editor * { box-sizing: border-box; }
 .route-editor-header,.route-editor-card-heading,.route-editor-document-actions,.route-editor-history-actions,
 .route-editor-summary,.route-editor-tool-buttons,.route-editor-patrol-actions,.route-editor-segment-heading,
-.route-editor-segment-assignments,.route-editor-segment-actions,.route-editor-empty-actions,.route-editor-loop-toggle {
+.route-editor-empty-actions,.route-editor-loop-toggle {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -59,25 +59,23 @@
 .route-editor-card h2 { margin: 0; font-size: 17px; }
 .route-editor-card-heading p { margin: 5px 0 0; color: var(--route-muted); font-size: 13px; }
 .route-editor-document-actions,.route-editor-history-actions,.route-editor-tool-buttons,
-.route-editor-patrol-actions,.route-editor-segment-assignments { flex-wrap: wrap; }
-.route-editor-button,.route-editor-load-label select,.route-editor-segment-actions button,
-.route-editor-row-action,.map-route-insertion-banner button {
+.route-editor-patrol-actions { flex-wrap: wrap; }
+.route-editor-button,.route-editor-load-label select,.map-route-insertion-banner button {
   min-height: 38px; border: 1px solid var(--route-line); border-radius: 8px; padding: 8px 13px;
   color: var(--route-text); background: var(--route-surface); font: inherit; font-size: 13px;
   font-weight: 600; cursor: pointer;
 }
-.route-editor-button:hover:not(:disabled),.route-editor-load-label select:hover,
-.route-editor-segment-actions button:hover:not(:disabled),.route-editor-row-action:hover:not(:disabled) {
+.route-editor-button:hover:not(:disabled),.route-editor-load-label select:hover {
   border-color: #8fb4d9; background: var(--route-accent-soft);
 }
 .route-editor-button.primary { border-color: var(--route-accent); color: #fff; background: var(--route-accent); }
 .route-editor-new-route { border-color: #88add0; color: var(--route-accent); background: var(--route-accent-soft); }
 .route-editor-button.primary:hover:not(:disabled) { background: #3477b8; }
 .route-editor-button.danger { color: #8a342d; border-color: #e3c0bb; background: #fff8f7; }
-.route-editor-button:disabled,.route-editor-segment-actions button:disabled,.route-editor-row-action:disabled {
+.route-editor-button:disabled {
   opacity: .58; cursor: not-allowed;
 }
-#root .route-editor .route-editor-button:disabled,#root .route-editor .route-editor-segment-actions button:disabled {
+#root .route-editor .route-editor-button:disabled {
   opacity: 1 !important; border-color: #d7e0e9 !important; color: #718292 !important;
   background: #f5f7f9 !important; box-shadow: none !important;
 }
@@ -136,14 +134,28 @@
 }
 .route-editor-selected-tools h3 { margin: 0; font-size: 15px; }
 .route-editor-selected-tools p { margin: 5px 0 0; color: var(--route-muted); font-size: 12px; }
+.route-editor-option-group { display: grid; gap: 9px; padding-top: 12px; border-top: 1px solid #d9e4ef; }
+.route-editor-option-group h4 { margin: 0; color: #315e82; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.route-editor-option-group p { margin: 0; }
+.route-editor-patrol-order { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.route-editor-patrol-order span { flex: 1 1 100%; color: var(--route-muted); font-size: 12px; }
+.route-editor-patrol-order .route-editor-button { min-height: 30px; padding: 5px 9px; }
 .route-editor-insert-action { justify-self: start; }
 .route-editor-insert-choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .route-editor-select-prompt { align-self: center; text-align: center; padding: 20px; }
-.route-editor-action-buttons { padding-top: 10px; border-top: 1px solid #d9e4ef; }
 .route-editor-hint { color: var(--route-muted); font-size: 12px; }
 .route-editor-readiness { white-space: normal; }
 .route-editor-home-summary { margin: 15px 0 0; color: var(--route-text); font-size: 13px; }
 .route-editor-segments { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 15px; }
+.route-editor-patrol-overview { margin-top: 16px; padding-top: 14px; border-top: 1px solid #d8e3ed; }
+.route-editor-patrol-overview > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.route-editor-patrol-overview > summary::before { content: '▸'; color: var(--route-accent); font-size: 14px; }
+.route-editor-patrol-overview[open] > summary::before { content: '▾'; }
+.route-editor-patrol-overview > summary > span:first-child { display: grid; flex: 1 1 auto; gap: 3px; }
+.route-editor-patrol-overview > summary strong { font-size: 14px; }
+.route-editor-patrol-overview > summary small { color: var(--route-muted); font-size: 12px; }
+.route-editor-patrol-overview[open] > summary { padding-bottom: 14px; }
+.route-editor-patrol-actions { flex-wrap: wrap; }
 .route-editor-segment { min-width: 0; padding: 13px; border: 1px solid #d8e3ed; border-radius: 9px; background: var(--route-soft); }
 .route-editor-segment-heading { justify-content: space-between; align-items: baseline; }
 .route-editor-segment-heading h3 { font-size: 13px; }
@@ -153,10 +165,6 @@
 .route-editor-segment-point { display: flex; align-items: center; gap: 8px; border: 0; padding: 0; color: var(--route-text); background: transparent; text-align: left; cursor: pointer; }
 .route-editor-segment-point > span:first-child { flex-basis: 24px; width: 24px; height: 24px; font-size: 11px; }
 .route-editor-segment-point > span:last-child { font-size: 12px; }
-.route-editor-segment-actions { flex-wrap: wrap; gap: 5px; padding-left: 32px; }
-.route-editor-segment-actions button { min-height: 29px; padding: 4px 7px; font-size: 11px; }
-.route-editor-segment-assignments { margin-top: 14px; padding-top: 14px; border-top: 1px solid #d8e3ed; }
-.route-editor-segment-assignments p { flex: 1 0 100%; margin: 0; color: var(--route-muted); font-size: 12px; }
 .route-editor-loop-toggle { width: fit-content; margin-top: 14px; color: var(--route-text); font-size: 13px; cursor: pointer; }
 .route-editor-loop-toggle input { width: 17px; height: 17px; accent-color: var(--route-accent); }
 .route-editor-saved-routes > summary { color: var(--route-text); font-size: 14px; font-weight: 700; cursor: pointer; }

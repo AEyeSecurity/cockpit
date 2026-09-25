@@ -17,6 +17,8 @@ function waypointTags(waypoint: GoalInput, state: NavigationState): string[] {
   if (state.patrolMissionProfile.loopWaypoints.some((item) => item.localId === id)) tags.push("Recorrido");
   if (state.patrolMissionProfile.departWaypoints.some((item) => item.localId === id)) tags.push("Salida");
   if (state.patrolMissionProfile.returnWaypoints.some((item) => item.localId === id)) tags.push("Regreso");
+  const entry = state.patrolMissionProfile.loopWaypoints[state.patrolMissionProfile.departEntryLoopIndex];
+  if (entry?.localId === id) tags.push("Reingreso");
   return tags;
 }
 
@@ -157,6 +159,13 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   ];
   const indexForId = (id: string | undefined): number =>
     state.waypoints.findIndex((waypoint) => waypoint.localId === id);
+  const selectedSegmentIndexes = selectedWaypoint ? {
+    loop: state.patrolMissionProfile.loopWaypoints.findIndex((point) => point.localId === selectedWaypoint.localId),
+    depart: state.patrolMissionProfile.departWaypoints.findIndex((point) => point.localId === selectedWaypoint.localId),
+    return: state.patrolMissionProfile.returnWaypoints.findIndex((point) => point.localId === selectedWaypoint.localId)
+  } : null;
+  const selectedIsEntry = selectedSegmentIndexes?.loop !== undefined && selectedSegmentIndexes.loop >= 0 &&
+    selectedSegmentIndexes.loop === state.patrolMissionProfile.departEntryLoopIndex;
   const selectedSegmentInsertions = selectedWaypoint ? segmentRows.flatMap((segment) => {
     const segmentIndex = segment.points.findIndex((point) => point.localId === selectedWaypoint.localId);
     if (segmentIndex < 0) return [];
@@ -314,13 +323,37 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                 );
               })}
             </ol>
-            <aside className="route-editor-selected-tools" aria-label={selectedWaypoint ? `Opciones del punto ${selectedIndex! + 1}` : "Opciones del punto"}>
-              {selectedWaypoint ? (
+            <aside className="route-editor-selected-tools" aria-label={selectedWaypoint ? `Opciones del punto ${selectedIndex! + 1}` : "Opciones de puntos"}>
+              {state.selectedWaypointIndexes.length > 1 ? (
+                <>
+                  <div><h3>{state.selectedWaypointIndexes.length} puntos seleccionados</h3><p>Asigna la selección a un tramo de patrulla.</p></div>
+                  <section className="route-editor-option-group" aria-label="Patrulla para varios puntos">
+                    <h4>Patrulla</h4>
+                    <div className="route-editor-tool-buttons">
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome}
+                        onClick={() => withError(() => navigation.addSelectedWaypointsToPatrolLoop(), "Selección añadida al recorrido principal.")}>Añadir al recorrido principal</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome}
+                        onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("depart"), "Salida desde HOME actualizada.")}>Usar selección como salida</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || selectionIncludesHome}
+                        onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("return"), "Regreso a HOME actualizado.")}>Usar selección como regreso</button>
+                      {(["loop", "depart", "return"] as const).map((segment) => (
+                        <button key={segment} type="button" className="route-editor-button" disabled={editingDisabled}
+                          onClick={() => withError(() => navigation.removeSelectedWaypointsFromPatrolSegment(segment), "Selección quitada del tramo.")}>
+                          Quitar de {segment === "loop" ? "recorrido" : segment === "depart" ? "salida" : "regreso"}
+                        </button>
+                      ))}
+                    </div>
+                    <p>«Usar selección» reemplaza ese tramo y quita sus puntos del recorrido principal.</p>
+                  </section>
+                </>
+              ) : selectedWaypoint ? (
               <>
                 <div>
                   <h3>Opciones del punto {selectedIndex! + 1}</h3>
                   <p>Las opciones se aplican al punto seleccionado.</p>
                 </div>
+                <section className="route-editor-option-group" aria-label="Edición de ruta">
+                  <h4>Edición de ruta</h4>
                 {!structuredPatrol ? (
                   <button type="button" className="route-editor-button primary route-editor-insert-action" disabled={editingDisabled}
                     onClick={() => void openMap(selectedIndex!)}>
@@ -346,20 +379,73 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                   <button type="button" className="route-editor-button" disabled={editingDisabled || structuredPatrol || selectedIndex === count - 1}
                     aria-describedby={structuredPatrol ? "route-editor-segment-order-hint" : undefined}
                     onClick={() => navigation.reorderWaypoint(selectedIndex!, selectedIndex! + 1)}>Mover abajo en la lista</button>
-                  <button type="button" className="route-editor-button" disabled={editingDisabled}
-                    onClick={() => withError(() => navigation.setHomeForSelected(), "Punto marcado como HOME.")}>Marcar como HOME</button>
-                  <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role !== "home"}
-                    onClick={() => withError(() => navigation.clearHomeForSelected(), "Marca HOME quitada.")}>Quitar marca HOME</button>
                   <button type="button" className="route-editor-button danger" disabled={editingDisabled}
                     onClick={async () => {
                       const ok = await dialogs.confirm({ title: "Eliminar punto", message: `¿Eliminar el punto ${selectedIndex! + 1}?`, confirmLabel: "Eliminar", danger: true });
                       if (ok) withError(() => navigation.removeWaypoint(selectedIndex!), "Punto eliminado.");
                     }}>Eliminar punto</button>
                 </div>
-                {structuredPatrol ? (
-                  <p id="route-editor-segment-order-hint" className="route-editor-hint">Para cambiar el orden de ejecución de la patrulla, usa Subir y Bajar en los segmentos. El orden de la lista general se conserva por separado.</p>
-                ) : null}
-                <div className="route-editor-tool-buttons route-editor-action-buttons">
+                </section>
+                <section className="route-editor-option-group" aria-label="Configuración de patrulla del punto">
+                  <h4>Patrulla</h4>
+                  <p>{selectedWaypoint.role === "home" ? "Este punto es HOME." : selectedIsEntry ? "Este punto es el reingreso al recorrido." : "Asigna este punto a los tramos de la patrulla."}</p>
+                  <div className="route-editor-tool-buttons">
+                    {selectedWaypoint.role === "home" ? (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.clearHomeForSelected(), "Marca HOME quitada.")}>Quitar HOME</button>
+                    ) : (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.setHomeForSelected(), "Punto marcado como HOME.")}>Marcar como HOME</button>
+                    )}
+                    {selectedWaypoint.role !== "home" && selectedSegmentIndexes?.loop === -1 ? (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.addSelectedWaypointsToPatrolLoop(), "Punto añadido al recorrido principal.")}>Añadir al recorrido principal</button>
+                    ) : selectedSegmentIndexes && selectedSegmentIndexes.loop >= 0 ? (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.removeSelectedWaypointsFromPatrolSegment("loop"), "Punto quitado del recorrido principal.")}>Quitar del recorrido principal</button>
+                    ) : null}
+                    {selectedSegmentIndexes && selectedSegmentIndexes.loop >= 0 ? (
+                      selectedIsEntry ? (
+                        <button type="button" className="route-editor-button" disabled={editingDisabled}
+                          onClick={() => withError(() => navigation.clearPatrolDepartEntry(), "Reingreso quitado.")}>Quitar reingreso</button>
+                      ) : (
+                        <button type="button" className="route-editor-button" disabled={editingDisabled}
+                          onClick={() => withError(() => navigation.setPatrolDepartEntryFromSelected(), "Punto de reingreso actualizado.")}>Marcar como reingreso</button>
+                      )
+                    ) : null}
+                    {selectedWaypoint.role !== "home" ? (
+                      <>
+                        <button type="button" className="route-editor-button" disabled={editingDisabled}
+                          onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("depart"), "Salida desde HOME actualizada.")}>Usar como salida desde HOME</button>
+                        <button type="button" className="route-editor-button" disabled={editingDisabled}
+                          onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("return"), "Regreso a HOME actualizado.")}>Usar como regreso a HOME</button>
+                      </>
+                    ) : null}
+                    {selectedSegmentIndexes && selectedSegmentIndexes.depart >= 0 ? (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.removeSelectedWaypointsFromPatrolSegment("depart"), "Punto quitado de la salida.")}>Quitar de la salida</button>
+                    ) : null}
+                    {selectedSegmentIndexes && selectedSegmentIndexes.return >= 0 ? (
+                      <button type="button" className="route-editor-button" disabled={editingDisabled}
+                        onClick={() => withError(() => navigation.removeSelectedWaypointsFromPatrolSegment("return"), "Punto quitado del regreso.")}>Quitar del regreso</button>
+                    ) : null}
+                  </div>
+                  {selectedSegmentIndexes && segmentRows.map((segment) => {
+                    const position = selectedSegmentIndexes[segment.key];
+                    if (position < 0) return null;
+                    return <div key={segment.key} className="route-editor-patrol-order">
+                      <span>Orden en {segment.label}: {position + 1} de {segment.points.length}</span>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || position === 0}
+                        onClick={() => withError(() => navigation.reorderPatrolSegment(segment.key, position, position - 1), "Orden de patrulla actualizado.")}>Subir</button>
+                      <button type="button" className="route-editor-button" disabled={editingDisabled || position === segment.points.length - 1}
+                        onClick={() => withError(() => navigation.reorderPatrolSegment(segment.key, position, position + 1), "Orden de patrulla actualizado.")}>Bajar</button>
+                    </div>;
+                  })}
+                  <p>«Usar como salida/regreso» reemplaza ese tramo y quita el punto del recorrido principal. Si era reingreso, elige otro.</p>
+                </section>
+                <section className="route-editor-option-group" aria-label="Acciones al llegar al punto">
+                  <h4>Acciones al llegar</h4>
+                <div className="route-editor-tool-buttons">
                   <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
                     onClick={() => withError(() => navigation.setNavigationProfileActionForSelected("urban"), "Perfil urbano asignado.")}>Usar perfil urbano</button>
                   <button type="button" className="route-editor-button" disabled={editingDisabled || selectedWaypoint.role === "home"}
@@ -375,6 +461,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                   <button type="button" className="route-editor-button" disabled={editingDisabled || !(selectedWaypoint.actions?.length)}
                     onClick={() => withError(() => navigation.clearWaypointActionsForSelected(), "Acciones quitadas del punto.")}>Quitar acciones</button>
                 </div>
+                </section>
                 <p className="route-editor-hint">Mantén Shift para seleccionar varios puntos y asignarlos juntos a un segmento.</p>
               </>
               ) : (
@@ -386,18 +473,13 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             </aside>
           </div>
         )}
-      </section>
-
-      <section className="route-editor-card" aria-labelledby="patrol-setup-title">
-        <div className="route-editor-card-heading">
-          <div>
-            <h2 id="patrol-setup-title">Configuración de patrulla</h2>
-            <p>Define el recorrido, el punto de salida y cómo volver a HOME.</p>
-          </div>
-          <span className={`route-editor-readiness ${patrolReadiness.isReady ? "ready" : "incomplete"}`}>
-            {patrolReadiness.isReady ? "Lista para iniciar" : `Falta: ${missingRequirementsText(patrolReadiness.missingRequirements)}`}
-          </span>
-        </div>
+        <details className="route-editor-patrol-overview">
+          <summary>
+            <span><strong>Patrulla</strong><small>HOME, recorrido, salida y regreso</small></span>
+            <span className={`route-editor-readiness ${patrolReadiness.isReady ? "ready" : "incomplete"}`}>
+              {patrolReadiness.isReady ? "Lista para iniciar" : `Falta: ${missingRequirementsText(patrolReadiness.missingRequirements)}`}
+            </span>
+          </summary>
         <div className="route-editor-patrol-actions">
           <button type="button" className="route-editor-button" disabled={editingDisabled || count < 2}
             onClick={() => withError(() => navigation.useQueuedWaypointsAsPatrolLoop(), "Recorrido principal actualizado con los puntos de la ruta.")}>Usar los puntos de la ruta como recorrido</button>
@@ -425,48 +507,22 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
                       <button type="button" className="route-editor-segment-point" onClick={() => routeIndex >= 0 && selectWaypoint(routeIndex)}>
                         <span>{segmentIndex + 1}</span><span>Punto {routeIndex + 1}{isEntry ? " · Reingreso" : ""}</span>
                       </button>
-                      <div className="route-editor-segment-actions">
-                        <button type="button" disabled={editingDisabled || segmentIndex === 0}
-                          aria-label={`Mover punto ${segmentIndex + 1} arriba en ${segment.label}`}
-                          onClick={() => withError(() => navigation.reorderPatrolSegment(segment.key, segmentIndex, segmentIndex - 1), "Orden de patrulla actualizado.")}>Subir</button>
-                        <button type="button" disabled={editingDisabled || segmentIndex === segment.points.length - 1}
-                          aria-label={`Mover punto ${segmentIndex + 1} abajo en ${segment.label}`}
-                          onClick={() => withError(() => navigation.reorderPatrolSegment(segment.key, segmentIndex, segmentIndex + 1), "Orden de patrulla actualizado.")}>Bajar</button>
-                        {routeIndex >= 0 ? <button type="button" disabled={editingDisabled} onClick={() => void openMap(routeIndex, { segment: segment.key, segmentIndex: segmentIndex + 1 })}>
-                          {(() => {
-                            const nextPoint = segment.points[segmentIndex + 1] ?? (segment.key === "loop" ? segment.points[0] : null);
-                            const nextIndex = nextPoint ? indexForId(nextPoint.localId) : -1;
-                            return nextIndex >= 0
-                              ? `Insertar entre ${routeIndex + 1} y ${nextIndex + 1}`
-                              : `Añadir después del punto ${routeIndex + 1}`;
-                          })()}
-                        </button> : null}
-                      </div>
                     </li>;
                   })}
                 </ol>
               ) : <p className="route-editor-hint">Todavía no hay puntos en este segmento.</p>}
               {segment.key === "loop" && segment.points.length >= 2 ? (
-                <p className="route-editor-hint">{state.patrolMissionProfile.departEntryLoopIndex >= 0 ? `Punto de reingreso: ${state.patrolMissionProfile.departEntryLoopIndex + 1}.` : "Elige el punto de reingreso desde la selección de la lista."}</p>
+                <p className="route-editor-hint">{state.patrolMissionProfile.departEntryLoopIndex >= 0 ? `Reingreso: punto ${indexForId(state.patrolMissionProfile.loopWaypoints[state.patrolMissionProfile.departEntryLoopIndex]?.localId) + 1}.` : "Selecciona un punto del recorrido para marcar el reingreso."}</p>
               ) : null}
             </section>
           ))}
         </div>
-        <div className="route-editor-segment-assignments">
-          <p>Seleccionados: {state.selectedWaypointIndexes.length || "ninguno"}. Mantén Shift para sumar o quitar puntos.</p>
-          <button type="button" className="route-editor-button" disabled={editingDisabled || state.selectedWaypointIndexes.length === 0 || selectionIncludesHome}
-            onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("depart"), "Salida desde HOME actualizada.")}>Asignar selección a salida</button>
-          <button type="button" className="route-editor-button" disabled={editingDisabled || state.selectedWaypointIndexes.length === 0 || selectionIncludesHome}
-            onClick={() => withError(() => navigation.useSelectedWaypointsAsPatrolSegment("return"), "Regreso a HOME actualizado.")}>Asignar selección a regreso</button>
-          <button type="button" className="route-editor-button" disabled={editingDisabled || state.selectedWaypointIndexes.length !== 1}
-            onClick={() => withError(() => navigation.setPatrolDepartEntryFromSelected(), "Punto de reingreso actualizado.")}>Usar selección como reingreso</button>
-          <button type="button" className="route-editor-button" disabled={state.selectedWaypointIndexes.length === 0}
-            onClick={() => navigation.clearWaypointSelection()}>Quitar selección</button>
-        </div>
+        <p className="route-editor-hint">Selecciona un punto arriba para editar sus funciones de patrulla. Mantén Shift para seleccionar varios.</p>
         <label className="route-editor-loop-toggle">
           <input type="checkbox" checked={state.loopRoute} onChange={(event) => navigation.setLoopRoute(event.target.checked)} />
           Repetir la ruta al terminar
         </label>
+        </details>
       </section>
 
     </main>

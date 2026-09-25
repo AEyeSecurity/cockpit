@@ -2657,6 +2657,73 @@ export class NavigationService {
     return loopIndex;
   }
 
+  clearPatrolDepartEntry(): void {
+    if (this.state.patrolMissionProfile.departEntryLoopIndex < 0) return;
+    this.commitRouteEdit(() => {
+      this.state = {
+        ...this.state,
+        patrolMissionProfile: {
+          ...this.state.patrolMissionProfile,
+          departEntryLoopIndex: -1
+        },
+        lastStatus: "Punto de reingreso quitado"
+      };
+    });
+    this.emit();
+  }
+
+  addSelectedWaypointsToPatrolLoop(): number {
+    const selected = this.state.selectedWaypointIndexes
+      .map((index) => this.state.waypoints[index])
+      .filter((waypoint): waypoint is GoalInput => Boolean(waypoint) && waypoint.role !== "home");
+    if (selected.length === 0) throw new Error("Selecciona puntos que no sean HOME");
+    const selectedIds = new Set(selected.map((waypoint) => waypointLocalId(waypoint)));
+    this.commitRouteEdit(() => {
+      const profile = this.state.patrolMissionProfile;
+      const loopIds = new Set(profile.loopWaypoints.map((waypoint) => waypointLocalId(waypoint)));
+      const nextProfile = reconcilePatrolMissionProfile(this.state.waypoints, {
+        ...profile,
+        loopWaypoints: [...profile.loopWaypoints, ...selected.filter((waypoint) => !loopIds.has(waypointLocalId(waypoint)))],
+        departWaypoints: profile.departWaypoints.filter((waypoint) => !selectedIds.has(waypointLocalId(waypoint))),
+        returnWaypoints: profile.returnWaypoints.filter((waypoint) => !selectedIds.has(waypointLocalId(waypoint)))
+      });
+      this.state = { ...this.state, patrolMissionProfile: nextProfile, lastStatus: "Puntos añadidos al recorrido principal" };
+    });
+    this.emit();
+    return selected.length;
+  }
+
+  removeSelectedWaypointsFromPatrolSegment(segment: PatrolRouteSegment): number {
+    const selectedIds = new Set(this.state.selectedWaypointIndexes
+      .map((index) => this.state.waypoints[index])
+      .filter((waypoint): waypoint is GoalInput => Boolean(waypoint))
+      .map((waypoint) => waypointLocalId(waypoint)));
+    if (selectedIds.size === 0) return 0;
+    const key = `${segment}Waypoints` as const;
+    const profile = this.state.patrolMissionProfile;
+    const remaining = profile[key].filter((waypoint) => !selectedIds.has(waypointLocalId(waypoint)));
+    const removed = profile[key].length - remaining.length;
+    if (removed === 0) return 0;
+    const entryId = profile.departEntryLoopIndex >= 0
+      ? profile.loopWaypoints[profile.departEntryLoopIndex]?.localId
+      : undefined;
+    this.commitRouteEdit(() => {
+      this.state = {
+        ...this.state,
+        patrolMissionProfile: reconcilePatrolMissionProfile(this.state.waypoints, {
+          ...profile,
+          [key]: remaining,
+          departEntryLoopIndex: segment === "loop"
+            ? remaining.findIndex((waypoint) => waypoint.localId === entryId)
+            : profile.departEntryLoopIndex
+        }),
+        lastStatus: `${removed} punto(s) quitado(s) de ${segment}`
+      };
+    });
+    this.emit();
+    return removed;
+  }
+
   clearPatrolMissionProfile(): void {
     this.commitRouteEdit(() => {
       this.state = {

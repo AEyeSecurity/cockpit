@@ -8294,6 +8294,8 @@ pre {
 }
 .nav-sidebar-open-route-editor { margin-top: 4px; }
 .nav-sidebar-execution { display: grid; gap: 8px; padding: 5px 2px 3px; }
+.nav-sidebar-execution-option { display: grid; gap: 4px; }
+.nav-sidebar-execution-option + .nav-sidebar-execution-option { padding-top: 9px; border-top: 1px solid #d9e4ed; }
 .nav-sidebar-execution > span { color: #3e5467; font-size: 12px; font-weight: 650; }
 .nav-sidebar-execution-hint {
   margin: 2px 0 0;

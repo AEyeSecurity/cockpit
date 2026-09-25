@@ -892,15 +892,22 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
   const missionInProgress = missionActive || patrolMission.active || routeMission.paused;
-  const startPending = patrolProfileConfigured ? patrolStartPending : routeStartPending;
-  const startBlockedReason = patrolProfileConfigured && !patrolReady
-    ? patrolStartMeta
-    : !patrolProfileConfigured && wps < 2
+  const routeStartReason = patrolProfileConfigured
+    ? "Hay una patrulla configurada. Usa Iniciar patrulla o quita su configuración en el editor."
+    : wps < 2
       ? "Añade al menos 2 puntos desde el editor."
       : navState.controlLocked
         ? "Conecta y desbloquea los controles para iniciar."
-        : `${patrolProfileConfigured ? "Patrulla" : "Ruta"} lista para iniciar.`;
-  const startDisabled = navState.controlLocked || startPending || (patrolProfileConfigured ? !patrolReady : wps < 2);
+        : "Ruta simple lista.";
+  const patrolStartReason = !patrolProfileConfigured
+    ? "Configura HOME, recorrido y reingreso en el editor."
+    : !patrolReady
+      ? patrolStartMeta
+      : navState.controlLocked
+        ? "Conecta y desbloquea los controles para iniciar."
+        : "Patrulla lista.";
+  const routeStartDisabled = navState.controlLocked || routeStartPending || patrolProfileConfigured || wps < 2;
+  const patrolStartDisabled = navState.controlLocked || patrolStartPending || !patrolReady;
   const goalModeSelected = navState.goalMode;
   const navigationProfileLocked =
     navState.controlLocked ||
@@ -941,8 +948,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const emitError = (text: string): void => {
     runtime.eventBus.emit("console.event", { level: "error", text, timestamp: Date.now() });
   };
-  const startMission = async (): Promise<void> => {
-    if (patrolProfileConfigured) {
+  const startMission = async (kind: "route" | "patrol"): Promise<void> => {
+    if (kind === "patrol") {
       if (patrolStartPending) return;
       setPatrolStartPending(true);
       setPatrolStartError("");
@@ -1165,12 +1172,18 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             </>
           ) : (
             <>
-              <button type="button" className="ncb-wide send-btn" disabled={startDisabled} onClick={() => void startMission()}>
-                <ButtonFace icon={<NavGlyph kind="route" />}
-                  label={patrolProfileConfigured ? "INICIAR PATRULLA" : "INICIAR RUTA"}
-                  meta={startPending ? "Iniciando…" : patrolProfileConfigured ? "Recorrer la patrulla" : "Usar los puntos actuales"} />
-              </button>
-              <p className="nav-sidebar-execution-hint">{startBlockedReason}</p>
+              <div className="nav-sidebar-execution-option">
+                <button type="button" className="ncb-wide send-btn" disabled={routeStartDisabled} onClick={() => void startMission("route")}>
+                  <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR RUTA" meta="Recorrer puntos en orden" />
+                </button>
+                <p className="nav-sidebar-execution-hint">{routeStartPending ? "Iniciando…" : routeStartReason}</p>
+              </div>
+              <div className="nav-sidebar-execution-option">
+                <button type="button" className="ncb-wide send-btn" disabled={patrolStartDisabled} onClick={() => void startMission("patrol")}>
+                  <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR PATRULLA" meta="Usar HOME y tramos de patrulla" />
+                </button>
+                <p className="nav-sidebar-execution-hint">{patrolStartPending ? "Iniciando…" : patrolStartReason}</p>
+              </div>
             </>
           )}
           {routeStartError || patrolStartError ? <p className="ps-status-error" role="alert">{routeStartError || patrolStartError}</p> : null}
