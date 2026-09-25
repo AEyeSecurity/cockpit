@@ -990,6 +990,15 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const emitError = (text: string): void => {
     runtime.eventBus.emit("console.event", { level: "error", text, timestamp: Date.now() });
   };
+  const confirmDiscardRouteChanges = async (action: string): Promise<boolean> => {
+    if (!navState.routeEditor.dirty) return true;
+    return dialogService.confirm({
+      title: "Cambios sin guardar",
+      message: `La ruta tiene cambios sin guardar. ¿Descartarlos para ${action}?`,
+      confirmLabel: "Descartar",
+      danger: true
+    });
+  };
   const enableMapWaypointPlacement = async (): Promise<void> => {
     if (navState.controlLocked) {
       emitError(`Waypoint placement blocked: ${lockReasonText}`);
@@ -1407,6 +1416,88 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             })}
             {wps === 0 ? <p className="muted waypoint-manager-empty">No waypoints queued.</p> : null}
           </div>
+          <div className="nav-route-editor-status" aria-live="polite">
+            <span>{navState.routeEditor.activeRouteName ? `Ruta: ${navState.routeEditor.activeRouteName}` : "Borrador sin nombre"}</span>
+            {navState.routeEditor.dirty ? <strong>· Cambios sin guardar</strong> : <small>· Guardada</small>}
+          </div>
+          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
+            <button
+              type="button"
+              className={joinClassNames("ncb sec-btn", navState.routeEditor.insertionAfterIndex !== null && "active")}
+              disabled={selectedCount !== 1 || navState.controlLocked}
+              title={selectedCount === 1 ? "Elegir en el mapa un waypoint para insertar después del seleccionado" : "Seleccioná un waypoint"}
+              onClick={() => {
+                if (selectedCount !== 1) return;
+                try {
+                  navService.beginWaypointInsertion(navState.selectedWaypointIndexes[0]!);
+                  emitInfo(`Insert waypoint after ${navState.selectedWaypointIndexes[0]! + 1}`);
+                } catch (error) {
+                  emitError(`Insert waypoint failed: ${String(error)}`);
+                }
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="addWaypoint" />} label="INSERT AFTER" meta={selectedCount === 1 ? "Click map" : "Pick 1"} compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={!navState.routeEditor.insertionAfterIndex && navState.routeEditor.insertionAfterIndex !== 0}
+              title="Cancelar la inserción pendiente"
+              onClick={() => navService.cancelWaypointInsertion()}
+            >
+              <ButtonFace icon={<NavGlyph kind="cancel" />} label="CANCEL INSERT" meta="Map mode" compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={!navState.routeEditor.canRedo || navState.controlLocked}
+              title="Rehacer la última edición de ruta"
+              onClick={() => {
+                if (navService.redoRouteEdit()) emitInfo("Route edit redone");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="route" />} label="REDO" meta="Route edit" compact />
+            </button>
+          </div>
+          <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={selectedCount !== 1 || navState.selectedWaypointIndexes[0] === 0 || navState.controlLocked}
+              title="Mover el waypoint seleccionado una posición hacia arriba"
+              onClick={() => {
+                const index = navState.selectedWaypointIndexes[0];
+                if (index === undefined) return;
+                if (navService.reorderWaypoint(index, index - 1)) emitInfo("Waypoint moved up");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="route" />} label="MOVE UP" meta="Selected" compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={selectedCount !== 1 || navState.selectedWaypointIndexes[0] === wps - 1 || navState.controlLocked}
+              title="Mover el waypoint seleccionado una posición hacia abajo"
+              onClick={() => {
+                const index = navState.selectedWaypointIndexes[0];
+                if (index === undefined) return;
+                if (navService.reorderWaypoint(index, index + 1)) emitInfo("Waypoint moved down");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="route" />} label="MOVE DOWN" meta="Selected" compact />
+            </button>
+            <button
+              type="button"
+              className="ncb sec-btn"
+              disabled={!navState.routeEditor.canUndo || navState.controlLocked}
+              title="Deshacer la última edición de ruta"
+              onClick={() => {
+                if (navService.undoRouteEdit()) emitInfo("Route edit undone");
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Route edit" compact />
+            </button>
+          </div>
           <button
             type="button"
             className={joinClassNames("ncb-wide", goalModeSelected && "active")}
@@ -1436,22 +1527,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <div className="ncb-3-grid nav-sidebar-compact-grid nav-route-edit-grid">
             <button
               type="button"
-              className="ncb sec-btn"
-              disabled={wps === 0 || navState.controlLocked}
-              title={navState.controlLocked ? lockReasonText : "Deshacer último waypoint"}
-              onClick={() => {
-                navService.removeLastWaypoint();
-                emitInfo("Last waypoint removed");
-              }}
-            >
-              <ButtonFace icon={<NavGlyph kind="undo" />} label="UNDO" meta="Last waypoint" compact />
-            </button>
-            <button
-              type="button"
               className="ncb danger-btn"
               disabled={wps === 0 || navState.controlLocked}
               title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
-              onClick={() => {
+              onClick={async () => {
+                if (!(await confirmDiscardRouteChanges("limpiar la ruta"))) return;
                 navService.clearWaypoints();
                 emitInfo("Waypoints cleared");
               }}
@@ -1806,12 +1886,31 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         defaultCollapsed
       >
         <div className="nav-routes-tools">
+          {navState.routeEditor.activeRouteName ? (
+            <button
+              type="button"
+              className={joinClassNames("ncb-wide prim-btn", navState.routeEditor.dirty && "active")}
+              disabled={!navState.routeEditor.dirty || navState.controlLocked || wps === 0}
+              title={navState.routeEditor.dirty ? `Guardar cambios en ${navState.routeEditor.activeRouteName}` : "La ruta no tiene cambios pendientes"}
+              onClick={() => {
+                try {
+                  const count = navService.saveCurrentNamedRoute();
+                  emitInfo(`Ruta "${navState.routeEditor.activeRouteName}" actualizada (${count} waypoints)`);
+                } catch (error) {
+                  emitError(`Guardar cambios falló: ${String(error)}`);
+                }
+              }}
+            >
+              <ButtonFace icon={<NavGlyph kind="save" />} label="GUARDAR CAMBIOS" meta={navState.routeEditor.activeRouteName} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="ncb-wide danger-btn"
             disabled={wps === 0 || navState.controlLocked}
             title={navState.controlLocked ? lockReasonText : "Limpiar todos los waypoints"}
-            onClick={() => {
+            onClick={async () => {
+              if (!(await confirmDiscardRouteChanges("limpiar la ruta"))) return;
               navService.clearWaypoints();
               emitInfo("Waypoints cleared");
             }}
@@ -1835,8 +1934,18 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               });
               if (name === null) return;
               try {
+                const trimmedName = name.trim();
+                if (navState.savedRouteNames.includes(trimmedName) && trimmedName !== navState.routeEditor.activeRouteName) {
+                  const overwrite = await dialogService.confirm({
+                    title: "Sobrescribir ruta",
+                    message: `¿Sobrescribir la ruta "${trimmedName}"?`,
+                    confirmLabel: "Sobrescribir",
+                    danger: true
+                  });
+                  if (!overwrite) return;
+                }
                 const count = navService.saveNamedRoute(name);
-                emitInfo(`Ruta "${name.trim()}" guardada (${count} waypoints)`);
+                emitInfo(`Ruta "${trimmedName}" guardada (${count} waypoints)`);
               } catch (error) {
                 emitError(`Guardar ruta falló: ${String(error)}`);
               }
@@ -1852,8 +1961,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                   <button
                     type="button"
                     className="nav-saved-route-load"
+                    aria-current={navState.routeEditor.activeRouteName === routeName ? "true" : undefined}
                     title={`Cargar "${routeName}"`}
-                    onClick={() => {
+                    onClick={async () => {
+                      if (!(await confirmDiscardRouteChanges(`cargar "${routeName}"`))) return;
                       try {
                         const count = navService.loadNamedRoute(routeName);
                         emitInfo(`Ruta "${routeName}" cargada (${count} waypoints)`);

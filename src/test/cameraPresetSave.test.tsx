@@ -22,6 +22,15 @@ function createPtzState(activePreset = "home"): CameraPtzStateData {
 function createNavigationState(): NavigationState {
   return {
     waypoints: [],
+    routeEditor: {
+      activeRouteName: null,
+      dirty: false,
+      canUndo: false,
+      canRedo: false,
+      insertionAfterIndex: null,
+      insertionSegment: null,
+      insertionSegmentIndex: null
+    },
     patrolMissionProfile: {
       loopWaypoints: [],
       homeWaypoint: null,

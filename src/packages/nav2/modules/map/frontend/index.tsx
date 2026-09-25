@@ -2951,18 +2951,31 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
 
   const queueWaypointFromMap = (lat: number, lon: number, yawDeg?: number): void => {
     if (!navigationService || !navigationState?.goalMode) return;
-    navigationService.queueWaypoint(
+    const waypoint =
       yawDeg === undefined
         ? { x: lat, y: lon }
         : {
             x: lat,
             y: lon,
             yawDeg
-          }
-    );
+          };
+    const insertionAfterIndex = navigationState.routeEditor.insertionAfterIndex;
+    if (insertionAfterIndex !== null) {
+      const insertionSegment = navigationState.routeEditor.insertionSegment;
+      const insertionSegmentIndex = navigationState.routeEditor.insertionSegmentIndex;
+      navigationService.insertWaypoint(
+        insertionAfterIndex + 1,
+        waypoint,
+        insertionSegment && insertionSegmentIndex !== null
+          ? { segment: insertionSegment, segmentIndex: insertionSegmentIndex }
+          : undefined
+      );
+    } else {
+      navigationService.queueWaypoint(waypoint);
+    }
     runtime.eventBus.emit("console.event", {
       level: "info",
-      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
+      text: `${insertionAfterIndex !== null ? "Waypoint inserted" : "Waypoint queued"} from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
         yawDeg === undefined ? " auto-yaw" : ` yaw=${yawDeg.toFixed(1)}°`
       }`,
       timestamp: Date.now()
@@ -2997,6 +3010,11 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
         event.preventDefault();
         return;
       }
+      if (event.key === "Escape" && navigationService && navigationState?.routeEditor.insertionAfterIndex !== null) {
+        navigationService.cancelWaypointInsertion();
+        event.preventDefault();
+        return;
+      }
       if (event.key === "Escape" && navigationService && (navigationState?.waypointSelectionMode || navigationState?.selectedWaypointIndexes.length)) {
         navigationService.setWaypointSelectionMode(false);
         navigationService.clearWaypointSelection();
@@ -3027,7 +3045,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
+  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.routeEditor.insertionAfterIndex, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
 
   return (
     <div className="map-workspace-root map-html-root">

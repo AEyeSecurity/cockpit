@@ -344,6 +344,98 @@ describe("services", () => {
     expect(service.getState().selectedWaypointIndexes).toEqual([]);
   });
 
+  it("inserts, reorders, removes and undoes route edits without changing waypoint identities", () => {
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+    const original = service.getState().waypoints;
+    const originalIds = original.map((waypoint) => waypoint.localId);
+
+    const insertedIndex = service.insertWaypoint(1, { x: 1.5, y: 1.5 });
+    expect(insertedIndex).toBe(1);
+    const insertedId = service.getState().waypoints[1]?.localId;
+    expect(service.getState().waypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[0],
+      insertedId,
+      originalIds[1],
+      originalIds[2]
+    ]);
+    expect(service.getState().routeEditor).toMatchObject({ dirty: true, canUndo: true, canRedo: false });
+
+    expect(service.reorderWaypoint(1, 3)).toBe(true);
+    expect(service.getState().waypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[0], originalIds[1], originalIds[2], insertedId
+    ]);
+    expect(service.removeWaypoint(1)).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(3);
+
+    expect(service.undoRouteEdit()).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(4);
+    expect(service.redoRouteEdit()).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(3);
+  });
+
+  it("inserts into the requested patrol segment while preserving segment order", () => {
+    const service = new NavigationService({} as never);
+    for (let index = 0; index < 4; index += 1) {
+      service.queueWaypoint({ x: index, y: index });
+    }
+    service.useQueuedWaypointsAsPatrolLoop();
+    const before = service.getState().patrolMissionProfile.loopWaypoints.map((waypoint) => waypoint.localId);
+
+    service.insertWaypoint(2, { x: 99, y: 99 }, { segment: "loop", segmentIndex: 1 });
+    const state = service.getState();
+    expect(state.patrolMissionProfile.loopWaypoints.map((waypoint) => waypoint.localId)).toEqual([
+      before[0],
+      state.waypoints[2]?.localId,
+      before[1],
+      before[2],
+      before[3]
+    ]);
+  });
+
+  it("tracks the active named route and saves edits back to it", () => {
+    installStorageMock();
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 2 });
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.saveNamedRoute("Ronda editable");
+    expect(service.getState().routeEditor).toMatchObject({
+      activeRouteName: "Ronda editable",
+      dirty: false
+    });
+
+    service.insertWaypoint(1, { x: 2, y: 3 });
+    expect(service.getState().routeEditor.dirty).toBe(true);
+    expect(service.saveCurrentNamedRoute()).toBe(3);
+    expect(service.getState().routeEditor.dirty).toBe(false);
+
+    service.clearWaypoints();
+    service.loadNamedRoute("Ronda editable");
+    expect(service.getState().waypoints).toHaveLength(3);
+    expect(service.getState().routeEditor).toMatchObject({
+      activeRouteName: "Ronda editable",
+      dirty: false,
+      canUndo: false,
+      canRedo: false
+    });
+  });
+
+  it("tracks and cancels a map insertion position without creating a route edit", () => {
+    const service = new NavigationService({} as never);
+    service.applyLocalControlLock(false, "unlocked");
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    const undoAvailableBefore = service.getState().routeEditor.canUndo;
+
+    service.beginWaypointInsertion(0);
+    expect(service.getState().routeEditor.insertionAfterIndex).toBe(0);
+    expect(service.getState().routeEditor.canUndo).toBe(undoAvailableBefore);
+    service.cancelWaypointInsertion();
+    expect(service.getState().routeEditor.insertionAfterIndex).toBeNull();
+  });
+
   it("replaces or adds waypoint selections for map area selection", () => {
     const service = new NavigationService({} as never);
     service.queueWaypoint({ x: 1, y: 1 });

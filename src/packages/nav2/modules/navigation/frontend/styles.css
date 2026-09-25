@@ -8229,3 +8229,41 @@ pre {
   margin-top: -4px;
   text-transform: uppercase;
 }
+
+/* Route editor controls stay readable while keeping the destructive actions separate. */
+.nav-sidebar .nav-route-editor-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(82, 111, 47, 0.3);
+  border-radius: 9px;
+  background: rgba(223, 233, 201, 0.7);
+  color: #3f5a23;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.nav-sidebar .nav-route-editor-status span,
+.nav-sidebar .nav-route-editor-status strong,
+.nav-sidebar .nav-route-editor-status small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-sidebar .nav-route-editor-status strong {
+  color: #8b3d32;
+}
+
+.nav-sidebar .nav-route-edit-grid .ncb {
+  min-height: 44px;
+}
+
+.nav-sidebar .nav-saved-route-item:has(.nav-saved-route-load[aria-current="true"]) .nav-saved-route-load {
+  border-color: rgba(82, 111, 47, 0.7);
+  background: rgba(223, 233, 201, 0.9);
+  color: #3f5a23;
+}
