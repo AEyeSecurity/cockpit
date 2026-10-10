@@ -6,12 +6,20 @@ export interface CameraStreamRuntimeConfig {
   transport: CameraStreamTransport;
   mjpegUrl: string;
   webrtcUrl: string;
+  mobileWebrtcUrl?: string;
+  reverseWebrtcUrl?: string;
+  ptzEnabled?: boolean;
+  ptzZoomEnabled?: boolean;
   ptzRotationDeg: 0 | 180;
   probeTimeoutMs: number;
   loadTimeoutMs: number;
 }
 
 interface Nav2CameraConfig {
+  camera_mobile_webrtc_url?: unknown;
+  camera_reverse_webrtc_url?: unknown;
+  camera_ptz_enabled?: unknown;
+  camera_ptz_zoom_enabled?: unknown;
   camera_transport?: unknown;
   camera_mjpeg_url?: unknown;
   camera_webrtc_url?: unknown;
@@ -43,6 +51,10 @@ function readNav2CameraConfig(runtime: ModuleContext): Nav2CameraConfig {
 export function readCameraStreamConfig(runtime: ModuleContext): CameraStreamRuntimeConfig {
   const config = readNav2CameraConfig(runtime);
   return {
+    mobileWebrtcUrl: normalizeUrl(config.camera_mobile_webrtc_url),
+    reverseWebrtcUrl: normalizeUrl(config.camera_reverse_webrtc_url),
+    ptzEnabled: config.camera_ptz_enabled !== false,
+    ptzZoomEnabled: config.camera_ptz_zoom_enabled !== false,
     transport: normalizeTransport(config.camera_transport),
     mjpegUrl: normalizeUrl(config.camera_mjpeg_url) || DEFAULT_CAMERA_MJPEG_URL,
     webrtcUrl: normalizeUrl(config.camera_webrtc_url),

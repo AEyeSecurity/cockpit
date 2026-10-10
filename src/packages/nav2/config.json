@@ -7,7 +7,7 @@
     "camera_transport": "webrtc",
     "camera_mjpeg_url": "http://localhost:8089/stream.mjpg",
     "camera_webrtc_url": "http://100.66.15.45:8889/cam3/whep",
-    "camera_ptz_rotation_deg": 180,
+    "camera_ptz_rotation_deg": 0,
     "camera_probe_timeout_ms": 3000,
     "camera_load_timeout_ms": 7000,
     "map_default_center_lat": -31.4201,
@@ -19,7 +19,11 @@
     "manual_steering_angle_min_deg": 1.0,
     "manual_steering_angle_max_deg": 30.0,
     "manual_steering_angle_default_deg": 18.0,
-    "manual_loop_interval_ms": 50
+    "manual_loop_interval_ms": 50,
+    "camera_mobile_webrtc_url": "http://100.66.15.45:8889/cam4/whep",
+    "camera_reverse_webrtc_url": "",
+    "camera_ptz_enabled": true,
+    "camera_ptz_zoom_enabled": false
   },
   "settings": {
     "title": "Nav2",
@@ -131,6 +135,23 @@
         "key": "manual_loop_interval_ms",
         "label": "Manual Loop Interval (ms)",
         "type": "number"
+      },
+      {
+        "key": "camera_mobile_webrtc_url",
+        "label": "Mobile Camera WebRTC URL",
+        "type": "string",
+        "placeholder": "http://robot:8889/path/whep"
+      },
+      {
+        "key": "camera_reverse_webrtc_url",
+        "label": "Reverse Camera WebRTC URL",
+        "type": "string",
+        "placeholder": "http://robot:8889/path/whep"
+      },
+      {
+        "key": "camera_ptz_enabled",
+        "label": "Enable integrated PTZ controls",
+        "type": "boolean"
       }
     ]
   }

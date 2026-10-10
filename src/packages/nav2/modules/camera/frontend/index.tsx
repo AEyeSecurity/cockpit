@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./styles.css";
+import { SecondaryCameraTile } from "./SecondaryCameraTile";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { CORE_EVENTS } from "../../../../../core/events/topics";
 import { CameraDispatcher } from "../dispatcher/impl/CameraDispatcher";
@@ -580,7 +581,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   };
 
   useEffect(() => {
-    if (!navigationService || !navBackendConnected) {
+    if (cameraConfig.ptzEnabled === false || !navigationService || !navBackendConnected) {
       setPtzState(null);
       clearPresetSaveArm();
       if (!navBackendConnected) {
@@ -616,7 +617,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
+  }, [cameraConfig.ptzEnabled, connectionState?.host, connectionState?.port, navBackendConnected, navigationService]);
 
   useEffect(
     () => () => {
@@ -736,7 +737,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   return (
     <div className="cv-root cv-html-root">
       <div className="cv-body cv-html-body">
-        <section className="cv-main cv-html-main">
+        <section className="cv-main cv-html-main cv-camera-grid">
+          <header className="cv-grid-heading"><strong>Panorámica</strong><span>Principal · fija</span></header>
           <div className="cv-viewport-shell cv-html-stage">
             <div className={`cv-viewport cv-html-viewport cv-alert-${alertState.risk}${!feedOnline ? " cv-viewport--no-signal" : ""}`}>
               {showVideo ? (
@@ -798,6 +800,10 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
               ) : null}
               {feedOnline ? <div className="cv-html-rec">● {fpsLabel}</div> : null}
             </div>
+          </div>
+          <div className="cv-secondary-grid">
+            <SecondaryCameraTile title="Móvil" description="Secundaria · movimiento" config={cameraConfig} url={cameraConfig.mobileWebrtcUrl ?? ""} />
+            <SecondaryCameraTile autoStart title="Reversa" description="Secundaria · vista trasera" config={cameraConfig} url={cameraConfig.reverseWebrtcUrl ?? ""} />
           </div>
         </section>
 
@@ -942,7 +948,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
               </div>
             </section>
 
-            <section className={`cv-panel-section cv-rail-section cv-rail-ptz-section cv-rail-collapsible ${ptzExpanded ? "cv-rail-collapsible-open" : "cv-rail-collapsible-closed"}`}>
+            {cameraConfig.ptzEnabled !== false && <section className={`cv-panel-section cv-rail-section cv-rail-ptz-section cv-rail-collapsible ${ptzExpanded ? "cv-rail-collapsible-open" : "cv-rail-collapsible-closed"}`}>
               <button
                 className="cv-panel-header cv-ptz-section-header cv-rail-collapsible-header"
                 type="button"
@@ -959,7 +965,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                     <path d="M16.5 10h2" />
                   </svg>
                 </span>
-                <span>Camera PTZ</span>
+                <span>PTZ · cámara móvil</span>
                 <span className="cv-panel-caption">PAN / ZOOM</span>
                 <span className="cv-rail-collapsible-chevron" aria-hidden="true">
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
@@ -975,12 +981,12 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                   </div>
                   <div className="cv-ptz-stat">
                     <span className="cv-ptz-stat-label">Posicion</span>
-                    <strong className="cv-ptz-stat-value">{ptzPoseLabel}</strong>
+                    <strong className="cv-ptz-stat-value">{cameraConfig.ptzZoomEnabled === false ? "Usa las flechas" : ptzPoseLabel}</strong>
                   </div>
-                  <div className="cv-ptz-stat">
+                  {cameraConfig.ptzZoomEnabled !== false && <div className="cv-ptz-stat">
                     <span className="cv-ptz-stat-label">Zoom</span>
                     <strong className="cv-ptz-stat-value">{ptzZoomLabel}</strong>
-                  </div>
+                  </div>}
                 </div>
                 {ptzError ? (
                   <div className="cv-ptz-inline-note" role="status">
@@ -1085,6 +1091,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                     </div>
                   </div>
                 </div>
+                {cameraConfig.ptzZoomEnabled !== false && <>
                 <div className="cv-ptz-zoom-row">
                   <button
                     type="button"
@@ -1111,8 +1118,9 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                     Zoom +
                   </button>
                 </div>
+                </>}
                 <div className="cv-ptz-preset-row">
-                  {["front", "left", "right", "rear"].map((preset) => (
+                  {["front", "right", "rear", "left"].map((preset) => (
                     <button
                       key={preset}
                       type="button"
@@ -1120,13 +1128,15 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                       disabled={ptzCommandDisabled}
                       onClick={() => void goPreset(preset)}
                     >
-                      {formatPresetLabel(preset)}
+                      {cameraConfig.ptzZoomEnabled === false ? ({ front: "Frente", right: "Derecha", rear: "Atrás", left: "Izquierda" } as Record<string, string>)[preset] : formatPresetLabel(preset)}
                     </button>
                   ))}
                 </div>
                 <div className="cv-ptz-save-row">
                   {[
-                    { preset: "home", saveZoom: true },
+                    ...(cameraConfig.ptzZoomEnabled !== false ? [{ preset: "home", saveZoom: true }] : []),
+                    { preset: "front", saveZoom: false },
+                    { preset: "rear", saveZoom: false },
                     { preset: "left", saveZoom: false },
                     { preset: "right", saveZoom: false }
                   ].map(({ preset, saveZoom }) => {
@@ -1144,13 +1154,15 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                             : `Save current camera as ${formatPresetLabel(preset)}`
                         }
                       >
-                        {armed ? `Confirm ${formatPresetLabel(preset)}` : `Set ${formatPresetLabel(preset)}`}
+                        {cameraConfig.ptzZoomEnabled === false
+                          ? `${armed ? "Confirmar" : "Guardar"} ${({ front: "Frente", right: "Derecha", rear: "Atrás", left: "Izquierda" } as Record<string, string>)[preset]}`
+                          : armed ? `Confirm ${formatPresetLabel(preset)}` : `Set ${formatPresetLabel(preset)}`}
                       </button>
                     );
                   })}
                 </div>
               </div>
-            </section>
+            </section>}
 
             <section className={`cv-panel-section cv-rail-section cv-rail-feed-section cv-rail-collapsible ${feedExpanded ? "cv-rail-collapsible-open" : "cv-rail-collapsible-closed"}`}>
               <button
