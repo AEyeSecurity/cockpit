@@ -9,6 +9,7 @@ export interface CameraStreamRuntimeConfig {
   mobileWebrtcUrl?: string;
   reverseWebrtcUrl?: string;
   ptzEnabled?: boolean;
+  ptzPanInverted?: boolean;
   ptzZoomEnabled?: boolean;
   ptzRotationDeg: 0 | 180;
   probeTimeoutMs: number;
@@ -19,6 +20,7 @@ interface Nav2CameraConfig {
   camera_mobile_webrtc_url?: unknown;
   camera_reverse_webrtc_url?: unknown;
   camera_ptz_enabled?: unknown;
+  camera_ptz_pan_inverted?: unknown;
   camera_ptz_zoom_enabled?: unknown;
   camera_transport?: unknown;
   camera_mjpeg_url?: unknown;
@@ -54,6 +56,7 @@ export function readCameraStreamConfig(runtime: ModuleContext): CameraStreamRunt
     mobileWebrtcUrl: normalizeUrl(config.camera_mobile_webrtc_url),
     reverseWebrtcUrl: normalizeUrl(config.camera_reverse_webrtc_url),
     ptzEnabled: config.camera_ptz_enabled !== false,
+    ptzPanInverted: config.camera_ptz_pan_inverted === true,
     ptzZoomEnabled: config.camera_ptz_zoom_enabled !== false,
     transport: normalizeTransport(config.camera_transport),
     mjpegUrl: normalizeUrl(config.camera_mjpeg_url) || DEFAULT_CAMERA_MJPEG_URL,
@@ -70,13 +73,14 @@ export function isCameraFeedConfigured(config: CameraStreamRuntimeConfig): boole
 
 export function orientCameraPtzDelta<T extends object>(
   input: T,
-  rotationDeg: 0 | 180
+  rotationDeg: 0 | 180,
+  panInverted = false
 ): T {
-  if (rotationDeg !== 180) return input;
+  if (rotationDeg !== 180 && !panInverted) return input;
   const axes = input as { panDeg?: number; tiltDeg?: number };
   return {
     ...input,
-    ...(axes.panDeg === undefined ? {} : { panDeg: -axes.panDeg }),
-    ...(axes.tiltDeg === undefined ? {} : { tiltDeg: -axes.tiltDeg })
+    ...(axes.panDeg === undefined ? {} : { panDeg: axes.panDeg * ((rotationDeg === 180) !== panInverted ? -1 : 1) }),
+    ...(axes.tiltDeg === undefined || rotationDeg !== 180 ? {} : { tiltDeg: -axes.tiltDeg })
   };
 }

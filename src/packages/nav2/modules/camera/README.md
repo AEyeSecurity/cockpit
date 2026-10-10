@@ -17,3 +17,7 @@ Both Uniarch lenses use H.264 secondary feeds, 640x360 / 15 FPS / 256 kbit/s eac
 Two simultaneous feeds add network traffic. Rear camera hardware is not integrated yet. Uniarch mobile PTZ uses arrows and
 four editable directional views; camera_ptz_zoom_enabled=false hides unvalidated zoom.
 Saved directional views need calibration to the installed robot orientation.
+
+`camera_ptz_pan_inverted=true` corrects the Uniarch horizontal arrow direction,
+including diagonals, without changing vertical motion or saved preset positions.
+It is independent of the mounting rotation.

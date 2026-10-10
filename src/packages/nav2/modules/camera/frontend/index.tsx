@@ -675,7 +675,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     tiltDeg?: number;
     zoomLevel?: number;
   }): Promise<void> => {
-    const orientedInput = orientCameraPtzDelta(input, cameraConfig.ptzRotationDeg);
+    const orientedInput = orientCameraPtzDelta(input, cameraConfig.ptzRotationDeg, cameraConfig.ptzPanInverted);
     await runPtzAction(() => navigationService!.moveCameraPtz(orientedInput));
   };
 

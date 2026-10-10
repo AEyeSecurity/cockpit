@@ -20,3 +20,17 @@ describe("camera PTZ orientation", () => {
     expect(orientCameraPtzDelta(input, 180)).toEqual(input);
   });
 });
+
+describe("horizontal camera inversion", () => {
+  it("flips horizontal and diagonal pan while preserving tilt", () => {
+    expect(orientCameraPtzDelta({ relative: true, panDeg: 15, tiltDeg: 10 }, 0, true))
+      .toEqual({ relative: true, panDeg: -15, tiltDeg: 10 });
+    expect(orientCameraPtzDelta({ relative: true, panDeg: -15 }, 0, true))
+      .toEqual({ relative: true, panDeg: 15 });
+  });
+  it("composes with mounting rotation without adding a pan axis", () => {
+    expect(orientCameraPtzDelta({ panDeg: 15, tiltDeg: 10 }, 180, true))
+      .toEqual({ panDeg: 15, tiltDeg: -10 });
+    expect(orientCameraPtzDelta({ tiltDeg: 10 }, 0, true)).toEqual({ tiltDeg: 10 });
+  });
+});
