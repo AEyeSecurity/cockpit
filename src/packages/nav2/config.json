@@ -22,7 +22,7 @@
     "manual_steering_angle_default_deg": 18.0,
     "manual_loop_interval_ms": 50,
     "camera_mobile_webrtc_url": "http://100.66.15.45:8889/cam4/whep",
-    "camera_reverse_webrtc_url": "",
+    "camera_reverse_webrtc_url": "http://100.66.15.45:8889/cam5/whep",
     "camera_ptz_enabled": true,
     "camera_ptz_zoom_enabled": false
   },
