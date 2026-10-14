@@ -37,28 +37,35 @@ export function CameraAuxControls({ service, connected, controlLocked }: {
   const unavailable = !connected || !service || !state?.supported;
   const cannotStart = unavailable || busy || controlLocked;
   const label = (value: number | undefined): string => value === 1 ? "Encendida" : value === 0 ? "Apagada" : "Sin confirmar";
-  return <section className="cv-panel-section cv-camera-aux" aria-label="Paneo y luces">
-    <h3>Paneo y luces</h3>
-    <p>Recorrido completo de izquierda a derecha de la cámara móvil.</p>
-    <div className="cv-camera-aux-buttons">
-      <button type="button" disabled={cannotStart || state?.sweepRunning}
+  return <div className="cv-camera-aux" aria-label="Paneo y luces">
+    <div className="cv-ptz-preset-row cv-camera-sweep-row">
+      <button className="cv-ptz-preset-btn" type="button"
+        title="Recorrer de izquierda a derecha conservando la inclinación"
+        disabled={cannotStart || state?.sweepRunning}
         onClick={() => void run(() => service!.sweepCamera(true))}>Iniciar paneo</button>
-      <button type="button" disabled={!connected || !service || busy}
+      <button className="cv-ptz-preset-btn" type="button" disabled={!connected || !service || busy}
         onClick={() => void run(() => service!.sweepCamera(false))}>Detener paneo</button>
     </div>
-    {state?.sweepRunning && <p role="status">{state.sweepPhase === "moving_left" ? "Buscando extremo izquierdo…" : "Paneando hacia la derecha…"}</p>}
-    {(["mobile", "fixed"] as const).map((lens) => <div className="cv-camera-aux-light" key={lens}>
-      <strong>Luz {lens === "mobile" ? "móvil" : "fija"}</strong>
-      <span>{label(lens === "mobile" ? state?.mobileLight : state?.fixedLight)}</span>
-      <div className="cv-camera-aux-buttons">
-        <button type="button" disabled={cannotStart}
-          onClick={() => void run(() => service!.setCameraLight(lens, true))}>Encender luz {lens === "mobile" ? "móvil" : "fija"}</button>
-        <button type="button" disabled={!connected || !service || busy}
-          onClick={() => void run(() => service!.setCameraLight(lens, false))}>Apagar luz {lens === "mobile" ? "móvil" : "fija"}</button>
+    {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "moving_left" ? "Buscando extremo izquierdo…" : "Paneando hacia la derecha…"}</p>}
+    <details className="cv-camera-light-details">
+      <summary>Luces <span>Móvil / fija</span></summary>
+      <div className="cv-camera-light-body">
+        {(["mobile", "fixed"] as const).map((lens) => <div className="cv-camera-light-row" key={lens}>
+          <div><strong>{lens === "mobile" ? "Móvil" : "Fija"}</strong>
+            <span>{label(lens === "mobile" ? state?.mobileLight : state?.fixedLight)}</span></div>
+          <button className="cv-ptz-preset-btn" type="button" disabled={cannotStart}
+            aria-label={`Encender luz ${lens === "mobile" ? "móvil" : "fija"}`}
+            title={lens === "mobile" ? "Luz blanca fija; activa modo nocturno" : "Luz fija"}
+            onClick={() => void run(() => service!.setCameraLight(lens, true))}>Encender</button>
+          <button className="cv-ptz-preset-btn" type="button" disabled={!connected || !service || busy}
+            aria-label={`Apagar luz ${lens === "mobile" ? "móvil" : "fija"}`}
+            title={lens === "mobile" ? "Restaurar la configuración anterior" : "Apagar luz"}
+            onClick={() => void run(() => service!.setCameraLight(lens, false))}>Apagar</button>
+        </div>)}
+        <p>La móvil activa modo nocturno. Al apagar recupera su configuración anterior.</p>
       </div>
-    </div>)}
-    <p>Las luces quedan fijas hasta apagarlas. La móvil fuerza modo nocturno; al apagar restaura su configuración anterior. Estado de la última orden aceptada.</p>
-    {controlLocked && <p>Tomá el control para iniciar el paneo o encender las luces.</p>}
-    {error && <p role="alert">{error}</p>}
-  </section>;
+    </details>
+    {controlLocked && <p className="cv-ptz-inline-note">Tomá el control para encender o iniciar.</p>}
+    {error && <p className="cv-ptz-inline-note" role="alert">{error}</p>}
+  </div>;
 }

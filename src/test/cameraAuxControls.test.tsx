@@ -17,6 +17,7 @@ describe("camera sweep and light controls", () => {
   it("starts and stops one sweep and sends independent light targets", async () => {
     const service = fixture();
     render(<CameraAuxControls service={service as never} connected controlLocked={false} />);
+    fireEvent.click(screen.getByText("Luces"));
     const start = screen.getByRole("button", { name: "Iniciar paneo" });
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
@@ -37,6 +38,7 @@ describe("camera sweep and light controls", () => {
   it("blocks starts without control but leaves stop and off accessible", async () => {
     const service = fixture();
     render(<CameraAuxControls service={service as never} connected controlLocked />);
+    fireEvent.click(screen.getByText("Luces"));
     await waitFor(() => expect(service.readCameraFeatures).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "Iniciar paneo" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Encender luz fija" })).toBeDisabled();
@@ -48,6 +50,7 @@ describe("camera sweep and light controls", () => {
     const service = fixture();
     service.setCameraLight.mockRejectedValue(new Error("mobile light unsupported"));
     render(<CameraAuxControls service={service as never} connected controlLocked={false} />);
+    fireEvent.click(screen.getByText("Luces"));
     const on = screen.getByRole("button", { name: "Encender luz móvil" });
     await waitFor(() => expect(on).toBeEnabled());
     expect(screen.getAllByText("Sin confirmar")).toHaveLength(2);

@@ -42,6 +42,8 @@ present, so 256 kbit/s is not a total link budget. Build passed; frontend tests
 unreachable during this check; its existing configuration was preserved.
 # Paneo y luces — 2026-10-14
 
+Los controles están al inicio del panel PTZ; las luces usan un desplegable
+compacto cerrado inicialmente, con el mismo estilo de botones de presets.
 El módulo Camera añade iniciar/detener paneo completo izquierdo→derecho de la
 móvil y encender/apagar luz fija para ambas lentes. API WebSocket:
 `get_camera_features`, `camera_sweep {enabled}` y

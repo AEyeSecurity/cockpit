@@ -949,8 +949,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
               </div>
             </section>
 
-            <CameraAuxControls service={navigationService} connected={navBackendConnected}
-              controlLocked={navigationState?.controlLocked !== false} />
             {cameraConfig.ptzEnabled !== false && <section className={`cv-panel-section cv-rail-section cv-rail-ptz-section cv-rail-collapsible ${ptzExpanded ? "cv-rail-collapsible-open" : "cv-rail-collapsible-closed"}`}>
               <button
                 className="cv-panel-header cv-ptz-section-header cv-rail-collapsible-header"
@@ -977,6 +975,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
                 </span>
               </button>
               <div className="cv-ptz-panel cv-ptz-panel-compact cv-rail-collapsible-body">
+                <CameraAuxControls service={navigationService} connected={navBackendConnected}
+                  controlLocked={navigationState?.controlLocked !== false} />
                 <div className="cv-ptz-readout cv-ptz-readout-camera">
                   <div className="cv-ptz-stat">
                     <span className="cv-ptz-stat-label">Preset</span>
