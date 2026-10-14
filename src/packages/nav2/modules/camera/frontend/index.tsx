@@ -409,6 +409,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   }
   const [state, setState] = useState<CameraVisionState>(service.getState());
   const [cameraConfig, setCameraConfig] = useState(() => readCameraStreamConfig(runtime));
+  const [mobileStartRequest, setMobileStartRequest] = useState(0);
   const [videoRequested, setVideoRequested] = useState(false);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(navigationService?.getState() ?? null);
   const [connectionState, setConnectionState] = useState<ConnectionState | null>(connectionService?.getState() ?? null);
@@ -803,7 +804,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
             </div>
           </div>
           <div className="cv-secondary-grid">
-            <SecondaryCameraTile title="Móvil" description="Secundaria · movimiento" config={cameraConfig} url={cameraConfig.mobileWebrtcUrl ?? ""} />
+            <SecondaryCameraTile startRequest={mobileStartRequest} title="Móvil" description="Secundaria · movimiento" config={cameraConfig} url={cameraConfig.mobileWebrtcUrl ?? ""} />
             <SecondaryCameraTile autoStart title="Reversa" description="Secundaria · vista trasera" config={cameraConfig} url={cameraConfig.reverseWebrtcUrl ?? ""} />
           </div>
         </section>
@@ -976,7 +977,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
               </button>
               <div className="cv-ptz-panel cv-ptz-panel-compact cv-rail-collapsible-body">
                 <CameraAuxControls service={navigationService} connected={navBackendConnected}
-                  controlLocked={navigationState?.controlLocked !== false} />
+                  controlLocked={navigationState?.controlLocked !== false}
+                  onSweepStart={() => setMobileStartRequest(value => value + 1)} />
                 <div className="cv-ptz-readout cv-ptz-readout-camera">
                   <div className="cv-ptz-stat">
                     <span className="cv-ptz-stat-label">Preset</span>

@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
 import type { CameraStreamRuntimeConfig } from "../../../shared/cameraStreamConfig";
 
-export function SecondaryCameraTile({ title, description, config, url, autoStart = false }: {
-  title: string; description: string; config: CameraStreamRuntimeConfig; url: string; autoStart?: boolean;
+export function SecondaryCameraTile({ title, description, config, url, autoStart = false, startRequest = 0 }: {
+  title: string; description: string; config: CameraStreamRuntimeConfig; url: string; autoStart?: boolean; startRequest?: number;
 }): JSX.Element {
   const [requested, setRequested] = useState(autoStart);
+  useEffect(() => { if (startRequest > 0) setRequested(true); }, [startRequest]);
   const [status, setStatus] = useState<CameraStreamStatus | null>(null);
   const stream = useMemo(() => ({ ...config, transport: "webrtc" as const, webrtcUrl: url }), [config, url]);
   return <section className="cv-secondary-tile" aria-label={`Cámara ${title}`}>

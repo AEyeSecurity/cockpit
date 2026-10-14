@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import type { CameraFeaturesData, NavigationService } from "../../navigation/service/impl/NavigationService";
 
-export function CameraAuxControls({ service, connected, controlLocked }: {
+export function CameraAuxControls({ service, connected, controlLocked, onSweepStart }: {
   service: NavigationService | null;
   connected: boolean;
   controlLocked: boolean;
+  onSweepStart?: () => void;
 }): JSX.Element {
   const [state, setState] = useState<CameraFeaturesData | null>(null);
   const [error, setError] = useState("");
@@ -42,7 +43,7 @@ export function CameraAuxControls({ service, connected, controlLocked }: {
       <button className="cv-ptz-preset-btn" type="button"
         title="Recorrer de izquierda a derecha conservando la inclinación"
         disabled={cannotStart || state?.sweepRunning}
-        onClick={() => void run(() => service!.sweepCamera(true))}>Iniciar paneo</button>
+        onClick={() => { onSweepStart?.(); void run(() => service!.sweepCamera(true)); }}>Iniciar paneo</button>
       <button className="cv-ptz-preset-btn" type="button" disabled={!connected || !service || busy}
         onClick={() => void run(() => service!.sweepCamera(false))}>Detener paneo</button>
     </div>
