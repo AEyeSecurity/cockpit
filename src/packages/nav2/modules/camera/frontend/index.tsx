@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./styles.css";
 import { SecondaryCameraTile } from "./SecondaryCameraTile";
+import { CameraAuxControls } from "./CameraAuxControls";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { CORE_EVENTS } from "../../../../../core/events/topics";
 import { CameraDispatcher } from "../dispatcher/impl/CameraDispatcher";
@@ -948,6 +949,8 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
               </div>
             </section>
 
+            <CameraAuxControls service={navigationService} connected={navBackendConnected}
+              controlLocked={navigationState?.controlLocked !== false} />
             {cameraConfig.ptzEnabled !== false && <section className={`cv-panel-section cv-rail-section cv-rail-ptz-section cv-rail-collapsible ${ptzExpanded ? "cv-rail-collapsible-open" : "cv-rail-collapsible-closed"}`}>
               <button
                 className="cv-panel-header cv-ptz-section-header cv-rail-collapsible-header"

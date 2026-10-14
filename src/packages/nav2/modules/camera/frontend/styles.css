@@ -9847,3 +9847,11 @@
   gap: 7px !important;
 }
 .cv-ptz-preset-btn, .cv-ptz-save-btn { min-width: 0 !important; font-size: 11px !important; }
+/* Auxiliary controls remain inside the camera module's existing rail. */
+.cv-camera-aux { display: grid; gap: 10px; }
+.cv-camera-aux h3, .cv-camera-aux p { margin: 0; }
+.cv-camera-aux p, .cv-camera-aux-light > span { font-size: 12px; color: var(--text-secondary, #aeb7c7); }
+.cv-camera-aux-light { display: grid; gap: 6px; }
+.cv-camera-aux-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-camera-aux-buttons button { background: var(--surface-raised, #202c40); color: inherit; border: 1px solid #45516a; border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+.cv-camera-aux-buttons button:disabled { opacity: 0.45; cursor: default; }

@@ -154,6 +154,10 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("get_camera_ptz_state", {}, { timeoutMs: 4000 });
   }
 
+  async requestCameraFeatures(op: string, payload: Record<string, unknown> = {}): Promise<Nav2IncomingMessage> {
+    return this.request(op, payload as never, { timeoutMs: 5000 });
+  }
+
   async requestState(): Promise<Nav2IncomingMessage> {
     return this.request("get_state", {}, { timeoutMs: 5000 });
   }

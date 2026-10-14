@@ -40,3 +40,19 @@ was 640×360, readyState=4 with increasing playback time. Audio G.711 remains
 present, so 256 kbit/s is not a total link budget. Build passed; frontend tests
 198 passed/1 skipped. The previous panorama/mobile camera at .250 was
 unreachable during this check; its existing configuration was preserved.
+# Paneo y luces — 2026-10-14
+
+El módulo Camera añade iniciar/detener paneo completo izquierdo→derecho de la
+móvil y encender/apagar luz fija para ambas lentes. API WebSocket:
+`get_camera_features`, `camera_sweep {enabled}` y
+`camera_light {lens: fixed|mobile, enabled}`. El backend es responsable del
+recorrido y renovación; abandonar la vista no apaga las luces.
+Encendido/inicio requiere control del operador. Apagado/detención no requiere
+lease y sigue accesible conectado aunque el estado previo sea desconocido.
+Estado de luces: última orden reconocida, sin lectura óptica garantizada.
+
+La luz móvil selecciona blanco y fuerza noche; apagar restaura el perfil previo.
+La fija usa la orden manual temporal renovada. Antes de usar en robot real,
+desplegar el backend con CameraFeatures; la UI se degrada sin ese servicio.
+El método físico de ambas luces se confirmó con operador; el paneo automático
+nuevo todavía necesita aceptación física. No se compiló Tauri.

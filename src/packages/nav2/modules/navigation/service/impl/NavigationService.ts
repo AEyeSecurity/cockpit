@@ -164,6 +164,15 @@ export interface CameraPtzMoveInput {
 
 export interface CameraPtzStateData extends CameraStatusData {}
 
+export interface CameraFeaturesData {
+  supported: boolean;
+  sweepRunning: boolean;
+  sweepPhase: string;
+  fixedLight: number;
+  mobileLight: number;
+  error: string;
+}
+
 export interface ManualKeysState {
   w: boolean;
   a: boolean;
@@ -3085,6 +3094,32 @@ export class NavigationService {
       zoomLevel: Number(payload.zoom_level ?? payload.zoomLevel ?? 0) || 0,
       activePreset: String(payload.active_preset ?? payload.activePreset ?? "")
     };
+  }
+
+  private async cameraFeaturesRequest(op: string, fields: Record<string, unknown> = {}): Promise<CameraFeaturesData> {
+    const response = await this.robotDispatcher.requestCameraFeatures(op, fields);
+    if (response.ok === false) throw new Error(response.error ?? "Camera command failed");
+    const payload = (response.payload ?? response) as Record<string, unknown>;
+    return {
+      supported: payload.supported === true,
+      sweepRunning: payload.sweep_running === true,
+      sweepPhase: String(payload.sweep_phase ?? "idle"),
+      fixedLight: Number(payload.fixed_light ?? -1),
+      mobileLight: Number(payload.mobile_light ?? -1),
+      error: String(payload.error ?? "")
+    };
+  }
+
+  readCameraFeatures(): Promise<CameraFeaturesData> {
+    return this.cameraFeaturesRequest("get_camera_features");
+  }
+
+  sweepCamera(enabled: boolean): Promise<CameraFeaturesData> {
+    return this.cameraFeaturesRequest("camera_sweep", { enabled });
+  }
+
+  setCameraLight(lens: "fixed" | "mobile", enabled: boolean): Promise<CameraFeaturesData> {
+    return this.cameraFeaturesRequest("camera_light", { lens, enabled });
   }
 
   setManualLinearSpeed(value: number): void {
