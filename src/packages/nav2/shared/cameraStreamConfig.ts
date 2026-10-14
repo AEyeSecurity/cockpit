@@ -6,6 +6,7 @@ export interface CameraStreamRuntimeConfig {
   transport: CameraStreamTransport;
   mjpegUrl: string;
   webrtcUrl: string;
+  webrtcReceiveAudio?: boolean;
   mobileWebrtcUrl?: string;
   reverseWebrtcUrl?: string;
   ptzEnabled?: boolean;
@@ -25,6 +26,7 @@ interface Nav2CameraConfig {
   camera_transport?: unknown;
   camera_mjpeg_url?: unknown;
   camera_webrtc_url?: unknown;
+  camera_webrtc_receive_audio?: unknown;
   camera_ptz_rotation_deg?: unknown;
   camera_probe_timeout_ms?: unknown;
   camera_load_timeout_ms?: unknown;
@@ -61,6 +63,7 @@ export function readCameraStreamConfig(runtime: ModuleContext): CameraStreamRunt
     transport: normalizeTransport(config.camera_transport),
     mjpegUrl: normalizeUrl(config.camera_mjpeg_url) || DEFAULT_CAMERA_MJPEG_URL,
     webrtcUrl: normalizeUrl(config.camera_webrtc_url),
+    webrtcReceiveAudio: config.camera_webrtc_receive_audio === true,
     ptzRotationDeg: Number(config.camera_ptz_rotation_deg) === 180 ? 180 : 0,
     probeTimeoutMs: parsePositiveInt(config.camera_probe_timeout_ms, Number(runtime.env.cameraProbeTimeoutMs ?? 3000), 500),
     loadTimeoutMs: parsePositiveInt(config.camera_load_timeout_ms, Number(runtime.env.cameraLoadTimeoutMs ?? 7000), 1000)

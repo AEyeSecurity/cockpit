@@ -8,7 +8,7 @@ export function SecondaryCameraTile({ title, description, config, url, autoStart
   const [requested, setRequested] = useState(autoStart);
   useEffect(() => { if (startRequest > 0) setRequested(true); }, [startRequest]);
   const [status, setStatus] = useState<CameraStreamStatus | null>(null);
-  const stream = useMemo(() => ({ ...config, transport: "webrtc" as const, webrtcUrl: url }), [config, url]);
+  const stream = useMemo(() => ({ ...config, transport: "webrtc" as const, webrtcUrl: url, webrtcReceiveAudio: true }), [config, url]);
   return <section className="cv-secondary-tile" aria-label={`Cámara ${title}`}>
     <header><div><strong>{title}</strong><span>{description}</span></div>
       {url && <button type="button" onClick={() => setRequested(value => !value)}>{requested ? "Detener" : "Ver video"}</button>}

@@ -24,7 +24,8 @@
     "camera_mobile_webrtc_url": "http://100.66.15.45:8889/cam4/whep",
     "camera_reverse_webrtc_url": "http://100.66.15.45:8889/cam5/whep",
     "camera_ptz_enabled": true,
-    "camera_ptz_zoom_enabled": false
+    "camera_ptz_zoom_enabled": false,
+    "camera_webrtc_receive_audio": false
   },
   "settings": {
     "title": "Nav2",
@@ -152,6 +153,11 @@
       {
         "key": "camera_ptz_enabled",
         "label": "Enable integrated PTZ controls",
+        "type": "boolean"
+      },
+      {
+        "key": "camera_webrtc_receive_audio",
+        "label": "Recibir audio de la cámara frontal (puede aumentar la demora)",
         "type": "boolean"
       }
     ]

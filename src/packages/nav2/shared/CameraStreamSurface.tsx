@@ -14,6 +14,7 @@ interface MediaMTXWebRTCReaderInstance {
 interface MediaMTXWebRTCReaderConstructor {
   new (config: {
     url: string;
+    receiveAudio?: boolean;
     onError?: (error: string) => void;
     onTrack?: (event: RTCTrackEvent) => void;
   }): MediaMTXWebRTCReaderInstance;
@@ -256,6 +257,7 @@ export function CameraStreamSurface({
         video.srcObject = bootstrapStream;
         reader = new Reader({
           url: config.webrtcUrl,
+          receiveAudio: config.webrtcReceiveAudio,
           onError: (error) => {
             if (!active) return;
             setStatus((previous) => ({
@@ -315,7 +317,7 @@ export function CameraStreamSurface({
         video.srcObject = null;
       }
     };
-  }, [isActive, config.loadTimeoutMs, config.transport, config.webrtcUrl]);
+  }, [isActive, config.loadTimeoutMs, config.transport, config.webrtcUrl, config.webrtcReceiveAudio]);
 
   if (config.transport === "webrtc") {
     return (

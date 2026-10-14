@@ -64,3 +64,22 @@ hasta Stop explícito, un comando PTZ manual, error o cierre del nodo.
 Mantiene el timeout de 120 s por tramo; cada llegada renueva el plazo.
 Cerrar la vista de Cockpit no detiene el recorrido. Velocidad normalizada
 ONVIF 0.65 para paneo; flechas manuales conservan 0.15.
+
+## Frontal con baja latencia — 2026-10-14
+
+La frontal no negocia audio en su sesión WHEP por defecto
+(`camera_webrtc_receive_audio=false`). Silenciar el elemento video no evita
+sincronización A/V; omitir el transceiver de audio sí cambia la negociación.
+Móvil y reversa conservan recepción de audio. Parlante/sirena de la cámara no
+se modifican. La opción de configuración permite volver a recibir audio frontal.
+
+Ensayo simultáneo con la misma fuente: frontal con audio ~2.6 s de buffer;
+sin audio ~31–38 ms a 15 FPS. Target WebRTC 50 ms manteniendo audio no resolvió
+la acumulación; no se aplica ese hint. El operador confirmó mejora clara
+en Cockpit. Esto mide espera de jitter buffer, no latencia captura→pantalla.
+No cambió encoder, MediaMTX ni ROS y no requiere reiniciar el robot.
+
+Patch local del reader vendorizado: `receiveAudio` opcional, omite transceiver
+de audio sólo con false; su default mantiene el comportamiento upstream.
+Preservar este cambio al actualizar el vendor. Prueba de negociación real del
+reader (mocks sin red) cubre false/true/omitido.
