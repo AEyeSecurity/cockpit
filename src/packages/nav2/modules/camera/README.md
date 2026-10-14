@@ -58,3 +58,9 @@ La fija usa la orden manual temporal renovada. Antes de usar en robot real,
 desplegar el backend con CameraFeatures; la UI se degrada sin ese servicio.
 El método físico de ambas luces se confirmó con operador; el paneo automático
 nuevo todavía necesita aceptación física. No se compiló Tauri.
+
+Actualización 2026-10-14: el paneo alterna derecha/izquierda continuamente
+hasta Stop explícito, un comando PTZ manual, error o cierre del nodo.
+Mantiene el timeout de 120 s por tramo; cada llegada renueva el plazo.
+Cerrar la vista de Cockpit no detiene el recorrido. Velocidad normalizada
+ONVIF 0.65 para paneo; flechas manuales conservan 0.15.
