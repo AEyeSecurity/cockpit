@@ -47,7 +47,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
       <button className="cv-ptz-preset-btn" type="button" disabled={!connected || !service || busy}
         onClick={() => void run(() => service!.sweepCamera(false))}>Detener paneo</button>
     </div>
-    {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "moving_left" ? "Buscando extremo izquierdo…" : state.sweepPhase === "sweeping_left" ? "Paneando hacia la izquierda…" : "Paneando hacia la derecha…"}</p>}
+    {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "recovering" ? "Reintentando paneo en unos segundos…" : state.sweepPhase === "moving_left" ? "Buscando extremo izquierdo…" : state.sweepPhase === "sweeping_left" ? "Paneando hacia la izquierda…" : "Paneando hacia la derecha…"}</p>}
     <details className="cv-camera-light-details">
       <summary>Luces <span>Móvil / fija</span></summary>
       <div className="cv-camera-light-body">
