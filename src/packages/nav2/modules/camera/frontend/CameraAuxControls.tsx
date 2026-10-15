@@ -18,7 +18,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
     const poll = async (): Promise<void> => {
       try {
         const next = await service.readCameraFeatures();
-        if (!disposed) { setState(next); if (next.error) setError(next.error); }
+        if (!disposed) { setState(next); if (next.error) setError(next.error); else if (next.sweepRunning && next.sweepPhase !== "recovering") setError(""); }
       } catch {
         if (!disposed) { setState(null); setError("Controles de cámara sin enlace"); }
       } finally {
