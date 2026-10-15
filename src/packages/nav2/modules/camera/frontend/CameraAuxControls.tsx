@@ -41,7 +41,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   return <div className="cv-camera-aux" aria-label="Paneo y luces">
     <div className="cv-ptz-preset-row cv-camera-sweep-row">
       <button className="cv-ptz-preset-btn" type="button"
-        title="Paneo desde Frente, 120° a cada lado, hasta detener"
+        title="Paneo desde Frente, 90° a cada lado, hasta detener"
         disabled={cannotStart || state?.sweepRunning}
         onClick={() => { onSweepStart?.(); void run(() => service!.sweepCamera(true)); }}>Iniciar paneo</button>
       <button className="cv-ptz-preset-btn" type="button" disabled={!connected || !service || busy}
