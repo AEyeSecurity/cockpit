@@ -1,3 +1,4 @@
+import { describeRouteBlock } from "../blockedRouteStatus";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
 import { PanelCollapsibleSection, PanelSection } from "../../../../core";
@@ -169,8 +170,8 @@ function routeTone(
   const activity = getRouteMissionActivityState(routeMission, goalActive);
   if (routeMission.returnHomeActive) return "active";
   if (routeMission.returnHomeRequested) return "paused";
-  if (routeMission.blockedState === "NEEDS_OPERATOR") return "error";
-  if (["PENDING", "WAITING_DATA", "WAITING_RETRY", "RECOVERING"].includes(routeMission.blockedState)) return "paused";
+  const blocked = describeRouteBlock(routeMission);
+  if (blocked) return blocked.tone;
   const status = normalizeRouteMissionStatus(routeMission.status);
   if (routeMission.paused || status.includes("paused")) return "paused";
   if (status.includes("failed") || status.includes("abort")) return "error";
@@ -181,20 +182,11 @@ function routeTone(
 }
 
 function formatBlockedStatusTitle(routeMission: NavigationState["routeMission"]): string {
-  if (routeMission.blockedState === "RECOVERING") return "Reintentando la ruta";
-  if (routeMission.blockedState === "NEEDS_OPERATOR") return "Se necesita intervención";
-  if (["PENDING", "WAITING_DATA", "WAITING_RETRY"].includes(routeMission.blockedState)) return "Camino bloqueado";
-  return "";
+  return describeRouteBlock(routeMission)?.title ?? "";
 }
 
 function formatBlockedStatusDetail(routeMission: NavigationState["routeMission"]): string {
-  const reason = routeMission.blockedReasonText || routeMission.blockedReasonCode || "obstacle or path blockage";
-  const retryMax = Math.max(0, Math.round(routeMission.blockedRetryMaxAttempts));
-  const retryAttempt = Math.max(0, Math.round(routeMission.blockedRetryAttempt));
-  const retryText = retryMax > 0 ? `retry ${Math.min(retryAttempt + 1, retryMax)}/${retryMax}` : "";
-  const wait = Math.max(0, Number(routeMission.blockedWaitRemainingS));
-  const waitText = routeMission.blockedState === "WAITING_RETRY" && wait > 0 ? `${Math.ceil(wait)}s` : "";
-  return [reason, retryText, waitText].filter((entry) => entry.length > 0).join(" · ");
+  return describeRouteBlock(routeMission)?.detail ?? "";
 }
 
 function buildNavigationStatus(
@@ -889,6 +881,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const patrolStartMeta = patrolReady
     ? `${patrolProfile.loopWaypoints.length} puntos en el recorrido`
     : `Falta: ${patrolReadiness.missingRequirements.map((item) => patrolRequirementLabels[item] ?? item.toLowerCase()).join(", ")}`;
+  const routeBlock = describeRouteBlock(routeMission);
   const routeMissionActivity = getRouteMissionActivityState(routeMission, telemetrySnapshot?.goalActive === true);
   const missionActive = routeMissionActivity.running || (telemetrySnapshot?.goalActive === true);
   const missionInProgress = missionActive || patrolMission.active || routeMission.paused;
@@ -1144,6 +1137,13 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         defaultCollapsed={false}
       >
         <div className="nav-sidebar-execution">
+          {routeBlock ? (
+            <div className={routeBlock.tone === "error" ? "ps-status-error" : "ps-status-note"}
+              role={routeBlock.tone === "error" ? "alert" : "status"}>
+              <strong>{routeBlock.title}</strong>
+              <p>{routeBlock.detail}</p>
+            </div>
+          ) : null}
           {missionInProgress ? (
             <>
               <span>{patrolMission.active ? formatPatrolMissionPhase(patrolMission.phase) : formatRouteStatus(routeMission.status)}</span>

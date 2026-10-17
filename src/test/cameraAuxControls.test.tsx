@@ -7,7 +7,7 @@ function fixture() {
     fixedLight: -1, mobileLight: -1, error: "" };
   return {
     readCameraFeatures: vi.fn().mockResolvedValue(state),
-    sweepCamera: vi.fn().mockImplementation(async (enabled) => ({ ...state, sweepRunning: enabled, sweepPhase: "moving_left" })),
+    sweepCamera: vi.fn().mockImplementation(async (enabled) => ({ ...state, sweepRunning: enabled, sweepPhase: "centering" })),
     setCameraLight: vi.fn().mockImplementation(async (lens, enabled) => ({ ...state,
       [lens === "mobile" ? "mobileLight" : "fixedLight"]: enabled ? 1 : 0 }))
   };
@@ -22,7 +22,7 @@ describe("camera sweep and light controls", () => {
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
     await waitFor(() => expect(service.sweepCamera).toHaveBeenCalledWith(true));
-    expect(await screen.findByText("Buscando extremo izquierdo…")).toBeInTheDocument();
+    expect(await screen.findByText("Centrando al frente…")).toBeInTheDocument();
     expect(start).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Detener paneo" }));
     await waitFor(() => expect(service.sweepCamera).toHaveBeenCalledWith(false));

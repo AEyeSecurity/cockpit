@@ -934,6 +934,8 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     ? Math.trunc(returnHomeExitWaypointIndexRaw)
     : -1;
 
+  const blockedState = String(candidate.blocked_state ?? candidate.blockedState ?? "");
+
   return {
     active: candidate.active === true,
     paused: candidate.paused === true,
@@ -964,7 +966,7 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     legSpacingM: Number(candidate.leg_spacing_m ?? 0) || 0,
     chunkSpanM: Number(candidate.chunk_span_m ?? 0) || 0,
     chunkMaxWaypoints: Number(candidate.chunk_max_waypoints ?? 0) || 0,
-    blockedState: String(candidate.blocked_state ?? candidate.blockedState ?? ""),
+    blockedState: blockedState === "CLEAR" ? "" : blockedState,
     blockedReasonCode: String(candidate.blocked_reason_code ?? candidate.blockedReasonCode ?? ""),
     blockedReasonText: String(candidate.blocked_reason_text ?? candidate.blockedReasonText ?? ""),
     blockedRetryAttempt: Number(candidate.blocked_retry_attempt ?? candidate.blockedRetryAttempt ?? 0) || 0,

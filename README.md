@@ -4,6 +4,14 @@
 
 Aplicación desktop modular para tooling de robótica, construida con **React + TypeScript + Tauri**.
 
+## Rama de integración
+
+Por decisión del operador del 17/10/2026, `main` integra el trabajo de
+`migration/salus-robot-cockpit`, la rama de cámara `agent/camera-sweep-recovery`
+y la presentación de bloqueos de maniobras (PR #26). El backend de referencia
+es `salus_robot`; esta promoción no demuestra compatibilidad con ROS2_SALUS ni
+valida hardware. La rama de migración queda como referencia histórica.
+
 ## Stack
 
 - Frontend: React + TSX (Vite)

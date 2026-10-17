@@ -1,3 +1,4 @@
+import { describeRouteBlock } from "../../navigation/blockedRouteStatus";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -2753,22 +2754,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   }, [displayTotal, fwCurrentWp, goalActive, goalSucceeded, loopTotalWaypoints, missionProgressPct, routeComplete]);
   const missionProgressLabel = `${Math.round(displayMissionProgressPct)}%`;
   const blockedState = routeMission?.blockedState ?? "";
-  const blockedReason =
-    routeMission?.blockedReasonText || routeMission?.blockedReasonCode || (blockedState ? "obstacle or path blockage" : "");
-  const blockedRetryMax = Math.max(0, Math.round(routeMission?.blockedRetryMaxAttempts ?? 0));
-  const blockedRetryAttempt = Math.max(0, Math.round(routeMission?.blockedRetryAttempt ?? 0));
-  const blockedWait = Math.max(0, Number(routeMission?.blockedWaitRemainingS ?? 0));
-  const blockedRetryText = blockedRetryMax > 0 ? `retry ${Math.min(blockedRetryAttempt + 1, blockedRetryMax)}/${blockedRetryMax}` : "";
-  const blockedWaitText = blockedState === "BLOCKED_WAITING" && blockedWait > 0 ? `${Math.ceil(blockedWait)}s` : "";
-  const blockedDetail = [blockedReason, blockedRetryText, blockedWaitText].filter((entry) => entry.length > 0).join(" · ");
+  const blocked = describeRouteBlock(routeMission);
+  const blockedDetail = blocked?.detail ?? "";
   const returnHomePhase = routeMission?.returnHomePhase ?? "idle";
   const missionTitle =
     routeMission?.returnHomeActive ? "Returning HOME" :
     returnHomePhase === "completed" ? "HOME reached" :
     routeMission?.returnHomeRequested ? "Return HOME queued" :
-    blockedState === "BLOCKED_NEEDS_OPERATOR" ? "Operator needed" :
-    blockedState === "BLOCKED_RETRYING" ? "Retrying blocked route" :
-    blockedState === "BLOCKED_WAITING" ? "Route blocked" :
+    blocked ? blocked.title :
     routeComplete ? "Route complete" :
     routeMission?.paused ? "Route paused" :
     routeMissionActivity?.running ? "Following route" :
@@ -2800,7 +2793,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           ? "Operator control"
           : `${queuedWaypointCount} queued waypoints`;
   const missionToneClass =
-    blockedState === "BLOCKED_NEEDS_OPERATOR" || routeStatusText.includes("fail") || routeStatusText.includes("error")
+    blocked?.tone === "error" || routeStatusText.includes("fail") || routeStatusText.includes("error")
       ? "error"
       : blockedState || routeMission?.paused || navigationState?.manualMode
         ? "warn"
