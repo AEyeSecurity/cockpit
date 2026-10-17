@@ -7,6 +7,7 @@ import "leaflet-draw/dist/leaflet.draw.css";
 import "./styles.css";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
+import { ShellCommands } from "../../../../../app/shellCommands";
 import { MapDispatcher } from "../dispatcher/impl/MapDispatcher";
 import { ConnectionService, type ConnectionState } from "../../navigation/service/impl/ConnectionService";
 import { MapService, type DatumProfilesState, type MapToolMode, type MapWorkspaceState } from "../service/impl/MapService";
@@ -613,9 +614,14 @@ function LeafletMapCanvas({
   waypoints,
   patrolMissionProfile,
   selectedWaypointIndexes,
+  insertionAfterIndex,
+  insertionSegment,
+  insertionSegmentIndex,
   robotPose,
   datumPose,
   centerRequestKey,
+  followRobot,
+  onStopFollowingRobot,
   onQueueWaypoint,
   onToggleWaypointSelection,
   onSetWaypointSelection,
@@ -637,9 +643,14 @@ function LeafletMapCanvas({
   waypoints: NavigationState["waypoints"];
   patrolMissionProfile: NavigationState["patrolMissionProfile"];
   selectedWaypointIndexes: number[];
+  insertionAfterIndex: number | null;
+  insertionSegment: NavigationState["routeEditor"]["insertionSegment"];
+  insertionSegmentIndex: number | null;
   robotPose: TelemetrySnapshot["robotPose"];
   datumPose: { lat: number; lon: number } | null;
   centerRequestKey: number;
+  followRobot: boolean;
+  onStopFollowingRobot: () => void;
   onQueueWaypoint: (lat: number, lon: number, yawDeg?: number) => void;
   onToggleWaypointSelection: (index: number) => void;
   onSetWaypointSelection: (indexes: number[], mode: "replace" | "add") => void;
@@ -1650,12 +1661,12 @@ function LeafletMapCanvas({
                 `${entry.index}:${entry.lat.toFixed(7)}:${entry.lon.toFixed(7)}:${entry.displayYawDeg.toFixed(2)}:${entry.manual ? 1 : 0}:${entry.selected ? 1 : 0}:${entry.action ? 1 : 0}:${entry.home ? 1 : 0}:${entry.patrolSegment ?? "-"}`
                 + `:${entry.displayBadge}`
             )
-            .join("|");
+            .join("|") + `|insert:${insertionAfterIndex ?? "-"}:${insertionSegment ?? "-"}:${insertionSegmentIndex ?? "-"}`;
     if (renderKey === waypointRenderKeyRef.current) return;
     waypointRenderKeyRef.current = renderKey;
     layer.clearLayers();
     if (displayPoints.length === 0) return;
-      displayPoints.forEach((entry) => {
+    displayPoints.forEach((entry) => {
         const marker = L.marker([entry.lat, entry.lon], {
           icon: buildWaypointIcon(
             entry.displayBadge,
@@ -1691,7 +1702,7 @@ function LeafletMapCanvas({
       });
       marker.addTo(layer);
     });
-  }, [loopRoute, patrolMissionProfile, robotPose, selectedWaypointIndexes, waypoints]);
+  }, [insertionAfterIndex, insertionSegment, insertionSegmentIndex, loopRoute, patrolMissionProfile, robotPose, selectedWaypointIndexes, waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1739,11 +1750,21 @@ function LeafletMapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !robotPose || centerRequestKey <= 0) return;
-    if (centerRequestHandledRef.current === centerRequestKey) return;
-    centerRequestHandledRef.current = centerRequestKey;
-    map.setView([robotPose.lat, robotPose.lon], Math.max(map.getZoom(), 17));
-  }, [centerRequestKey, robotPose]);
+    if (!map || !robotPose) return;
+    const centerRequested = centerRequestKey > 0 && centerRequestHandledRef.current !== centerRequestKey;
+    if (centerRequested) centerRequestHandledRef.current = centerRequestKey;
+    if (!centerRequested && !followRobot) return;
+    const target = L.latLng(robotPose.lat, robotPose.lon);
+    if (!centerRequested && map.distance(map.getCenter(), target) < 0.1) return;
+    map.setView(target, centerRequested ? Math.max(map.getZoom(), 17) : map.getZoom(), { animate: false });
+  }, [centerRequestKey, followRobot, robotPose]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !interactive) return;
+    map.on("dragstart", onStopFollowingRobot);
+    return () => { map.off("dragstart", onStopFollowingRobot); };
+  }, [interactive, onStopFollowingRobot]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2455,6 +2476,34 @@ function CockpitMapCanvas({
   );
 }
 
+function describePendingWaypointInsertion(state: NavigationState): string {
+  const afterIndex = state.routeEditor.insertionAfterIndex;
+  if (afterIndex === null) return "";
+  if (afterIndex < 0) return "Colocando el primer punto";
+  const segment = state.routeEditor.insertionSegment;
+  const segmentIndex = state.routeEditor.insertionSegmentIndex;
+  if (segment && segmentIndex !== null) {
+    const points = state.patrolMissionProfile[`${segment}Waypoints`];
+    const before = points[segmentIndex - 1];
+    const after = points[segmentIndex] ?? (segment === "loop" ? points[0] : undefined);
+    const beforeIndex = before ? state.waypoints.findIndex((waypoint) => waypoint.localId === before.localId) : -1;
+    const afterWaypointIndex = after ? state.waypoints.findIndex((waypoint) => waypoint.localId === after.localId) : -1;
+    const labels: Record<typeof segment, string> = {
+      loop: "recorrido principal",
+      depart: "salida desde HOME",
+      return: "regreso a HOME"
+    };
+    if (beforeIndex >= 0 && afterWaypointIndex >= 0) {
+      return `Insertando en ${labels[segment]} entre los puntos ${beforeIndex + 1} y ${afterWaypointIndex + 1}`;
+    }
+    if (beforeIndex >= 0) return `Añadiendo al final de ${labels[segment]}, después del punto ${beforeIndex + 1}`;
+  }
+  if (afterIndex + 1 < state.waypoints.length) {
+    return `Insertando entre los puntos ${afterIndex + 1} y ${afterIndex + 2}`;
+  }
+  return `Añadiendo después del punto ${afterIndex + 1}`;
+}
+
 function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [nav2Config, setNav2Config] = useState<Nav2MapConfig>(() => readNav2MapConfig(runtime));
   const mapService = runtime.services.getService<MapService>(SERVICE_ID);
@@ -2495,6 +2544,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   });
   const [leafletZoneToolActive, setLeafletZoneToolActive] = useState(false);
   const [centerRequestKey, setCenterRequestKey] = useState(0);
+  const [followRobot, setFollowRobot] = useState(false);
   const [mapZoom, setMapZoom] = useState(GPS_DEFAULT_ZOOM);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(
     navigationService ? navigationService.getState() : null
@@ -2944,22 +2994,39 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
 
   const queueWaypointFromMap = (lat: number, lon: number, yawDeg?: number): void => {
     if (!navigationService || !navigationState?.goalMode) return;
-    navigationService.queueWaypoint(
+    const waypoint =
       yawDeg === undefined
         ? { x: lat, y: lon }
         : {
             x: lat,
             y: lon,
             yawDeg
-          }
-    );
+          };
+    const insertionAfterIndex = navigationState.routeEditor.insertionAfterIndex;
+    const insertedIndex = insertionAfterIndex !== null ? insertionAfterIndex + 1 : navigationState.waypoints.length;
+    if (insertionAfterIndex !== null) {
+      const insertionSegment = navigationState.routeEditor.insertionSegment;
+      const insertionSegmentIndex = navigationState.routeEditor.insertionSegmentIndex;
+      navigationService.insertWaypoint(
+        insertionAfterIndex + 1,
+        waypoint,
+        insertionSegment && insertionSegmentIndex !== null
+          ? { segment: insertionSegment, segmentIndex: insertionSegmentIndex }
+          : undefined
+      );
+    } else {
+      navigationService.queueWaypoint(waypoint);
+    }
+    navigationService.setWaypointSelection([insertedIndex]);
+    void navigationService.setGoalMode(false).catch(() => undefined);
     runtime.eventBus.emit("console.event", {
       level: "info",
-      text: `Waypoint queued from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
+      text: `${insertionAfterIndex !== null ? "Waypoint inserted" : "Waypoint queued"} from map (${lat.toFixed(6)}, ${lon.toFixed(6)})${
         yawDeg === undefined ? " auto-yaw" : ` yaw=${yawDeg.toFixed(1)}°`
       }`,
       timestamp: Date.now()
     });
+    runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
   };
 
   const toggleWaypointSelectionFromMap = (index: number): void => {
@@ -2985,6 +3052,13 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!mainIsMap || !mapToolsEnabled || isEditingTarget(event.target)) return;
+      if (event.key === "Escape" && navigationService && navigationState?.routeEditor.insertionAfterIndex !== null) {
+        navigationService.cancelWaypointInsertion();
+        void navigationService.setGoalMode(false).catch(() => undefined);
+        runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
+        event.preventDefault();
+        return;
+      }
       if (event.key === "Escape" && (state.toolMode !== "idle" || leafletZoneToolActive)) {
         closeMapTools();
         event.preventDefault();
@@ -3020,10 +3094,35 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
+  }, [closeMapTools, leafletZoneToolActive, mainIsMap, mapToolsEnabled, mapService, navigationService, navigationState?.routeEditor.insertionAfterIndex, navigationState?.selectedWaypointIndexes.length, navigationState?.waypointSelectionMode, selectTool, state.toolMode]);
 
   return (
     <div className="map-workspace-root map-html-root">
+      {navigationState?.routeEditor.insertionAfterIndex !== null && navigationState?.routeEditor.insertionAfterIndex !== undefined ? (
+        <div className="map-route-insertion-banner" role="status">
+          <div>
+            <strong>{describePendingWaypointInsertion(navigationState)}</strong>
+            <span>Haz clic en el mapa para colocar el punto. Después volverás al editor.</span>
+          </div>
+          <button type="button" onClick={() => {
+            navigationService?.cancelWaypointInsertion();
+            void navigationService?.setGoalMode(false).catch(() => undefined);
+            runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
+          }}>Cancelar y volver al editor</button>
+        </div>
+      ) : null}
+      {navigationState?.waypointSelectionMode && navigationState.routeEditor.insertionAfterIndex === null ? (
+        <div className="map-route-insertion-banner" role="status">
+          <div>
+            <strong>Seleccionar puntos por área</strong>
+            <span>Arrastra un rectángulo sobre los puntos. Mantén Shift para sumar otra área a la selección.</span>
+          </div>
+          <button type="button" onClick={() => {
+            navigationService?.setWaypointSelectionMode(false);
+            runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor");
+          }}>Terminar y volver al editor</button>
+        </div>
+      ) : null}
       <div className={`stage map-stage map-html-stage ${mainIsMap ? "mode-gps-main" : "mode-camera-main"}`}>
         {mainIsMap ? (
           <section className="stage-pane main map-stage-pane">
@@ -3046,9 +3145,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   }
                 }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                insertionAfterIndex={navigationState?.routeEditor.insertionAfterIndex ?? null}
+                insertionSegment={navigationState?.routeEditor.insertionSegment ?? null}
+                insertionSegmentIndex={navigationState?.routeEditor.insertionSegmentIndex ?? null}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                followRobot={followRobot}
+                onStopFollowingRobot={() => setFollowRobot(false)}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
@@ -3078,8 +3182,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   />
                 ) : null}
                 {cameraEnabled ? (
-                  <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
-                    {videoRequested ? "Stop video" : "Start video"}
+                  <button
+                    type="button"
+                    className={`map-camera-request-btn${videoRequested ? " is-active" : ""}`}
+                    onClick={() => setVideoRequested((current) => !current)}
+                    aria-label={videoRequested ? "Stop video" : "Start video"}
+                    title={videoRequested ? "Stop video" : "Start video"}
+                  >
+                    {videoRequested ? "Stop" : "Start video"}
                   </button>
                 ) : null}
                 {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
@@ -3088,7 +3198,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           </section>
         ) : null}
         {cameraPaneAvailable && !mainIsMap ? (
-          <section className="map-stage-pane map-map-stage-pane-mini">
+          <section className={`map-stage-pane map-map-stage-pane-mini${showVideo ? " is-video-active" : ""}`}>
             <div className="map-camera-mini-head map-map-mini-head">
               <span>Map</span>
               <div className="map-camera-mini-head-right">
@@ -3121,9 +3231,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   }
                 }
                 selectedWaypointIndexes={navigationState?.selectedWaypointIndexes ?? []}
+                insertionAfterIndex={navigationState?.routeEditor.insertionAfterIndex ?? null}
+                insertionSegment={navigationState?.routeEditor.insertionSegment ?? null}
+                insertionSegmentIndex={navigationState?.routeEditor.insertionSegmentIndex ?? null}
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
+                followRobot={followRobot}
+                onStopFollowingRobot={() => setFollowRobot(false)}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
                 onSetWaypointSelection={setWaypointSelectionFromMap}
@@ -3141,10 +3256,21 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
           <>
             <div className="map-right-stack">
               {showMiniCameraPane ? (
-                <section className="map-camera-stage-pane map-camera-stage-pane-mini">
+                <section className={`map-camera-stage-pane map-camera-stage-pane-mini${showVideo ? " is-video-active" : ""}`}>
                   <div className="map-camera-mini-head">
                     <span>Camera</span>
                     <div className="map-camera-mini-head-right">
+                      {cameraEnabled && videoRequested ? (
+                        <button
+                          type="button"
+                          className="map-camera-stop-btn"
+                          onClick={() => setVideoRequested(false)}
+                          aria-label="Stop video"
+                          title="Stop video"
+                        >
+                          Stop
+                        </button>
+                      ) : null}
                       {cameraPaneAvailable ? (
                         <button type="button" className="map-camera-expand-btn" onClick={() => setMainPane("camera")} title="Abrir cámara">
                           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3168,9 +3294,15 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                         onStatusChange={setCameraStreamStatus}
                       />
                     ) : null}
-                    {cameraEnabled ? (
-                      <button type="button" className="map-camera-request-btn" onClick={() => setVideoRequested((current) => !current)}>
-                        {videoRequested ? "Stop video" : "Start video"}
+                    {cameraEnabled && !videoRequested ? (
+                      <button
+                        type="button"
+                        className="map-camera-request-btn"
+                        onClick={() => setVideoRequested(true)}
+                        aria-label="Start video"
+                        title="Start video"
+                      >
+                        Start video
                       </button>
                     ) : null}
                     {cameraOverlayText ? <div className="camera-overlay visible">{cameraOverlayText}</div> : null}
@@ -3437,18 +3569,22 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
               </button>
               <button
                 type="button"
-                className="map-btn map-btn-sep"
+                className={`map-btn map-btn-sep${followRobot ? " active" : ""}`}
                 onClick={() => {
-                  setCenterRequestKey((value) => value + 1);
-                  mapService.centerRobot();
+                  const next = !followRobot;
+                  setFollowRobot(next);
+                  if (next) {
+                    setCenterRequestKey((value) => value + 1);
+                  }
                   runtime.eventBus.emit("console.event", {
                     level: "info",
-                    text: "Map centered on robot",
+                    text: next ? "Map following robot" : "Map stopped following robot",
                     timestamp: Date.now()
                   });
                 }}
-                title="Centrar robot"
-                aria-label="Centrar robot"
+                title={followRobot ? "Dejar de seguir al robot" : "Seguir al robot"}
+                aria-label={followRobot ? "Dejar de seguir al robot" : "Seguir al robot"}
+                aria-pressed={followRobot}
                 disabled={!mapToolsEnabled}
               >
                 <svg className="map-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">

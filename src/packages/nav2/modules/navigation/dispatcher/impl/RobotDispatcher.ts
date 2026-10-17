@@ -59,6 +59,10 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     return this.request("set_manual_mode", { enabled } as never, { timeoutMs: 5000 });
   }
 
+  async requestNavigationProfile(profile: "urban" | "rural"): Promise<Nav2IncomingMessage> {
+    return this.request("set_navigation_profile", { profile } as never, { timeoutMs: 7000 });
+  }
+
   async requestManualCommand(linearX: number, angularZ: number, brake: boolean): Promise<Nav2IncomingMessage> {
     // Legacy backend contract expects snake_case controls at top level.
     return this.request(
@@ -148,6 +152,10 @@ export class RobotDispatcher extends Nav2DispatcherBase {
 
   async requestCameraPtzState(): Promise<Nav2IncomingMessage> {
     return this.request("get_camera_ptz_state", {}, { timeoutMs: 4000 });
+  }
+
+  async requestCameraFeatures(op: string, payload: Record<string, unknown> = {}): Promise<Nav2IncomingMessage> {
+    return this.request(op, payload as never, { timeoutMs: 5000 });
   }
 
   async requestState(): Promise<Nav2IncomingMessage> {

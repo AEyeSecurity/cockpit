@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DispatchRouter } from "../packages/core/modules/runtime/dispatcher/DispatchRouter";
 import type { RequestOptions } from "../packages/core/modules/runtime/dispatcher/base/Dispatcher";
+import { RobotDispatcher } from "../packages/nav2/modules/navigation/dispatcher/impl/RobotDispatcher";
 import { Nav2DispatcherBase } from "../packages/nav2/protocol/Nav2DispatcherBase";
 import {
   decodeNav2Incoming,
@@ -104,6 +105,30 @@ describe("nav2 protocol", () => {
     );
 
     await expect(dispatcher.requestPing({}, { timeoutMs: 15 })).rejects.toThrow("timeout");
+  });
+
+  it("keeps navigation profile changes alive for the profile transaction budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispatcher = new RobotDispatcher("dispatcher.profile", "transport.test");
+      const sent: Array<Record<string, unknown>> = [];
+      dispatcher.setRouter(
+        {
+          async sendRaw(_transportId: string, raw: unknown): Promise<void> {
+            sent.push(raw as Record<string, unknown>);
+          }
+        } as unknown as DispatchRouter
+      );
+
+      const request = dispatcher.requestNavigationProfile("rural");
+      await vi.advanceTimersByTimeAsync(6000);
+      const requestId = String(sent[0]?.requestId ?? "");
+      dispatcher.handleIncoming({ op: "ack", requestId, ok: true, active_profile: "rural" }, "transport.test");
+
+      await expect(request).resolves.toMatchObject({ ok: true, active_profile: "rural" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("correlates request/response when backend replies with client_req_id", async () => {

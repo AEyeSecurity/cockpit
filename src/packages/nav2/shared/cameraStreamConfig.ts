@@ -6,15 +6,27 @@ export interface CameraStreamRuntimeConfig {
   transport: CameraStreamTransport;
   mjpegUrl: string;
   webrtcUrl: string;
+  webrtcReceiveAudio?: boolean;
+  mobileWebrtcUrl?: string;
+  reverseWebrtcUrl?: string;
+  ptzEnabled?: boolean;
+  ptzPanInverted?: boolean;
+  ptzZoomEnabled?: boolean;
   ptzRotationDeg: 0 | 180;
   probeTimeoutMs: number;
   loadTimeoutMs: number;
 }
 
 interface Nav2CameraConfig {
+  camera_mobile_webrtc_url?: unknown;
+  camera_reverse_webrtc_url?: unknown;
+  camera_ptz_enabled?: unknown;
+  camera_ptz_pan_inverted?: unknown;
+  camera_ptz_zoom_enabled?: unknown;
   camera_transport?: unknown;
   camera_mjpeg_url?: unknown;
   camera_webrtc_url?: unknown;
+  camera_webrtc_receive_audio?: unknown;
   camera_ptz_rotation_deg?: unknown;
   camera_probe_timeout_ms?: unknown;
   camera_load_timeout_ms?: unknown;
@@ -43,9 +55,15 @@ function readNav2CameraConfig(runtime: ModuleContext): Nav2CameraConfig {
 export function readCameraStreamConfig(runtime: ModuleContext): CameraStreamRuntimeConfig {
   const config = readNav2CameraConfig(runtime);
   return {
+    mobileWebrtcUrl: normalizeUrl(config.camera_mobile_webrtc_url),
+    reverseWebrtcUrl: normalizeUrl(config.camera_reverse_webrtc_url),
+    ptzEnabled: config.camera_ptz_enabled !== false,
+    ptzPanInverted: config.camera_ptz_pan_inverted === true,
+    ptzZoomEnabled: config.camera_ptz_zoom_enabled !== false,
     transport: normalizeTransport(config.camera_transport),
     mjpegUrl: normalizeUrl(config.camera_mjpeg_url) || DEFAULT_CAMERA_MJPEG_URL,
     webrtcUrl: normalizeUrl(config.camera_webrtc_url),
+    webrtcReceiveAudio: config.camera_webrtc_receive_audio === true,
     ptzRotationDeg: Number(config.camera_ptz_rotation_deg) === 180 ? 180 : 0,
     probeTimeoutMs: parsePositiveInt(config.camera_probe_timeout_ms, Number(runtime.env.cameraProbeTimeoutMs ?? 3000), 500),
     loadTimeoutMs: parsePositiveInt(config.camera_load_timeout_ms, Number(runtime.env.cameraLoadTimeoutMs ?? 7000), 1000)
@@ -58,13 +76,14 @@ export function isCameraFeedConfigured(config: CameraStreamRuntimeConfig): boole
 
 export function orientCameraPtzDelta<T extends object>(
   input: T,
-  rotationDeg: 0 | 180
+  rotationDeg: 0 | 180,
+  panInverted = false
 ): T {
-  if (rotationDeg !== 180) return input;
+  if (rotationDeg !== 180 && !panInverted) return input;
   const axes = input as { panDeg?: number; tiltDeg?: number };
   return {
     ...input,
-    ...(axes.panDeg === undefined ? {} : { panDeg: -axes.panDeg }),
-    ...(axes.tiltDeg === undefined ? {} : { tiltDeg: -axes.tiltDeg })
+    ...(axes.panDeg === undefined ? {} : { panDeg: axes.panDeg * ((rotationDeg === 180) !== panInverted ? -1 : 1) }),
+    ...(axes.tiltDeg === undefined || rotationDeg !== 180 ? {} : { tiltDeg: -axes.tiltDeg })
   };
 }

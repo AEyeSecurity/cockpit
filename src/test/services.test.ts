@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MapService } from "../packages/nav2/modules/map/service/impl/MapService";
 import { MissionService } from "../packages/nav2/modules/debug/service/impl/MissionService";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
-import { ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
+import { buildConnectionWebSocketUrl, ConnectionService } from "../packages/nav2/modules/navigation/service/impl/ConnectionService";
 import type { Nav2IncomingMessage } from "../packages/nav2/protocol/messages";
 
 function installStorageMock(seed: Record<string, string> = {}): void {
@@ -20,6 +20,31 @@ function installStorageMock(seed: Record<string, string> = {}): void {
 }
 
 describe("services", () => {
+  it("applies the selected navigation profile before starting a route", async () => {
+    const dispatcher = {
+      requestNavigationProfile: vi.fn().mockResolvedValue({ op: "ack", ok: true, active_profile: "rural" }),
+      requestRouteMission: vi.fn().mockResolvedValue({
+        op: "ack", ok: true, input_waypoint_count: 2, expanded_waypoint_count: 2
+      })
+    };
+    const service = new NavigationService(dispatcher as never);
+    service.applyLocalControlLock(false, "unlocked");
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+
+    await service.setNavigationStartProfile("rural");
+    await service.sendRouteMission();
+
+    expect(dispatcher.requestNavigationProfile).toHaveBeenNthCalledWith(1, "rural");
+    expect(dispatcher.requestNavigationProfile).toHaveBeenNthCalledWith(2, "rural");
+    expect(dispatcher.requestRouteMission).toHaveBeenCalledOnce();
+    expect(service.getState().navigationStartProfile).toBe("rural");
+  });
+
+  it("keeps normal WebSocket URLs unchanged and appends nav-live explicitly", () => {
+    expect(buildConnectionWebSocketUrl("robot", "8766")).toBe("ws://robot:8766");
+    expect(buildConnectionWebSocketUrl("robot", "8766", "nav-live")).toBe("ws://robot:8766/?client=nav-live");
+  });
   it("uses config defaults for ConnectionService when localStorage is empty", () => {
     installStorageMock();
     const transportManager = {
@@ -319,6 +344,98 @@ describe("services", () => {
     expect(service.getState().selectedWaypointIndexes).toEqual([]);
   });
 
+  it("inserts, reorders, removes and undoes route edits without changing waypoint identities", () => {
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.queueWaypoint({ x: 3, y: 3 });
+    const original = service.getState().waypoints;
+    const originalIds = original.map((waypoint) => waypoint.localId);
+
+    const insertedIndex = service.insertWaypoint(1, { x: 1.5, y: 1.5 });
+    expect(insertedIndex).toBe(1);
+    const insertedId = service.getState().waypoints[1]?.localId;
+    expect(service.getState().waypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[0],
+      insertedId,
+      originalIds[1],
+      originalIds[2]
+    ]);
+    expect(service.getState().routeEditor).toMatchObject({ dirty: true, canUndo: true, canRedo: false });
+
+    expect(service.reorderWaypoint(1, 3)).toBe(true);
+    expect(service.getState().waypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[0], originalIds[1], originalIds[2], insertedId
+    ]);
+    expect(service.removeWaypoint(1)).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(3);
+
+    expect(service.undoRouteEdit()).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(4);
+    expect(service.redoRouteEdit()).toBe(true);
+    expect(service.getState().waypoints).toHaveLength(3);
+  });
+
+  it("inserts into the requested patrol segment while preserving segment order", () => {
+    const service = new NavigationService({} as never);
+    for (let index = 0; index < 4; index += 1) {
+      service.queueWaypoint({ x: index, y: index });
+    }
+    service.useQueuedWaypointsAsPatrolLoop();
+    const before = service.getState().patrolMissionProfile.loopWaypoints.map((waypoint) => waypoint.localId);
+
+    service.insertWaypoint(2, { x: 99, y: 99 }, { segment: "loop", segmentIndex: 1 });
+    const state = service.getState();
+    expect(state.patrolMissionProfile.loopWaypoints.map((waypoint) => waypoint.localId)).toEqual([
+      before[0],
+      state.waypoints[2]?.localId,
+      before[1],
+      before[2],
+      before[3]
+    ]);
+  });
+
+  it("tracks the active named route and saves edits back to it", () => {
+    installStorageMock();
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 2 });
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.saveNamedRoute("Ronda editable");
+    expect(service.getState().routeEditor).toMatchObject({
+      activeRouteName: "Ronda editable",
+      dirty: false
+    });
+
+    service.insertWaypoint(1, { x: 2, y: 3 });
+    expect(service.getState().routeEditor.dirty).toBe(true);
+    expect(service.saveCurrentNamedRoute()).toBe(3);
+    expect(service.getState().routeEditor.dirty).toBe(false);
+
+    service.clearWaypoints();
+    service.loadNamedRoute("Ronda editable");
+    expect(service.getState().waypoints).toHaveLength(3);
+    expect(service.getState().routeEditor).toMatchObject({
+      activeRouteName: "Ronda editable",
+      dirty: false,
+      canUndo: false,
+      canRedo: false
+    });
+  });
+
+  it("tracks and cancels a map insertion position without creating a route edit", () => {
+    const service = new NavigationService({} as never);
+    service.applyLocalControlLock(false, "unlocked");
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    const undoAvailableBefore = service.getState().routeEditor.canUndo;
+
+    service.beginWaypointInsertion(0);
+    expect(service.getState().routeEditor.insertionAfterIndex).toBe(0);
+    expect(service.getState().routeEditor.canUndo).toBe(undoAvailableBefore);
+    service.cancelWaypointInsertion();
+    expect(service.getState().routeEditor.insertionAfterIndex).toBeNull();
+  });
+
   it("replaces or adds waypoint selections for map area selection", () => {
     const service = new NavigationService({} as never);
     service.queueWaypoint({ x: 1, y: 1 });
@@ -420,6 +537,7 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 5
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
       requestCancelGoal: vi.fn(),
       requestCancelRouteMission: vi.fn(),
       requestManualMode: vi.fn(),
@@ -459,6 +577,35 @@ describe("services", () => {
     );
   });
 
+  it("preserves automatic route-mission yaw for the route executor", async () => {
+    const dispatcher = {
+      requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
+        op: "ack",
+        ok: true,
+        input_waypoint_count: 2,
+        expanded_waypoint_count: 5
+      }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
+      requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
+    };
+    const service = new NavigationService(dispatcher as never);
+    await service.unlockControls();
+    service.setLoopRoute(false);
+    service.queueWaypoint({ x: 3, y: 4 });
+    service.queueWaypoint({ x: 5, y: 6 });
+
+    await service.sendRouteMission();
+
+    const payload = (
+      dispatcher.requestRouteMission.mock.calls as unknown as Array<[
+        { waypoints: Array<{ yaw_deg?: number }> }
+      ]>
+    )[0][0];
+    expect(payload.waypoints).toHaveLength(2);
+    expect(payload.waypoints[0].yaw_deg).toBeUndefined();
+    expect(payload.waypoints[1].yaw_deg).toBeUndefined();
+  });
+
   it("serializes rural and urban navigation profile waypoint actions", async () => {
     const dispatcher = {
       requestRouteMission: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({
@@ -467,12 +614,13 @@ describe("services", () => {
         input_waypoint_count: 2,
         expanded_waypoint_count: 2
       }),
+      requestNavigationProfile: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true }),
       requestControlLock: vi.fn<() => Promise<Nav2IncomingMessage>>().mockResolvedValue({ op: "ack", ok: true })
     };
     const service = new NavigationService(dispatcher as never);
     await service.unlockControls();
-    service.queueWaypoint({ x: 3, y: 4 });
-    service.queueWaypoint({ x: 5, y: 6 });
+    service.queueWaypoint({ x: 3, y: 4, yawDeg: 0 });
+    service.queueWaypoint({ x: 5, y: 6, yawDeg: 5 });
     service.toggleWaypointSelection(0);
     service.setNavigationProfileActionForSelected("rural");
     service.clearWaypointSelection();
@@ -484,8 +632,8 @@ describe("services", () => {
     expect(dispatcher.requestRouteMission).toHaveBeenCalledWith(
       expect.objectContaining({
         waypoints: [
-          { lat: 3, lon: 4, actions: [{ type: "set_navigation_profile", profile: "rural" }] },
-          { lat: 5, lon: 6, actions: [{ type: "set_navigation_profile", profile: "urban" }] }
+          { lat: 3, lon: 4, yaw_deg: 0, actions: [{ type: "set_navigation_profile", profile: "rural" }] },
+          { lat: 5, lon: 6, yaw_deg: 5, actions: [{ type: "set_navigation_profile", profile: "urban" }] }
         ]
       })
     );
@@ -571,6 +719,55 @@ describe("services", () => {
     expect(profile.homeWaypoint).toBeNull();
   });
 
+  it("removes patrol roles from selected points while preserving the re-entry point", () => {
+    const service = new NavigationService({} as never);
+    for (let index = 0; index < 4; index += 1) service.queueWaypoint({ x: index, y: index });
+    service.toggleWaypointSelection(0);
+    service.setPatrolHomeFromSelected();
+    service.clearWaypointSelection();
+    service.useQueuedWaypointsAsPatrolLoop();
+    service.toggleWaypointSelection(2);
+    service.setPatrolDepartEntryFromSelected();
+
+    service.clearWaypointSelection();
+    service.toggleWaypointSelection(1);
+    expect(service.removeSelectedWaypointsFromPatrolSegment("loop")).toBe(1);
+    let profile = service.getState().patrolMissionProfile;
+    expect(profile.loopWaypoints.map((waypoint) => waypoint.x)).toEqual([2, 3]);
+    expect(profile.departEntryLoopIndex).toBe(0);
+
+    service.clearPatrolDepartEntry();
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(-1);
+    service.addSelectedWaypointsToPatrolLoop();
+    profile = service.getState().patrolMissionProfile;
+    expect(profile.loopWaypoints.map((waypoint) => waypoint.x)).toEqual([2, 3, 1]);
+    expect(profile.departEntryLoopIndex).toBe(-1);
+  });
+
+  it("switches waypoint orientation without changing its patrol role or arrival actions", () => {
+    const service = new NavigationService({} as never);
+    service.queueWaypoint({ x: 1, y: 1 });
+    service.queueWaypoint({ x: 2, y: 2 });
+    service.toggleWaypointSelection(1);
+    service.setBrakeHoldActionForSelected(true, 5);
+    service.useQueuedWaypointsAsPatrolLoop();
+
+    service.setWaypointOrientation(1, 135);
+    let waypoint = service.getState().waypoints[1];
+    expect(waypoint.yawDeg).toBe(135);
+    expect(waypoint.actions?.[0]?.type).toBe("brake_hold");
+    expect(service.getState().patrolMissionProfile.loopWaypoints[1].yawDeg).toBe(135);
+
+    service.setWaypointOrientation(1);
+    waypoint = service.getState().waypoints[1];
+    expect(waypoint.yawDeg).toBeUndefined();
+    expect(waypoint.actions?.[0]?.type).toBe("brake_hold");
+    expect(service.getState().patrolMissionProfile.loopWaypoints[1].yawDeg).toBeUndefined();
+    service.undoRouteEdit();
+    expect(service.getState().waypoints[1].yawDeg).toBe(135);
+    expect(() => service.setWaypointOrientation(1, Number.NaN)).toThrow(/orientación/i);
+  });
+
   it("rejects selecting HOME or connector waypoints as patrol entry", () => {
     const service = new NavigationService({} as never);
 
@@ -634,7 +831,7 @@ describe("services", () => {
     expect(profile.departEntryLoopIndex).toBe(-1);
   });
 
-  it("resolves auto yaw before dispatching a structured patrol", async () => {
+  it("preserves automatic loop yaw for the structured patrol executor", async () => {
     const dispatcher = {
       requestControlLock: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
       requestNavigationProfile: vi.fn().mockResolvedValue({
@@ -672,7 +869,7 @@ describe("services", () => {
       };
     };
     expect(payload.patrol_mission.loop_waypoints).toHaveLength(3);
-    expect(payload.patrol_mission.loop_waypoints.every((waypoint) => Number.isFinite(waypoint.yaw_deg))).toBe(true);
+    expect(payload.patrol_mission.loop_waypoints.every((waypoint) => waypoint.yaw_deg === undefined)).toBe(true);
     expect(Number.isFinite(payload.patrol_mission.home_waypoint.yaw_deg)).toBe(true);
     expect(service.getState().patrolMission).toMatchObject({
       active: true,
@@ -1171,6 +1368,23 @@ describe("services", () => {
       await Promise.resolve();
 
       expect(dispatcher.requestControlHeartbeat).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes mission state while the connection stays open", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispatcher = {
+        requestControlHeartbeat: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
+        requestState: vi.fn().mockResolvedValue({ op: "state", ok: true })
+      };
+      const service = new NavigationService(dispatcher as never);
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      expect(dispatcher.requestState).toHaveBeenCalledOnce();
+      service.stopControlHeartbeat();
     } finally {
       vi.useRealTimers();
     }

@@ -9812,3 +9812,53 @@
 .cv-rail-feed-section > .cv-feed-header::before {
   display: block !important;
 }
+
+/* Camera priorities: large panorama, two smaller secondary feeds. */
+.cv-main.cv-html-main.cv-camera-grid {
+  display: grid !important;
+  grid-template-rows: auto minmax(220px, 2fr) minmax(140px, 1fr) !important;
+  gap: 10px !important;
+  min-height: 0;
+}
+.cv-grid-heading, .cv-secondary-tile header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px; background: #f5f8fc; color: #20374a; border-radius: 10px;
+}
+.cv-grid-heading span, .cv-secondary-tile header span { font-size: 11px; color: #526879; }
+.cv-secondary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-height: 0; }
+.cv-secondary-tile { display: flex; flex-direction: column; overflow: hidden; min-width: 0; min-height: 0; border-radius: 12px; background: #152636; }
+.cv-secondary-tile header { border-radius: 0; padding: 6px 10px; }
+.cv-secondary-tile header div { display: grid; gap: 2px; }
+.cv-secondary-tile button { border: 1px solid #c5d5e4; border-radius: 7px; padding: 5px 9px; background: white; color: #20374a; cursor: pointer; }
+.cv-secondary-video { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+.cv-secondary-frame { width: 100%; height: 100%; object-fit: contain; position: absolute; }
+.cv-secondary-video p { position: relative; color: #d6e3ee; text-align: center; font-size: 12px; padding: 12px; }
+@media (max-width: 700px) {
+  .cv-main.cv-html-main.cv-camera-grid { grid-template-rows: auto minmax(230px, 2fr) minmax(130px, 1fr) !important; }
+  .cv-secondary-tile header span { display: none; }
+}
+.cv-secondary-tile header button {
+  background: #f8fbff !important; color: #193a55 !important;
+  border: 1px solid #a9bfd3 !important; box-shadow: none !important;
+}
+.cv-ptz-preset-row, .cv-ptz-save-row {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 7px !important;
+}
+.cv-ptz-preset-btn, .cv-ptz-save-btn { min-width: 0 !important; font-size: 11px !important; }
+/* Camera actions share the PTZ rail styling and never reserve a fixed height. */
+.cv-camera-aux { display: grid; gap: 8px; min-width: 0; }
+.cv-camera-aux .cv-camera-sweep-row { margin: 0; }
+.cv-camera-light-details { border: 1px solid #c5d5e4; border-radius: 8px; background: #f6f9fc; color: #20374a; }
+.cv-camera-light-details summary { cursor: pointer; padding: 8px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.cv-camera-light-details summary > span { float: right; color: #697e90; font-size: 10px; }
+.cv-camera-light-body { display: grid; gap: 8px; padding: 0 8px 8px; }
+.cv-camera-light-row { display: grid; grid-template-columns: minmax(0, 1fr) 75px 65px; gap: 6px; align-items: center; }
+.cv-camera-light-row > div { display: grid; gap: 2px; font-size: 11px; }
+.cv-camera-light-row > div > span { color: #697e90; font-size: 10px; }
+.cv-camera-light-body > p { margin: 0; font-size: 10px; line-height: 1.4; color: #697e90; }
+.cv-camera-light-row .cv-ptz-preset-btn { padding-inline: 4px; }
+
+.cv-camera-aux { position: relative; z-index: 1; background: #f4f8ff; }
+.cv-camera-aux .cv-ptz-preset-btn:disabled { opacity: .65 !important; color: #53677b !important; background: #e7edf5 !important; }

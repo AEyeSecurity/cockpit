@@ -22,6 +22,7 @@
  * @property {string} user - username.
  * @property {string} pass - password.
  * @property {string} token - token.
+ * @property {boolean} [receiveAudio=true] - negotiate an incoming audio track.
  * @property {OnError} onError - called when there's an error.
  * @property {OnTrack} onTrack - called when there's a track available.
  * @property {OnDataChannel} onDataChannel - called when there's a data channel available.
@@ -446,7 +447,9 @@ class MediaMTXWebRTCReader {
 
     const direction = 'recvonly';
     this.pc.addTransceiver('video', { direction });
-    this.pc.addTransceiver('audio', { direction });
+    if (this.conf.receiveAudio !== false) {
+      this.pc.addTransceiver('audio', { direction });
+    }
 
     // using data channels requires creating a data channel locally
     this.pc.createDataChannel('');

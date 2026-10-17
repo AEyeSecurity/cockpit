@@ -1,64 +1,113 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
 import { NavigationService } from "../packages/nav2/modules/navigation/service/impl/NavigationService";
 
-describe("navigation sidebar", () => {
-  it("groups manual controls and automatic route actions in the sidebar", async () => {
+function installLocalStorageMock(): void {
+  const values = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      get length() { return values.size; }
+    }
+  });
+}
+
+describe("navigation sidebar and route editor", () => {
+  it("keeps the sidebar focused on the current route and mission controls", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    const routeEditor = runtime.contributions.get("nav2.workspace.route-editor");
     expect(navigationSidebar?.slot).toBe("sidebar");
+    if (!routeEditor || routeEditor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    expect(routeEditor.label).toBe("Editor de rutas");
     if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
       throw new Error("Navigation sidebar contribution not registered");
     }
 
     render(<>{navigationSidebar.render()}</>);
 
-    expect(screen.getByText("MANUAL CONTROL")).toBeInTheDocument();
-    expect(screen.getByText("AUTOMATIC ROUTE")).toBeInTheDocument();
-    expect(screen.getByText("WAYPOINTS")).toBeInTheDocument();
-    expect(screen.getByText("Route")).toBeInTheDocument();
-    expect(screen.getByText("Waypoints")).toBeInTheDocument();
-    expect(screen.getByText("START ROUTE")).toBeInTheDocument();
-    expect(screen.getByText("CANCEL")).toBeInTheDocument();
-    expect(screen.getByText("ADD WAYPOINT")).toBeInTheDocument();
-    expect(screen.getByText("WAYPOINT TOOLS")).toBeInTheDocument();
-    expect(screen.getByText("Patrol Mission")).toBeInTheDocument();
-    expect(screen.getByText("USE LOOP")).toBeInTheDocument();
-    expect(screen.getByText("SET HOME")).toBeInTheDocument();
-    expect(screen.queryByText("SET RETURN")).not.toBeInTheDocument();
-    expect(screen.queryByText("SET DEPART")).not.toBeInTheDocument();
-    expect(screen.queryByText("SET ENTRY")).not.toBeInTheDocument();
-    expect(screen.queryByText("MARK HOME")).not.toBeInTheDocument();
-    expect(screen.queryByText("ACTION WAYPOINT")).not.toBeInTheDocument();
-    expect(screen.queryByText("CONTROL MODE")).not.toBeInTheDocument();
-    expect(screen.queryByText("NAVIGATION ACTIONS")).not.toBeInTheDocument();
-    expect(screen.queryByText("PATROL")).not.toBeInTheDocument();
+    expect(screen.getByText("CONTROL MANUAL")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PERFIL DE NAVEGACIÓN" })).toBeInTheDocument();
+    expect(screen.getByText("RUTA ACTUAL")).toBeInTheDocument();
+    expect(screen.getByText("RUTA AUTOMÁTICA")).toBeInTheDocument();
+    expect(screen.getByText("Borrador nuevo")).toBeInTheDocument();
+    expect(screen.getByText("EDITAR / AÑADIR PUNTOS")).toBeInTheDocument();
+    expect(screen.getByText("Añade al menos 2 puntos desde el editor.")).toBeInTheDocument();
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
+    expect(screen.queryByText("CANCELAR MISIÓN")).not.toBeInTheDocument();
+    expect(screen.queryByText("WAYPOINTS")).not.toBeInTheDocument();
+    expect(screen.queryByText("WAYPOINT TOOLS")).not.toBeInTheDocument();
+    expect(screen.queryByText("ADD WAYPOINT")).not.toBeInTheDocument();
+    expect(screen.queryByText("SELECT ALL")).not.toBeInTheDocument();
 
-    const routeHeading = screen.getByText("Route");
-    const waypointsHeading = screen.getByText("Waypoints");
-    expect(routeHeading.compareDocumentPosition(waypointsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+    fireEvent.click(screen.getByText("EDITAR / AÑADIR PUNTOS").closest("button") as HTMLButtonElement);
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.route-editor");
 
-    const linearSpeed = screen.getByLabelText("Linear speed");
-    fireEvent.change(linearSpeed, { target: { value: "2.4" } });
-
-    const steeringAngle = screen.getByLabelText("Steering angle / turn radius");
-    fireEvent.change(steeringAngle, { target: { value: "24" } });
-
+    fireEvent.change(screen.getByLabelText("Velocidad lineal"), { target: { value: "2.4" } });
+    fireEvent.change(screen.getByLabelText("Ángulo de giro / radio de giro"), { target: { value: "24" } });
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     expect(navigationService.getState().manualLinearSpeed).toBe(2.4);
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
   });
 
-  it("shows HOME, patrol, and action tools together with correct enablement", async () => {
+  it("shows the complete saved-route list above the waypoint editor", async () => {
+    installLocalStorageMock();
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const routeNames = ["PatrullaSencillaPolo", "Ruta bien1", "test real polo", "test1", "test2", "test3", "test4"];
+    act(() => {
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      for (const name of routeNames) navigationService.saveNamedRoute(name);
+    });
+
+    render(<>{editor.render()}</>);
+
+    const savedRoutes = screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`).closest("details");
+    expect(savedRoutes).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`));
+    for (const name of routeNames) expect(savedRoutes).toHaveTextContent(name);
+    const routePicker = screen.getByRole("combobox", { name: "Abrir ruta guardada" }) as HTMLSelectElement;
+    expect(Array.from(routePicker.options).map((option) => option.value).filter(Boolean)).toEqual(routeNames);
+  });
+
+  it("restores the connected operator control-lock toggle", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
-    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
-      throw new Error("Navigation sidebar contribution not registered");
-    }
-
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") throw new Error("Navigation sidebar contribution not registered");
     render(<>{navigationSidebar.render()}</>);
 
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connectionService = runtime.services.getService<{
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    act(() => connectionService.applyTransportStatus({ connected: true, intentional: false, reason: "" }));
+
+    const unlock = vi.spyOn(navigationService, "unlockControls").mockImplementation(async () => {
+      navigationService.applyLocalControlLock(false, "unlocked");
+    });
+    const lock = vi.spyOn(navigationService, "lockControls").mockImplementation(async () => {
+      navigationService.applyLocalControlLock(true, "locked");
+    });
+    fireEvent.click(screen.getByText("DESBLOQUEAR CONTROLES").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(unlock).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByText("BLOQUEAR CONTROLES").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(lock).toHaveBeenCalledOnce());
+  });
+
+  it("shows only the simple-route action when a regular route can run", async () => {
+    const runtime = await bootstrapApp();
+    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") throw new Error("Navigation sidebar contribution not registered");
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     act(() => {
       navigationService.applyLocalControlLock(false, "SIM_BACKEND");
@@ -66,106 +115,176 @@ describe("navigation sidebar", () => {
       navigationService.queueWaypoint({ x: 20, y: 20 });
     });
 
-    const waypointToolsButton = screen.getByText("WAYPOINT TOOLS").closest("button");
-    expect(waypointToolsButton).not.toBeNull();
-    expect(waypointToolsButton).toBeDisabled();
+    render(<>{navigationSidebar.render()}</>);
 
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeEnabled();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
+    expect(screen.queryByText("CANCELAR MISIÓN")).not.toBeInTheDocument();
+    expect(screen.queryByText("VOLVER A HOME")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state and opens the map to place the first point", async () => {
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => navigationService.applyLocalControlLock(false, "SIM_BACKEND"));
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+
+    render(<>{editor.render()}</>);
+    expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument();
+    expect(screen.getByText("Para crear una ruta")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir primer punto en el mapa" }));
+
+    await waitFor(() => expect(navigationService.getState().routeEditor.insertionAfterIndex).toBe(-1));
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+  });
+
+  it("starts a new route draft without deleting or overwriting the saved route", async () => {
+    installLocalStorageMock();
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     act(() => {
-      navigationService.toggleWaypointSelection(0);
+      navigationService.queueWaypoint({ x: 10, y: 20 });
+      navigationService.saveNamedRoute("Ruta original");
     });
+    render(<>{editor.render()}</>);
 
-    expect(waypointToolsButton).not.toBeDisabled();
-    fireEvent.click(waypointToolsButton as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Nueva ruta" }));
+    await waitFor(() => expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument());
+    expect(navigationService.getState().routeEditor.activeRouteName).toBeNull();
+    expect(navigationService.getState().savedRouteNames).toContain("Ruta original");
+    expect(navigationService.getState().routeEditor.dirty).toBe(false);
+    expect(screen.getByRole("combobox", { name: "Abrir ruta guardada" })).toHaveTextContent("Ruta original");
+  });
 
-    const setHomeButton = screen.getByText("Set HOME").closest("button");
-    const clearHomeButton = screen.getByText("Clear HOME").closest("button");
-    const setReturnButton = screen.getByText("Set RETURN").closest("button");
-    const clearReturnButton = screen.getByText("Clear RETURN").closest("button");
-    const setDepartButton = screen.getByText("Set DEPART").closest("button");
-    const clearDepartButton = screen.getByText("Clear DEPART").closest("button");
-    const setEntryButton = screen.getByText("Set ENTRY").closest("button");
-    const brakeButton = screen.getByText("Brake").closest("button");
-
-    expect(setHomeButton).not.toBeNull();
-    expect(clearHomeButton).not.toBeNull();
-    expect(setReturnButton).not.toBeNull();
-    expect(clearReturnButton).not.toBeNull();
-    expect(setDepartButton).not.toBeNull();
-    expect(clearDepartButton).not.toBeNull();
-    expect(setEntryButton).not.toBeNull();
-    expect(brakeButton).not.toBeNull();
-    expect(setHomeButton).not.toBeDisabled();
-    expect(clearHomeButton).toBeDisabled();
-    expect(setReturnButton).not.toBeDisabled();
-    expect(clearReturnButton).toBeDisabled();
-    expect(setDepartButton).not.toBeDisabled();
-    expect(clearDepartButton).toBeDisabled();
-    expect(setEntryButton).toBeDisabled();
-    expect(brakeButton).not.toBeDisabled();
-
-    fireEvent.click(setHomeButton as HTMLButtonElement);
+  it("keeps point actions beside a compact list and inserts after the selection", async () => {
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     act(() => {
-      navigationService.clearWaypointSelection();
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 20 });
+      navigationService.queueWaypoint({ x: 11, y: 21 });
+    });
+    const originalIds = navigationService.getState().waypoints.map((waypoint) => waypoint.localId);
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+
+    render(<>{editor.render()}</>);
+    expect(screen.queryByText("Opciones del punto 1")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".route-editor-insertion-slot")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /Punto 1.*10\.000000/ }));
+    const panel = screen.getByLabelText("Opciones del punto 1");
+    expect(panel.parentElement).toHaveClass("route-editor-waypoint-layout");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Ángulo de orientación fija en grados" }), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar orientación fija" }));
+    expect(navigationService.getState().waypoints[0].yawDeg).toBe(90);
+    fireEvent.click(screen.getByRole("button", { name: "Usar orientación automática" }));
+    expect(navigationService.getState().waypoints[0].yawDeg).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "Insertar entre 1 y 2 en el mapa" }));
+    await waitFor(() => expect(navigationService.getState().routeEditor.insertionAfterIndex).toBe(0));
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+
+    act(() => navigationService.insertWaypoint(1, { x: 10.5, y: 20.5 }));
+    const state = navigationService.getState();
+    expect(state.waypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[0], state.waypoints[1]?.localId, originalIds[1]
+    ]);
+    expect(state.selectedWaypointIndexes).toEqual([1]);
+    expect(state.routeEditor.dirty).toBe(true);
+  });
+
+  it("restores area selection and actions for several selected points", async () => {
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 20 });
+      navigationService.queueWaypoint({ x: 11, y: 21 });
+      navigationService.queueWaypoint({ x: 12, y: 22 });
+    });
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+    render(<>{editor.render()}</>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Seleccionar área en el mapa" }));
+    await waitFor(() => expect(navigationService.getState().waypointSelectionMode).toBe(true));
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+
+    act(() => navigationService.setWaypointSelection([0, 1], "replace"));
+    const panel = screen.getByLabelText("Opciones de puntos");
+    expect(panel).toHaveTextContent("2 puntos seleccionados");
+    expect(screen.getByRole("button", { name: "Eliminar 2 puntos…" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Usar perfil rural" }));
+    expect(navigationService.getState().waypoints[0].actions).toEqual(expect.arrayContaining([expect.objectContaining({ profile: "rural" })]));
+    expect(navigationService.getState().waypoints[1].actions).toEqual(expect.arrayContaining([expect.objectContaining({ profile: "rural" })]));
+    expect(navigationService.getState().waypoints[2].actions ?? []).toEqual([]);
+  });
+
+  it("keeps patrol segment insertion tied to that segment's order", async () => {
+    const runtime = await bootstrapApp();
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+      navigationService.queueWaypoint({ x: 30, y: 30 });
+      navigationService.useQueuedWaypointsAsPatrolLoop();
+      navigationService.reorderPatrolSegment("loop", 1, 0);
+    });
+    const originalIds = navigationService.getState().waypoints.map((waypoint) => waypoint.localId);
+    const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
+
+    render(<>{editor.render()}</>);
+    fireEvent.click(screen.getByRole("list", { name: "Puntos de la ruta" }).querySelectorAll("button")[2]);
+    fireEvent.click(screen.getByRole("button", { name: "Insertar entre 3 y 2 en Recorrido principal" }));
+
+    await waitFor(() => expect(navigationService.getState().routeEditor.insertionSegmentIndex).toBe(3));
+    expect(navigationService.getState().routeEditor.insertionSegment).toBe("loop");
+    expect(navigationService.getState().selectedWaypointIndexes).toEqual([2, 1]);
+    expect(execute).toHaveBeenCalledWith("cockpit.shell.openWorkspace", "workspace.map");
+
+    act(() => navigationService.insertWaypoint(3, { x: 31, y: 31 }, { segment: "loop", segmentIndex: 3 }));
+    const state = navigationService.getState();
+    expect(state.waypoints.slice(0, 3).map((waypoint) => waypoint.localId)).toEqual(originalIds);
+    expect(state.patrolMissionProfile.loopWaypoints.map((waypoint) => waypoint.localId)).toEqual([
+      originalIds[1], originalIds[0], originalIds[2], state.waypoints[3]?.localId
+    ]);
+    expect(state.selectedWaypointIndexes).toEqual([3]);
+  });
+
+  it("moves patrol segment points without losing the selected re-entry waypoint", async () => {
+    const runtime = await bootstrapApp();
+    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    act(() => {
+      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      navigationService.queueWaypoint({ x: 10, y: 10 });
+      navigationService.queueWaypoint({ x: 20, y: 20 });
+      navigationService.queueWaypoint({ x: 30, y: 30 });
+      navigationService.useQueuedWaypointsAsPatrolLoop();
       navigationService.toggleWaypointSelection(1);
+      navigationService.setPatrolDepartEntryFromSelected();
     });
+    const before = navigationService.getState().patrolMissionProfile;
+    const entryId = before.loopWaypoints[before.departEntryLoopIndex]?.localId;
 
-    fireEvent.click(waypointToolsButton as HTMLButtonElement);
-    const reopenedSetReturnButton = screen.getByText("Set RETURN").closest("button");
-    expect(reopenedSetReturnButton).not.toBeNull();
-    fireEvent.click(reopenedSetReturnButton as HTMLButtonElement);
-    fireEvent.click(waypointToolsButton as HTMLButtonElement);
-
-    const updatedSetHomeButton = screen.getByText("Set HOME").closest("button");
-    const updatedClearHomeButton = screen.getByText("Clear HOME").closest("button");
-    const updatedSetReturnButton = screen.getByText("Set RETURN").closest("button");
-    const updatedClearReturnButton = screen.getByText("Clear RETURN").closest("button");
-    const updatedBrakeButton = screen.getByText("Brake").closest("button");
-
-    expect(updatedSetHomeButton).not.toBeNull();
-    expect(updatedClearHomeButton).not.toBeNull();
-    expect(updatedSetReturnButton).not.toBeNull();
-    expect(updatedClearReturnButton).not.toBeNull();
-    expect(updatedBrakeButton).not.toBeNull();
-    expect(updatedSetHomeButton?.className).not.toContain("active");
-    expect(updatedClearHomeButton).toBeDisabled();
-    expect(updatedClearReturnButton).not.toBeDisabled();
-    expect(updatedBrakeButton).not.toBeDisabled();
+    act(() => navigationService.reorderPatrolSegment("loop", 0, 2));
+    const after = navigationService.getState().patrolMissionProfile;
+    expect(after.loopWaypoints[after.departEntryLoopIndex]?.localId).toBe(entryId);
+    expect(after.departEntryLoopIndex).toBe(0);
   });
 
-  it("provides select all, clear selection, and map area selection controls", async () => {
+  it("keeps simple route start unavailable when a structured patrol is configured", async () => {
     const runtime = await bootstrapApp();
     const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
-    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
-      throw new Error("Navigation sidebar contribution not registered");
-    }
-
+    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") throw new Error("Navigation sidebar contribution not registered");
     render(<>{navigationSidebar.render()}</>);
-    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
-    act(() => {
-      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
-      navigationService.queueWaypoint({ x: 10, y: 10 });
-      navigationService.queueWaypoint({ x: 20, y: 20 });
-    });
-
-    fireEvent.click(screen.getByText("SELECT ALL").closest("button") as HTMLButtonElement);
-    expect(navigationService.getState().selectedWaypointIndexes).toEqual([0, 1]);
-
-    fireEvent.click(screen.getByText("SELECT AREA").closest("button") as HTMLButtonElement);
-    expect(navigationService.getState().waypointSelectionMode).toBe(true);
-
-    fireEvent.click(screen.getByText("CLEAR SEL.").closest("button") as HTMLButtonElement);
-    expect(navigationService.getState().selectedWaypointIndexes).toEqual([]);
-  });
-
-  it("blocks simple route start when a structured patrol profile is configured", async () => {
-    const runtime = await bootstrapApp();
-    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
-    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
-      throw new Error("Navigation sidebar contribution not registered");
-    }
-
-    render(<>{navigationSidebar.render()}</>);
-
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
     act(() => {
       navigationService.applyLocalControlLock(false, "SIM_BACKEND");
@@ -182,55 +301,39 @@ describe("navigation sidebar", () => {
       navigationService.toggleWaypointSelection(1);
       navigationService.setPatrolDepartEntryFromSelected();
     });
-
-    const startRouteButton = screen.getByText("START ROUTE").closest("button");
-    const startPatrolButton = screen.getByText("START PATROL").closest("button");
-
-    expect(startRouteButton).not.toBeNull();
-    expect(startPatrolButton).not.toBeNull();
-    expect(startRouteButton).toBeDisabled();
-    expect(startPatrolButton).not.toBeDisabled();
-    expect(screen.getByText("Structured patrol loaded: use START PATROL")).toBeInTheDocument();
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).not.toBeDisabled();
   });
 
-  it("shows exactly which patrol requirements are missing", async () => {
+  it("shows missing patrol requirements and lets the selected point lose its re-entry role", async () => {
     const runtime = await bootstrapApp();
-    const navigationSidebar = runtime.contributions.get("nav2.sidebar.navigation");
-    if (!navigationSidebar || navigationSidebar.slot !== "sidebar") {
-      throw new Error("Navigation sidebar contribution not registered");
-    }
-
-    render(<>{navigationSidebar.render()}</>);
-
-    const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    const editor = runtime.contributions.get("nav2.workspace.route-editor");
+    if (!sidebar || sidebar.slot !== "sidebar" || !editor || editor.slot !== "workspace") throw new Error("Navigation UI not registered");
+    const service = runtime.services.getService<NavigationService>("nav2.service.navigation");
     act(() => {
-      navigationService.applyLocalControlLock(false, "SIM_BACKEND");
+      service.applyLocalControlLock(false, "SIM_BACKEND");
+      service.queueWaypoint({ x: 10, y: 10 });
+      service.queueWaypoint({ x: 20, y: 20 });
+      service.queueWaypoint({ x: 30, y: 30 });
+      service.toggleWaypointSelection(2);
+      service.setPatrolHomeFromSelected();
+      service.clearWaypointSelection();
+      service.useQueuedWaypointsAsPatrolLoop();
     });
+    render(<>{sidebar.render()}{editor.render()}</>);
+    const patrolOverview = screen.getByText("Patrulla", { selector: "strong" }).closest("details");
+    expect(patrolOverview?.closest("section.route-editor-card")).toBe(screen.getByText("Puntos de la ruta").closest("section.route-editor-card"));
+    expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
+    expect(screen.getAllByText(/Falta: punto de reingreso/).length).toBeGreaterThan(0);
 
-    expect(screen.getByText("Missing: LOOP, HOME, ENTRY")).toBeInTheDocument();
-
-    act(() => {
-      navigationService.queueWaypoint({ x: 10, y: 10 });
-      navigationService.queueWaypoint({ x: 20, y: 20 });
-      navigationService.queueWaypoint({ x: 30, y: 30 });
-      navigationService.useQueuedWaypointsAsPatrolLoop();
-    });
-
-    expect(screen.getByText("Missing: HOME, ENTRY")).toBeInTheDocument();
-
-    act(() => {
-      navigationService.toggleWaypointSelection(2);
-      navigationService.setPatrolHomeFromSelected();
-      navigationService.clearWaypointSelection();
-    });
-
-    expect(screen.getByText("Missing: ENTRY")).toBeInTheDocument();
-
-    act(() => {
-      navigationService.toggleWaypointSelection(1);
-      navigationService.setPatrolDepartEntryFromSelected();
-    });
-
-    expect(screen.getByText("2 loop · home · entry #2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("list", { name: "Puntos de la ruta" }).querySelectorAll("button")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como reingreso" }));
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(1);
+    expect(screen.getByRole("button", { name: "Quitar reingreso" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quitar reingreso" }));
+    expect(service.getState().patrolMissionProfile.departEntryLoopIndex).toBe(-1);
+    expect(screen.getByText("INICIAR PATRULLA").closest("button")).toBeDisabled();
   });
 });
