@@ -874,6 +874,8 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     ? Math.trunc(returnHomeExitWaypointIndexRaw)
     : -1;
 
+  const blockedState = String(candidate.blocked_state ?? candidate.blockedState ?? "");
+
   return {
     active: candidate.active === true,
     paused: candidate.paused === true,
@@ -904,7 +906,7 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
     legSpacingM: Number(candidate.leg_spacing_m ?? 0) || 0,
     chunkSpanM: Number(candidate.chunk_span_m ?? 0) || 0,
     chunkMaxWaypoints: Number(candidate.chunk_max_waypoints ?? 0) || 0,
-    blockedState: String(candidate.blocked_state ?? candidate.blockedState ?? ""),
+    blockedState: blockedState === "CLEAR" ? "" : blockedState,
     blockedReasonCode: String(candidate.blocked_reason_code ?? candidate.blockedReasonCode ?? ""),
     blockedReasonText: String(candidate.blocked_reason_text ?? candidate.blockedReasonText ?? ""),
     blockedRetryAttempt: Number(candidate.blocked_retry_attempt ?? candidate.blockedRetryAttempt ?? 0) || 0,
@@ -1081,6 +1083,8 @@ function extractPatrolLoopUpdate(message: Record<string, unknown>): Partial<Patr
 export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatCount = 0;
+  private missionRefreshPending = false;
   private manualLoopTimer: ReturnType<typeof setInterval> | null = null;
   private manualLoopIntervalMs: number;
   private manualLinearMin = DEFAULT_MANUAL_LINEAR_MIN;
@@ -1915,6 +1919,18 @@ export class NavigationService {
     if (this.heartbeatTimer) return;
     this.heartbeatTimer = setInterval(() => {
       void this.robotDispatcher.requestControlHeartbeat().catch(() => undefined);
+      // blocked_* arrives through get_state, not compact telemetry. Reuse the
+      // connection heartbeat instead of inventing a separate mission timer.
+      this.heartbeatCount += 1;
+      if (this.heartbeatCount % 3 === 0 && !this.missionRefreshPending) {
+        const refresh = this.robotDispatcher.requestState?.();
+        if (refresh) {
+          this.missionRefreshPending = true;
+          void refresh.catch(() => undefined).finally(() => {
+            this.missionRefreshPending = false;
+          });
+        }
+      }
     }, Math.max(300, intervalMs));
   }
 
