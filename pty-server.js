@@ -5,6 +5,7 @@ import * as pty from "node-pty";
 import { homedir, platform } from "os";
 
 const PORT = 7681;
+const HOST = process.env.PTY_HOST ?? "127.0.0.1";
 const SHELL = platform() === "win32" ? "cmd.exe" : (process.env.SHELL ?? "/bin/bash");
 const LOCAL_CWD = process.env.PTY_CWD ?? process.env.HOME ?? homedir() ?? "/";
 const REMOTE_HOST = process.env.PTY_REMOTE_HOST ?? "salus";
@@ -126,6 +127,6 @@ wss.on("connection", (ws, req) => {
   ws.on("error", () => term.kill());
 });
 
-httpServer.listen(PORT, "127.0.0.1", () => {
-  console.log(`PTY server listening on ws://127.0.0.1:${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`PTY server listening on ws://${HOST}:${PORT}`);
 });

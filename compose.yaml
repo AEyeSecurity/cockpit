@@ -1,0 +1,26 @@
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "127.0.0.1:5173:80"
+    restart: unless-stopped
+
+  terminal:
+    profiles: [terminal]
+    build:
+      context: .
+      target: terminal
+    ports:
+      - "127.0.0.1:7681:7681"
+    environment:
+      PTY_REMOTE_HOST: ${PTY_REMOTE_HOST:-salus}
+      PTY_REMOTE_CWD: ${PTY_REMOTE_CWD:-~/ros2_ws}
+    volumes:
+      - terminal-home:/home/node
+    init: true
+    restart: unless-stopped
+
+volumes:
+  terminal-home:

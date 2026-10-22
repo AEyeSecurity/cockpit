@@ -1,0 +1,12 @@
+.git
+node_modules
+dist
+target
+src-tauri/target
+.env*
+!.env.example
+*.log
+*.tsbuildinfo
+.codex
+.claude
+.vscode-test

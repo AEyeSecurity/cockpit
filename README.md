@@ -21,6 +21,9 @@ valida hardware. La rama de migración queda como referencia histórica.
 
 ## Requisitos
 
+Para ejecutar solo la **web app con Docker**, ver [docs/docker.md](docs/docker.md).
+Inicio rápido: `docker compose up -d --build`, luego abrir http://localhost:5173.
+
 - Node.js 18+
 - npm 9+
 - Rust toolchain
