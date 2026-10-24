@@ -8429,3 +8429,4 @@ button:disabled,
 .recordings-filters label { display:flex; flex-direction:column; gap:6px; font-size:12px; font-weight:600; }
 #root .recordings-filters input, #root .recordings-filters select { background:#f5f8fc !important; color:#172b46 !important; border:1px solid #cbd9e8 !important; border-radius:8px; padding:9px; }
 .recordings-empty { text-align:center; margin-top:10px; }
+.recording-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid #d9e4ef; flex-wrap:wrap; }
