@@ -14,6 +14,7 @@ export interface BaseContribution {
 
 export interface SidebarContribution extends BaseContribution {
   readonly slot: "sidebar";
+  readonly placement?: "primary" | "secondary";
   readonly label: string;
   readonly icon?: string;
   readonly render: () => ReactNode;

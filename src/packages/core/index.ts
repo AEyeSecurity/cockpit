@@ -52,13 +52,6 @@ const uiModule: CockpitModule = {
     });
 
     ctx.contributions.register({
-      id: "toolbar.diagnostics",
-      slot: "toolbar",
-      label: "Diagnostics",
-      commandId: "diagnostics.open"
-    });
-
-    ctx.contributions.register({
       id: "console.log",
       slot: "console",
       label: "Log",

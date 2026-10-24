@@ -1118,7 +1118,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <strong>{navState.routeEditor.activeRouteName ?? "Borrador nuevo"}</strong>
           <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
           <span className={navState.routeEditor.dirty ? "pending" : "saved"}>
-            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en Cockpit" : "Sin guardar"}
+            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en el robot" : "Sin guardar"}
           </span>
           {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
           <button
@@ -1883,7 +1883,7 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   return (
     <div className="stack info-modal-root">
       <div className="modal-tabs">
-        {(["general", "topics", "pixhawk_gps", "lidar", "camera"] as SensorInfoTab[]).map((tab) => (
+        {(["general"] as SensorInfoTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -2229,6 +2229,10 @@ function registerServices(
     });
   });
 
+  connectionService.subscribe((connection) => {
+    navigationService.setRouteLibraryConnection(connection.connected && !connection.connecting, ctx.env.wsUrl);
+  });
+
   const sensorInfoService = new SensorInfoService(dispatcher);
   ctx.services.registerService({
     id: SENSOR_INFO_SERVICE_ID,
@@ -2243,20 +2247,6 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [savingSource, setSavingSource] = useState(false);
-  const [sourceDraft, setSourceDraft] = useState<RtkSourceDraft>({
-    id: "",
-    label: "",
-    host: "",
-    port: 2101,
-    mountpoint: "",
-    username: "",
-    password: "",
-    activate: true
-  });
-
   useEffect(() => {
     if (!telemetryService) return;
     return telemetryService.subscribeTelemetry((next) => setSnapshot(next));
@@ -2278,62 +2268,6 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const fresh = snapshot?.robotStatus.connected === true && now - sequenceSeenAt.current < 5000;
   const { receiving, text: statusText } = rtkSourceStatus(rtkState, fresh);
 
-  const emit = (level: string, text: string): void => {
-    runtime.eventBus.emit("console.event", { level, text, timestamp: Date.now() });
-  };
-
-  const selectSource = async (sourceId: string): Promise<void> => {
-    if (!telemetryService || sourceId === activeId || busyId !== null) return;
-    setBusyId(sourceId);
-    try {
-      await telemetryService.selectRtkSource(sourceId);
-      emit("info", `Cambiando a fuente RTK "${sourceId}"`);
-    } catch (error) {
-      emit("error", `No se pudo cambiar la fuente RTK: ${String(error)}`);
-    } finally {
-      setBusyId(null);
-    }
-  };
-  const updateDraft = (key: keyof RtkSourceDraft, value: string | boolean | number): void => {
-    setSourceDraft((current) => ({ ...current, [key]: value }));
-  };
-  const draftId = sourceDraft.id.trim();
-  const draftHost = sourceDraft.host.trim();
-  const draftMountpoint = sourceDraft.mountpoint.trim();
-  const canSaveSource = Boolean(draftId && draftHost && draftMountpoint && Number.isFinite(sourceDraft.port) && sourceDraft.port > 0);
-  const saveSource = async (): Promise<void> => {
-    if (!telemetryService || !canSaveSource || savingSource) return;
-    setSavingSource(true);
-    try {
-      await telemetryService.upsertRtkSource({
-        ...sourceDraft,
-        id: draftId,
-        label: sourceDraft.label.trim() || draftId,
-        host: draftHost,
-        port: Math.trunc(Number(sourceDraft.port)),
-        mountpoint: draftMountpoint,
-        username: sourceDraft.username.trim(),
-        password: sourceDraft.password
-      });
-      emit("info", `Antena RTK "${sourceDraft.label.trim() || draftId}" guardada`);
-      setSourceDraft({
-        id: "",
-        label: "",
-        host: "",
-        port: 2101,
-        mountpoint: "",
-        username: "",
-        password: "",
-        activate: true
-      });
-      setShowAddForm(false);
-    } catch (error) {
-      emit("error", `No se pudo guardar la antena RTK: ${String(error)}`);
-    } finally {
-      setSavingSource(false);
-    }
-  };
-
   return (
     <div className="rtk-modal">
       <div className="rtk-modal-status">
@@ -2345,131 +2279,15 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
           {activeId ? <code>{activeId}</code> : null}
         </div>
       </div>
-      {sources.length > 0 ? (
-        <ul className="rtk-source-list">
-          {sources.map((source) => {
-            const isActive = source.id === activeId;
-            const isBusy = busyId === source.id;
-            return (
-              <li key={source.id}>
-                <button
-                  type="button"
-                  className={joinClassNames("rtk-source-btn", isActive && "active")}
-                  disabled={!fresh || isActive || busyId !== null}
-                  title={
-                    isActive
-                        ? "Antena activa"
-                        : `Cambiar a ${source.label}`
-                  }
-                  onClick={() => void selectSource(source.id)}
-                >
-                  <span className="rtk-source-label">{source.label}</span>
-                  <span className="rtk-source-tag">
-                    {isActive ? "Activa" : isBusy ? "Cambiando…" : "Usar"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="rtk-empty muted">No hay antenas configuradas (revisá rtk_sources.yaml).</p>
-      )}
-      <button
-        type="button"
-        className="rtk-add-toggle"
-        onClick={() => setShowAddForm((current) => !current)}
-      >
-        {showAddForm ? "Cerrar formulario" : "Agregar antena"}
-      </button>
-      {showAddForm ? (
-        <form
-          className="rtk-add-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveSource();
-          }}
-        >
-          <div className="rtk-form-grid">
-            <label>
-              ID
-              <input
-                value={sourceDraft.id}
-                onChange={(event) => updateDraft("id", event.target.value)}
-                placeholder="ej: base_sur"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              Nombre
-              <input
-                value={sourceDraft.label}
-                onChange={(event) => updateDraft("label", event.target.value)}
-                placeholder="Base Sur"
-                autoComplete="off"
-              />
-            </label>
-            <label className="rtk-form-wide">
-              Host
-              <input
-                value={sourceDraft.host}
-                onChange={(event) => updateDraft("host", event.target.value)}
-                placeholder="rtk2go.com"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              Puerto
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={sourceDraft.port}
-                onChange={(event) => updateDraft("port", Number(event.target.value))}
-              />
-            </label>
-            <label>
-              Mountpoint
-              <input
-                value={sourceDraft.mountpoint}
-                onChange={(event) => updateDraft("mountpoint", event.target.value)}
-                placeholder="CASISA"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              Usuario
-              <input
-                value={sourceDraft.username}
-                onChange={(event) => updateDraft("username", event.target.value)}
-                placeholder="opcional"
-                autoComplete="username"
-              />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={sourceDraft.password}
-                onChange={(event) => updateDraft("password", event.target.value)}
-                placeholder="opcional"
-                autoComplete="new-password"
-              />
-            </label>
+      <div className="panel-card">
+        <h4>Fuentes de correcciones</h4>
+        {sources.length ? sources.map((source) => (
+          <div className="row" key={source.id}>
+            <span>{source.label}</span>
+            {source.id === activeId ? <span className="status-pill">Activa</span> : null}
           </div>
-          <label className="rtk-activate-row">
-            <input
-              type="checkbox"
-              checked={sourceDraft.activate}
-              onChange={(event) => updateDraft("activate", event.target.checked)}
-            />
-            Activarla al guardar
-          </label>
-          <button type="submit" className="rtk-save-btn" disabled={!canSaveSource || savingSource}>
-            {savingSource ? "Guardando..." : "Guardar antena"}
-          </button>
-        </form>
-      ) : null}
+        )) : <p className="muted">Sin fuentes disponibles. Conectá el robot para consultar su configuración.</p>}
+      </div>
     </div>
   );
 }
@@ -2478,7 +2296,7 @@ function registerSidebarPanels(ctx: ModuleContext): void {
   ctx.contributions.register({
     id: "sidebar.navigation",
     slot: "sidebar",
-    label: "Navigation",
+    label: "Operación",
     icon: "🧭",
     render: () => <NavigationSidebarPanel runtime={ctx} />
   });
@@ -2514,14 +2332,6 @@ function registerModals(ctx: ModuleContext): void {
   });
 }
 
-function registerToolbar(ctx: ModuleContext): void {
-  ctx.contributions.register({
-    id: "toolbar.rtk",
-    slot: "toolbar",
-    label: "RTK",
-    commandId: NavigationCommands.openRtkModal
-  });
-}
 
 function registerFooterItems(ctx: ModuleContext): void {
   ctx.contributions.register({
@@ -2825,7 +2635,7 @@ export function createNavigationModule(): CockpitModule {
       registerCommands(ctx, navigationService, connectionService);
       registerSidebarPanels(ctx);
       registerModals(ctx);
-      registerToolbar(ctx);
+
       registerFooterItems(ctx);
     }
   };

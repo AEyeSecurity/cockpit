@@ -113,6 +113,7 @@ function createNavigationState(): NavigationState {
     patrolLoop: { active: false, currentWaypoint: 0, totalWaypoints: 0, label: "" },
     lastStatus: "",
     lastSnapshot: null,
+    routeLibrary: { connected: false, busy: false, error: "", conflict: false },
     savedRouteNames: []
   };
 }

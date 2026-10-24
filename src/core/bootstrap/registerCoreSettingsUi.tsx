@@ -640,67 +640,26 @@ function SettingsModalFooter({ runtime }: { runtime: AppRuntime }): JSX.Element 
   );
 }
 
-function SettingsSidebarPanel({ runtime }: { runtime: AppRuntime }): JSX.Element {
-  const packageCount = runtime.packages.length;
-  const packageFieldCount = runtime.packages.reduce((total, cockpitPackage) => {
-    return total + listedFields(cockpitPackage).length;
-  }, 0);
-
-  return (
-    <div className="stack settings-sidebar-panel">
-      <div className="panel-card settings-sidebar-hero">
-        <span className="settings-sidebar-kicker">Control Surface</span>
-        <div className="settings-sidebar-header">
-          <h3>Settings</h3>
-        </div>
-        <p className="muted settings-sidebar-copy">
-          Abrí la superficie de configuración para ajustar notificaciones globales y runtime settings de cada paquete.
-        </p>
-        <button
-          type="button"
-          aria-label="Open Settings"
-          className="button-primary button-tile settings-sidebar-action"
-          onClick={() => {
-            void runtime.commands.execute(OPEN_SETTINGS_COMMAND_ID);
-          }}
-        >
-          <span className="button-face">
-            <span className="button-face-icon" aria-hidden="true">
-              ⚙
-            </span>
-            <span className="button-face-copy">
-              <span className="button-face-label">Open Settings</span>
-              <span className="button-face-meta">Global notifications and package runtime controls</span>
-            </span>
-          </span>
-        </button>
-      </div>
-      <div className="panel-card settings-sidebar-summary">
-        <div className="settings-sidebar-stat">
-          <span className="settings-sidebar-stat-label">Packages</span>
-          <strong className="settings-sidebar-stat-value">{packageCount}</strong>
-        </div>
-        <div className="settings-sidebar-stat">
-          <span className="settings-sidebar-stat-label">Fields</span>
-          <strong className="settings-sidebar-stat-value">{GLOBAL_SETTINGS_FIELDS.length + packageFieldCount}</strong>
-        </div>
-      </div>
-      <div className="panel-card settings-sidebar-packages">
-        <div className="settings-sidebar-section-head">
-          <strong>Editable scopes</strong>
-          <span className="muted">Global + packages</span>
-        </div>
-        <div className="settings-sidebar-chip-list">
-          <span className="settings-sidebar-chip">Global Notifications</span>
-          {runtime.packages.map((cockpitPackage) => (
-            <span key={cockpitPackage.id} className="settings-sidebar-chip">
-              {cockpitPackage.settingsSchema.title?.trim() || cockpitPackage.id}
-            </span>
-          ))}
-        </div>
-      </div>
+function AppearanceSettings({ runtime }: { runtime: AppRuntime }): JSX.Element {
+  return <section className="panel-card appearance-settings" aria-label="Apariencia">
+    <h4>Apariencia</h4>
+    <p className="muted">Tamaño de toda la interfaz. El zoom del mapa se controla desde el mapa.</p>
+    <div className="row">
+      <button type="button" className="button-secondary" aria-label="Reducir tamaño de interfaz" onClick={() => void runtime.commands.execute(ShellCommands.zoomOut)}>−</button>
+      <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute(ShellCommands.zoomReset)}>Restablecer tamaño</button>
+      <button type="button" className="button-secondary" aria-label="Aumentar tamaño de interfaz" onClick={() => void runtime.commands.execute(ShellCommands.zoomIn)}>+</button>
     </div>
-  );
+  </section>;
+}
+
+function SettingsSidebarPanel({ runtime }: { runtime: AppRuntime }): JSX.Element {
+  useEffect(() => { resetSettingsUiState(); }, []);
+  return <div className="stack settings-sidebar-inline">
+    <AppearanceSettings runtime={runtime} />
+    <SettingsModalHeader runtime={runtime} close={() => {}} />
+    <SettingsModalBody runtime={runtime} />
+    <SettingsModalFooter runtime={runtime} />
+  </div>;
 }
 
 export function registerCoreSettingsUi(runtime: AppRuntime): void {
@@ -724,7 +683,8 @@ export function registerCoreSettingsUi(runtime: AppRuntime): void {
   runtime.contributions.register({
     id: "sidebar.settings",
     slot: "sidebar",
-    label: "Settings",
+    label: "Configuración",
+    placement: "secondary",
     icon: "⚙️",
     order: 110,
     render: () => <SettingsSidebarPanel runtime={runtime} />

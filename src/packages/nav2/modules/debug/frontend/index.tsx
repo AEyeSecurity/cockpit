@@ -794,126 +794,18 @@ function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
 }
 
 function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
-  const missionService = runtime.services.getService<MissionService>(SERVICE_ID);
-  const [status, setStatus] = useState<RosbagStatus>({
-    active: false,
-    profile: "core",
-    outputPath: "n/a",
-    logPath: "n/a"
-  });
-
-  useEffect(() => {
-    const unsubscribe = missionService.subscribeRosbagStatus((next) => {
-      setStatus(next);
-    });
-    void missionService
-      .getRosbagStatus()
-      .then((next) => {
-        setStatus(next);
-      })
-      .catch(() => {
-        // Optional backend capability.
-      });
-    return unsubscribe;
-  }, [missionService]);
-
   return (
-    <div className="stack debug-sidebar-panel">
-      <div className="panel-card debug-sidebar-hero">
-        <span className="debug-sidebar-kicker">Diagnostics</span>
-        <div className="debug-sidebar-header">
-          <h3>Debug</h3>
-          <span className={`status-pill ${status.active ? "ok" : ""}`}>
-            {status.active ? "Recording" : "Idle"}
-          </span>
-        </div>
-        <p className="muted debug-sidebar-copy">
-          Accedé a captura operativa y diagnóstico del stack sin salir del panel lateral.
-        </p>
-        <div className="debug-sidebar-actions">
-          <button
-            type="button"
-            aria-label="Open Recorder"
-            className="button-primary button-tile"
-            onClick={() => {
-              void runtime.commands.execute(OPEN_RECORD_MODAL_COMMAND_ID);
-            }}
-          >
-            <span className="button-face">
-              <span className="button-face-icon" aria-hidden="true">
-                ⏺
-              </span>
-              <span className="button-face-copy">
-                <span className="button-face-label">Recorder</span>
-                <span className="button-face-meta">Open rosbag capture controls</span>
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open Debug Info"
-            className="button-secondary button-tile"
-            onClick={() => {
-              void runtime.commands.execute(NavigationCommands.openInfoModal);
-            }}
-          >
-            <span className="button-face">
-              <span className="button-face-icon" aria-hidden="true">
-                ℹ
-              </span>
-              <span className="button-face-copy">
-                <span className="button-face-label">Info</span>
-                <span className="button-face-meta">Open navigation diagnostics</span>
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open Mission Sessions"
-            className="button-secondary button-tile"
-            onClick={() => {
-              void runtime.commands.execute(OPEN_SESSIONS_WORKSPACE_COMMAND_ID);
-            }}
-          >
-            <span className="button-face">
-              <span className="button-face-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M8 6h11" />
-                  <path d="M8 12h11" />
-                  <path d="M8 18h11" />
-                  <path d="M4 6h.01" />
-                  <path d="M4 12h.01" />
-                  <path d="M4 18h.01" />
-                </svg>
-              </span>
-              <span className="button-face-copy">
-                <span className="button-face-label">Sessions</span>
-                <span className="button-face-meta">Review mission recordings</span>
-              </span>
-            </span>
-          </button>
-        </div>
+    <div className="stack support-sidebar">
+      <div className="panel-card">
+        <h3>Diagnóstico</h3>
+        <p className="muted">Información técnica para revisar el funcionamiento del robot.</p>
       </div>
-      <div className="panel-card debug-sidebar-status-grid">
-        <div className="debug-sidebar-stat">
-          <span className="debug-sidebar-stat-label">Profile</span>
-          <strong className="debug-sidebar-stat-value">{status.profile}</strong>
-        </div>
-        <div className="debug-sidebar-stat">
-          <span className="debug-sidebar-stat-label">Recorder</span>
-          <strong className="debug-sidebar-stat-value">{status.active ? "Active" : "Stopped"}</strong>
-        </div>
-      </div>
-      <div className="panel-card debug-sidebar-paths">
-        <div className="debug-sidebar-path">
-          <span className="debug-sidebar-path-label">Output</span>
-          <strong className="debug-sidebar-path-value">{status.outputPath || "n/a"}</strong>
-        </div>
-        <div className="debug-sidebar-path">
-          <span className="debug-sidebar-path-label">Log</span>
-          <strong className="debug-sidebar-path-value">{status.logPath || "n/a"}</strong>
-        </div>
-      </div>
+      <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute("core.diagnostics.open")}>
+        Eventos, telemetría y terminal
+      </button>
+      <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute(NavigationCommands.openInfoModal)}>
+        Información de navegación
+      </button>
     </div>
   );
 }
@@ -1418,29 +1310,13 @@ export function createDebugModule(): CockpitModule {
       ctx.contributions.register({
         id: "sidebar.debug",
         slot: "sidebar",
-        label: "Debug",
+        label: "Diagnóstico",
+        placement: "secondary",
         icon: "🛠️",
         order: 100,
         render: () => <DebugSidebarPanel runtime={ctx} />
       });
 
-      ctx.contributions.register({
-        id: "toolbar.debug",
-        slot: "toolbar",
-        label: "Debug",
-        items: [
-          {
-            id: "debug.record",
-            label: "Grabación",
-            commandId: OPEN_RECORD_MODAL_COMMAND_ID
-          },
-          {
-            id: "debug.info",
-            label: "Información",
-            commandId: NavigationCommands.openInfoModal
-          }
-        ]
-      });
     }
   };
 }

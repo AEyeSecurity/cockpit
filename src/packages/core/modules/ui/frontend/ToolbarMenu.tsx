@@ -1,29 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type { ToolbarContribution } from "../../../../../core/contributions/types";
 import type { AppRuntime } from "../../../../../core/types/module";
-import { ShellCommands } from "../../../../../app/shellCommands";
 import logo from "../../../../../../icon2-backgroundless.png";
 import { ToolbarMenuItem } from "./ToolbarMenuItem";
-
-export interface ToolbarStatusItem {
-  id: string;
-  label: string;
-  value: string;
-  detail?: string;
-  tone?: "ok" | "warn" | "bad" | "neutral";
-}
 
 interface ToolbarMenuProps {
   runtime: AppRuntime;
   menus: ToolbarContribution[];
-  statusItems?: ToolbarStatusItem[];
 }
 
-export function ToolbarMenu({ runtime, menus, statusItems = [] }: ToolbarMenuProps): JSX.Element {
+export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
-  const connectionItem = statusItems.find((item) => item.id === "link") ?? null;
-  const secondaryItems = statusItems.filter((item) => item.id !== "link");
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent): void => {
@@ -96,62 +84,7 @@ export function ToolbarMenu({ runtime, menus, statusItems = [] }: ToolbarMenuPro
           ))}
         </nav>
       </div>
-      <div className="toolbar-right" aria-label="Cockpit status">
-        {connectionItem ? (
-          <div
-            className={`conn-badge ${connectionItem.tone ?? "neutral"}`}
-            title={connectionItem.detail ?? connectionItem.label}
-            aria-label={`${connectionItem.label}: ${connectionItem.value}`}
-          >
-            <span className={`conn-dot ${connectionItem.tone === "warn" ? "pulse" : ""}`} aria-hidden="true" />
-            <span>{connectionItem.value}</span>
-          </div>
-        ) : null}
-        {secondaryItems.map((item) => (
-          <div
-            key={item.id}
-            className={`toolbar-mini-badge toolbar-mini-badge-${item.tone ?? "neutral"} toolbar-mini-badge-id-${item.id}`}
-            title={item.detail ?? item.label}
-            aria-label={`${item.label}: ${item.value}`}
-          >
-            <span className="toolbar-mini-label">{item.label}</span>
-            <span className="toolbar-mini-value">{item.value}</span>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="toolbar-icon-btn"
-          title="Zoom out"
-          aria-label="Zoom out"
-          onClick={() => {
-            void runtime.commands.execute(ShellCommands.zoomOut);
-          }}
-        >
-          －
-        </button>
-        <button
-          type="button"
-          className="toolbar-icon-btn"
-          title="Zoom reset"
-          aria-label="Zoom reset"
-          onClick={() => {
-            void runtime.commands.execute(ShellCommands.zoomReset);
-          }}
-        >
-          ⊡
-        </button>
-        <button
-          type="button"
-          className="toolbar-icon-btn"
-          title="Zoom in"
-          aria-label="Zoom in"
-          onClick={() => {
-            void runtime.commands.execute(ShellCommands.zoomIn);
-          }}
-        >
-          ＋
-        </button>
-      </div>
+
     </header>
   );
 }
