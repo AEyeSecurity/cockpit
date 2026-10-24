@@ -27,6 +27,14 @@ export class RobotDispatcher extends Nav2DispatcherBase {
     super(id, transportId);
   }
 
+  async requestRouteLibrary(op: "list_routes" | "get_route" | "save_route" | "delete_route", payload: unknown = {}): Promise<Nav2IncomingMessage> {
+    return this.request(op, payload, { timeoutMs: 7000 });
+  }
+
+  subscribeRoutesChanged(callback: (message: Nav2IncomingMessage) => void): () => void {
+    return this.subscribe("routes_changed", callback);
+  }
+
   async requestGoal(goal: unknown): Promise<Nav2IncomingMessage> {
     return this.request("set_goal_ll", goal, { timeoutMs: 5000 });
   }

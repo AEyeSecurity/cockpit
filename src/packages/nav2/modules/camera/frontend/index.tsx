@@ -1,3 +1,4 @@
+import { ShellCommands } from "../../../../../app/shellCommands";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./styles.css";
 import { SecondaryCameraTile } from "./SecondaryCameraTile";
@@ -1267,6 +1268,16 @@ export function createCameraModule(): CockpitModule {
       ctx.services.registerService({
         id: SERVICE_ID,
         service
+      });
+
+      ctx.contributions.register({
+        id: "sidebar.camera",
+        slot: "sidebar",
+        label: "Cámara",
+        render: () => <div className="stack support-sidebar">
+          <div className="panel-card"><h3>Cámara</h3><p className="muted">Video en vivo, orientación y zoom de la cámara del robot.</p></div>
+          <button type="button" className="button-primary" onClick={() => void ctx.commands.execute(ShellCommands.openWorkspace, "workspace.camera")}>Ver cámara y controles PTZ</button>
+        </div>
       });
 
       ctx.contributions.register({

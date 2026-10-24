@@ -1,3 +1,5 @@
+import { robotRouteLibraryFixture } from "./robotRouteLibraryFixture";
+import type { RobotDispatcher } from "../packages/nav2/modules/navigation/dispatcher/impl/RobotDispatcher";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
@@ -64,17 +66,21 @@ describe("navigation sidebar and route editor", () => {
     const editor = runtime.contributions.get("nav2.workspace.route-editor");
     if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const library = robotRouteLibraryFixture();
+    library.attach(runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher);
+    navigationService.setRouteLibraryConnection(true, "robot");
+    await navigationService.refreshSavedRoutes();
     const routeNames = ["PatrullaSencillaPolo", "Ruta bien1", "test real polo", "test1", "test2", "test3", "test4"];
-    act(() => {
+    await act(async () => {
       navigationService.queueWaypoint({ x: 10, y: 10 });
-      for (const name of routeNames) navigationService.saveNamedRoute(name);
+      for (const name of routeNames) await navigationService.saveNamedRoute(name);
     });
 
     render(<>{editor.render()}</>);
 
-    const savedRoutes = screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`).closest("details");
+    const savedRoutes = screen.getByText(`Rutas guardadas en el robot (${routeNames.length})`).closest("details");
     expect(savedRoutes).not.toHaveAttribute("open");
-    fireEvent.click(screen.getByText(`Rutas guardadas en Cockpit (${routeNames.length})`));
+    fireEvent.click(screen.getByText(`Rutas guardadas en el robot (${routeNames.length})`));
     for (const name of routeNames) expect(savedRoutes).toHaveTextContent(name);
     const routePicker = screen.getByRole("combobox", { name: "Abrir ruta guardada" }) as HTMLSelectElement;
     expect(Array.from(routePicker.options).map((option) => option.value).filter(Boolean)).toEqual(routeNames);
@@ -146,9 +152,13 @@ describe("navigation sidebar and route editor", () => {
     const editor = runtime.contributions.get("nav2.workspace.route-editor");
     if (!editor || editor.slot !== "workspace") throw new Error("Route editor workspace not registered");
     const navigationService = runtime.services.getService<NavigationService>("nav2.service.navigation");
-    act(() => {
+    const library = robotRouteLibraryFixture();
+    library.attach(runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher);
+    navigationService.setRouteLibraryConnection(true, "robot");
+    await navigationService.refreshSavedRoutes();
+    await act(async () => {
       navigationService.queueWaypoint({ x: 10, y: 20 });
-      navigationService.saveNamedRoute("Ruta original");
+      await navigationService.saveNamedRoute("Ruta original");
     });
     render(<>{editor.render()}</>);
 

@@ -8368,3 +8368,64 @@ button:disabled,
   border-radius: 12px !important;
   background: #ffffff !important;
 }
+
+/* Sidebar navigation: operational sections above, support tools below. */
+#root .sidebar-selector .selector-group { display:flex; flex-direction:column; gap:6px; width:100%; align-items:center; }
+#root .sidebar-selector .selector-group-secondary { margin-top:auto; padding-top:12px; border-top:1px solid var(--line); }
+#root .sidebar-selector.selector-expanded { width:176px; flex-shrink:0; }
+#root .sidebar-selector.selector-expanded .sel-btn { width:100%; justify-content:flex-start; gap:10px; padding:0 10px; }
+.selector-label { font-size:12px; font-weight:600; white-space:nowrap; }
+.settings-sidebar-inline .settings-modal-header { flex-direction:column; align-items:stretch; gap:12px; }
+.settings-sidebar-inline .settings-scope-tabs { flex-wrap:wrap; }
+.settings-sidebar-inline .settings-table { display:flex; flex-direction:column; }
+.settings-sidebar-inline .settings-footer { flex-direction:column; align-items:stretch; }
+.settings-sidebar-inline .settings-footer-actions { flex-wrap:wrap; }
+
+.shell-body:has(.selector-expanded) { --sidebar-rail-width:176px; }
+#root .sidebar-selector.selector-expanded { width:176px !important; min-width:176px !important; max-width:176px !important; }
+#root .sidebar-selector.selector-expanded .sel-btn { width:100% !important; }
+#root .sidebar-selector .collapse-toggle { margin-top:0 !important; }
+#root .sidebar-selector .selector-label { overflow:hidden; text-overflow:ellipsis; }
+#root .sidebar-selector .sidebar-button-glyph { flex-shrink:0; }
+#root .sidebar-selector.selector-expanded .sel-btn { flex-direction:row !important; align-items:center !important; justify-content:flex-start !important; gap:10px !important; padding:0 10px !important; }
+#root .sidebar-selector.selector-expanded .selector-label { line-height:1.2; }
+#root .settings-sidebar-inline .settings-modal-header { display:flex !important; flex-direction:column !important; align-items:stretch !important; padding:4px !important; gap:12px !important; }
+#root .settings-sidebar-inline .settings-header-title { color:#172b46 !important; font-size:18px !important; }
+#root .settings-sidebar-inline .settings-header-subtitle { color:#64748b !important; }
+#root .settings-sidebar-inline .settings-header-kicker { display:none !important; }
+#root .settings-sidebar-inline .settings-modal-layout > .panel-card { background:transparent !important; border:0 !important; padding:0 !important; box-shadow:none !important; }
+#root .settings-sidebar-inline .settings-section-intro h4 { font-size:18px !important; }
+#root .settings-sidebar-inline .settings-row.settings-field-card { grid-template-columns:minmax(0,1fr) !important; gap:8px !important; padding:12px !important; }
+#root .settings-sidebar-inline .settings-field-head { flex-wrap:wrap !important; }
+#root .settings-sidebar-inline .settings-value-column { min-width:0; width:100%; }
+#root .settings-sidebar-inline input:not([type=checkbox]), #root .settings-sidebar-inline textarea { width:100% !important; min-width:0 !important; }
+#root .support-sidebar .panel-card { background:#fff !important; color:#172b46 !important; border:1px solid #d9e4ef !important; box-shadow:0 3px 10px rgba(30,60,90,.04) !important; }
+#root .support-sidebar .panel-card h3 { color:#172b46 !important; }
+#root .support-sidebar .panel-card .muted { color:#64748b !important; }
+#root .support-sidebar > button { background:linear-gradient(180deg,#fff,#eef4fa) !important; color:#172b46 !important; border:1px solid #cbd9e8 !important; border-radius:10px; padding:12px; text-align:left; }
+#root .settings-sidebar-inline .scope-tabs-shell { background:#eaf1f8 !important; box-shadow:none !important; }
+#root .settings-sidebar-inline .scope-tabs-option { color:#526580 !important; }
+#root .settings-sidebar-inline .scope-tabs-option--active { background:#087bff !important; color:#fff !important; }
+#root .settings-sidebar-inline .settings-toggle-visual { background:#cbd5e1 !important; }
+#root .settings-sidebar-inline input:checked + .settings-toggle-visual { background:#087bff !important; }
+/* Keep the simplified toolbar on one line at laptop widths. */
+#root header.top-toolbar.toolbar { flex-wrap:nowrap !important; }
+#root header.top-toolbar.toolbar .toolbar-left { width:auto !important; min-width:0 !important; flex:1 1 auto !important; }
+#root header.top-toolbar.toolbar .toolbar-right { width:auto !important; flex:0 0 auto !important; }
+@media (max-width:900px) {
+  #root header.top-toolbar.toolbar .toolbar-brand-sub { display:none !important; }
+  #root header.top-toolbar.toolbar .toolbar-mini-label { display:none !important; }
+}
+#root .appearance-settings { background:#fff !important; color:#172b46 !important; border:1px solid #d9e4ef !important; padding:12px !important; }
+#root .appearance-settings h4 { color:#172b46 !important; margin:0; }
+#root .appearance-settings .muted { color:#64748b !important; font-size:12px; }
+#root .appearance-settings .row { display:flex; flex-wrap:wrap; gap:6px; }
+#root .appearance-settings button { background:#eef4fa !important; color:#172b46 !important; border:1px solid #cbd9e8 !important; border-radius:8px; padding:8px; }
+#root .recordings-workspace { padding:16px; overflow:auto; height:100%; }
+#root .recordings-workspace .panel-card { background:#fff !important; color:#172b46 !important; border:1px solid #d9e4ef !important; border-radius:14px; padding:20px; }
+#root .recordings-workspace h2, #root .recordings-workspace h3 { color:#172b46 !important; }
+#root .recordings-workspace .muted { color:#64748b !important; }
+.recordings-filters { display:flex; align-items:end; flex-wrap:wrap; gap:14px; margin-top:20px; }
+.recordings-filters label { display:flex; flex-direction:column; gap:6px; font-size:12px; font-weight:600; }
+#root .recordings-filters input, #root .recordings-filters select { background:#f5f8fc !important; color:#172b46 !important; border:1px solid #cbd9e8 !important; border-radius:8px; padding:9px; }
+.recordings-empty { text-align:center; margin-top:10px; }

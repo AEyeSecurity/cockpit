@@ -193,3 +193,24 @@
   .route-editor-waypoint-tags { padding-left: 42px; }
   .route-editor-button,.route-editor-load-label,.route-editor-load-label select { max-width: 100%; }
 }
+
+/* Shared library: remote actions first, local file tools kept secondary. */
+.route-library-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.route-library-description { min-width: 0; flex: 1 1 280px; }
+.route-library-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.route-library-description > p { margin: 7px 0 0; color: var(--route-muted); font-size: 13px; line-height: 1.5; }
+.route-library-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; color: var(--route-muted); background: var(--route-soft); font-size: 11px; font-weight: 600; }
+.route-library-badge > span { width: 6px; height: 6px; border-radius: 50%; background: #8496a8; }
+.route-library-badge.is-connected { color: #31684e; background: #edf6f0; }
+.route-library-badge.is-connected > span { background: #398063; }
+.route-library-refresh { display: inline-flex; align-items: center; gap: 7px; }
+.route-library-refresh > span { font-size: 19px; font-weight: 400; line-height: 1; }
+.route-library-files { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--route-line); }
+.route-library-files-description { display: grid; gap: 4px; flex: 1 1 240px; }
+.route-library-files-description strong { color: var(--route-muted); font-size: 12px; font-weight: 650; }
+.route-library-files-description span { color: var(--route-muted); font-size: 12px; line-height: 1.5; }
+.route-library-file-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#root .route-editor .route-library .route-editor-button { box-shadow: none; transform: none; }
+.route-library-file-actions .route-editor-button { min-height: 34px; padding: 7px 11px; font-size: 12px; }
+.route-library-alert { margin: 12px 0 0; padding: 10px 12px; border-radius: 7px; color: #8a4c1d; background: #fff6e9; font-size: 13px; line-height: 1.5; }
+.route-library input[hidden] { display: none; }

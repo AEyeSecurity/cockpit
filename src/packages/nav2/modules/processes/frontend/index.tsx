@@ -370,19 +370,6 @@ export function createProcessesModule(): CockpitModule {
         }
       );
 
-      ctx.keybindings.register({
-        key: "p",
-        commandId: ProcessesCommands.openModal,
-        source: "default",
-        when: "!modalOpen"
-      });
-
-      ctx.contributions.register({
-        id: "toolbar.processes",
-        slot: "toolbar",
-        label: "Processes",
-        commandId: ProcessesCommands.openModal
-      });
     }
   };
 }

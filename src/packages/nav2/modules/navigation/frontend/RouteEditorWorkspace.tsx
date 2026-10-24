@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModuleContext } from "../../../../../core/types/module";
 import { ShellCommands } from "../../../../../app/shellCommands";
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
@@ -41,6 +41,13 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   const [state, setState] = useState<NavigationState>(navigation.getState());
   const [message, setMessage] = useState("");
   const [fixedYawDraft, setFixedYawDraft] = useState("0");
+  const routeFileInput = useRef<HTMLInputElement>(null);
+  const [imports, setImports] = useState<Record<string, string>>({});
+  const [importResults, setImportResults] = useState<Record<string, string>>({});
+  const [importing, setImporting] = useState(false);
+  const libraryDisabled = !state.routeLibrary.connected || state.routeLibrary.busy || importing;
+  const localRouteNames = navigation.listLocalRouteNames();
+  const editingLocked = state.controlLocked && state.routeLibrary.connected;
 
   useEffect(() => navigation.subscribe(setState), [navigation]);
 
@@ -56,14 +63,14 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     segment?: { segment: PatrolRouteSegment; segmentIndex: number }
   ): Promise<void> => {
     setMessage("");
-    if (state.controlLocked) {
+    if (editingLocked) {
       setMessage(`No se puede editar: ${state.controlLockReason || "los controles están bloqueados"}.`);
       return;
     }
     try {
-      if (!state.goalMode) await navigation.setGoalMode(true);
+      if (!state.goalMode) await navigation.setGoalMode(true, !state.routeLibrary.connected);
       navigation.setWaypointSelectionMode(false);
-      navigation.beginWaypointInsertion(afterIndex ?? state.waypoints.length - 1, segment);
+      navigation.beginWaypointInsertion(afterIndex ?? state.waypoints.length - 1, segment, !state.routeLibrary.connected);
       runtime.commands.execute(ShellCommands.openWorkspace, MAP_WORKSPACE_ID);
     } catch (error) {
       reportError(error);
@@ -90,7 +97,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   };
   const saveAs = async (): Promise<void> => {
     const name = await dialogs.prompt({
-      title: "Guardar ruta en Cockpit",
+      title: "Guardar ruta en el robot",
       message: "Elige un nombre para esta ruta:",
       placeholder: "Por ejemplo, Ronda noche",
       confirmLabel: "Guardar"
@@ -98,26 +105,21 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     if (name === null) return;
     const trimmed = name.trim();
     if (state.savedRouteNames.includes(trimmed) && trimmed !== state.routeEditor.activeRouteName) {
-      const overwrite = await dialogs.confirm({
-        title: "Sobrescribir ruta",
-        message: `Ya existe «${trimmed}». ¿Quieres reemplazarla?`,
-        confirmLabel: "Sobrescribir",
-        danger: true
-      });
-      if (!overwrite) return;
+      setMessage("Ya existe una ruta con ese nombre en el robot. Elegí otro nombre.");
+      return;
     }
     try {
-      const count = navigation.saveNamedRoute(trimmed);
-      setMessage(`Ruta «${trimmed}» guardada en Cockpit (${count} puntos).`);
+      const count = await navigation.saveNamedRoute(trimmed);
+      setMessage(`Ruta «${trimmed}» guardada en el robot (${count} puntos).`);
     } catch (error) {
       reportError(error);
     }
   };
   const loadRoute = async (name: string): Promise<void> => {
-    if (!name || name === state.routeEditor.activeRouteName) return;
+    if (!name) return;
     if (!(await confirmDiscard(`abrir «${name}»`))) return;
     try {
-      const count = navigation.loadNamedRoute(name);
+      const count = await navigation.loadNamedRoute(name);
       setMessage(`Ruta «${name}» abierta (${count} puntos).`);
     } catch (error) {
       reportError(error);
@@ -167,9 +169,9 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
   const selectionHasActions = state.selectedWaypointIndexes.some((index) => Boolean(state.waypoints[index]?.actions?.length));
   const patrolReadiness = getPatrolProfileReadiness(state.patrolMissionProfile);
   const structuredPatrol = patrolReadiness.profileConfigured;
-  const editingDisabled = state.controlLocked || state.routeMission.active || state.patrolMission.active;
+  const editingDisabled = editingLocked || state.routeMission.active || state.patrolMission.active;
   const missionEditingDisabled = state.routeMission.active || state.routeMission.paused || state.patrolMission.active;
-  const missionReadOnlyMessage = state.controlLocked
+  const missionReadOnlyMessage = editingLocked
     ? `Edición bloqueada: ${state.controlLockReason || "desbloquea el control para modificar la ruta"}.`
     : state.routeMission.active || state.patrolMission.active
       ? "Hay una misión activa. La ruta se muestra en modo consulta hasta que termine o se cancele."
@@ -213,7 +215,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         <div className={`route-editor-save-state ${state.routeEditor.dirty ? "is-dirty" : state.routeEditor.activeRouteName ? "is-saved" : "is-new"}`} role="status">
           <span className="route-editor-state-dot" />
           {state.routeEditor.activeRouteName
-            ? state.routeEditor.dirty ? "Cambios sin guardar" : "Guardada en Cockpit"
+            ? state.routeEditor.dirty ? "Cambios sin guardar" : "Guardada en el robot"
             : state.routeEditor.dirty ? "Borrador con cambios" : "Borrador nuevo"}
         </div>
       </header>
@@ -227,7 +229,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
           <span>1. Añade el primer punto en el mapa.</span>
           <span>2. Haz clic donde quieras colocarlo; volverás al editor.</span>
           <span>3. Añade los demás puntos y pulsa «Guardar como…».</span>
-          {state.controlLocked ? <p>Para colocar puntos, conecta el robot o simulador desde «Conexión» y desbloquea los controles.</p> : null}
+          {editingLocked ? <p>Para colocar puntos con el robot conectado, desbloqueá los controles.</p> : null}
         </section>
       ) : null}
 
@@ -243,14 +245,17 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             <button
               type="button"
               className="route-editor-button primary"
-              disabled={!state.routeEditor.dirty || !state.routeEditor.activeRouteName}
-              onClick={() => withError(() => navigation.saveCurrentNamedRoute(), "Cambios guardados en la ruta actual.")}
+              disabled={libraryDisabled || !state.routeEditor.dirty || !state.routeEditor.activeRouteName}
+              onClick={async () => {
+                try { await navigation.saveCurrentNamedRoute(); setMessage("Cambios guardados en el robot."); }
+                catch (error) { reportError(error); }
+              }}
             >Guardar cambios</button>
-            <button type="button" className="route-editor-button" disabled={count === 0} onClick={() => void saveAs()}>
+            <button type="button" className="route-editor-button" disabled={libraryDisabled || count === 0} onClick={() => void saveAs()}>
               Guardar como…
             </button>
             <label className="route-editor-load-label">
-              <select aria-label="Abrir ruta guardada" value="" onChange={(event) => void loadRoute(event.target.value)}>
+              <select disabled={libraryDisabled || missionEditingDisabled} aria-label="Abrir ruta guardada" value="" onChange={(event) => void loadRoute(event.target.value)}>
                 <option value="">Abrir ruta guardada…</option>
                 {state.savedRouteNames.map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
@@ -270,17 +275,100 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         </div>
       </section>
 
+      <section className="route-editor-card route-library" aria-label="Biblioteca del robot">
+        <div className="route-library-heading">
+          <div className="route-library-description">
+            <div className="route-library-title">
+              <h2>Rutas del robot</h2>
+              <span className={`route-library-badge ${state.routeLibrary.connected ? "is-connected" : ""}`} role="status">
+                <span aria-hidden="true" />
+                {!state.routeLibrary.connected ? "Sin conexión" : state.routeLibrary.busy ? "Actualizando…" : "Compartidas"}
+              </span>
+            </div>
+            <p>{!state.routeLibrary.connected ? "Conectate al robot para consultar y guardar sus rutas."
+              : "Disponibles para todos los operadores de este robot."}</p>
+          </div>
+          <button type="button" className="route-editor-button route-library-refresh" disabled={libraryDisabled}
+            aria-label="Actualizar rutas del robot"
+            onClick={() => void navigation.refreshSavedRoutes().catch(reportError)}>
+            <span aria-hidden="true">↻</span> Actualizar
+          </button>
+        </div>
+        {state.routeLibrary.error ? <p className="route-library-alert" role="alert">{state.routeLibrary.error}</p> : null}
+        {state.routeLibrary.conflict ? <p className="route-library-alert" role="alert">Otro operador modificó o eliminó la ruta abierta. Tu borrador se conserva. Volvé a abrirla o guardá una copia con otro nombre.</p> : null}
+        <div className="route-library-files">
+          <div className="route-library-files-description">
+            <strong>Archivos de ruta</strong>
+            <span>Importá un borrador o exportá una copia a tu PC.</span>
+          </div>
+          <div className="route-library-file-actions" role="group" aria-label="Importar y exportar rutas">
+            <button type="button" className="route-editor-button" disabled={missionEditingDisabled || state.routeLibrary.busy}
+              onClick={() => routeFileInput.current?.click()}>Importar archivo…</button>
+            <button type="button" className="route-editor-button" disabled={!count} onClick={() => {
+          const url = URL.createObjectURL(new Blob([navigation.exportRouteDocument()], { type: "application/json" }));
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = "ruta-salus.json";
+          anchor.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>Exportar copia</button>
+          </div>
+          <input ref={routeFileInput} type="file" accept=".json,application/json" hidden
+            aria-label="Importar archivo al borrador" disabled={missionEditingDisabled || state.routeLibrary.busy} onChange={async (event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file || !(await confirmDiscard("importar un archivo"))) return;
+            try {
+              if (file.size > 512000) throw new Error("El archivo de ruta es demasiado grande");
+              navigation.importRouteDocument(await file.text());
+              setMessage("Archivo cargado como borrador. Guardalo en el robot para compartirlo.");
+            } catch (error) { reportError(error); }
+          }} />
+        </div>
+      </section>
+      {localRouteNames.length > 0 ? <details className="route-editor-card">
+        <summary>Importar rutas de esta PC ({localRouteNames.length})</summary>
+        <p>Destino: {navigation.getRouteLibraryTarget() || "sin conexión"}. Seleccioná las rutas y sus nombres de destino. Las copias locales se conservarán.</p>
+        {localRouteNames.map((name) => <div key={name}>
+          <label><input type="checkbox" disabled={importing} checked={Object.prototype.hasOwnProperty.call(imports, name)} onChange={(event) => {
+            const next = { ...imports };
+            if (event.target.checked) next[name] = name; else delete next[name];
+            setImports(next);
+          }} />{name}</label>
+          {Object.prototype.hasOwnProperty.call(imports, name) ? <input aria-label={`Nombre en el robot para ${name}`} disabled={importing}
+            value={imports[name]} onChange={(event) => setImports({ ...imports, [name]: event.target.value })} /> : null}
+          {importResults[name] ? <span role="status">{importResults[name]}</span> : null}
+        </div>)}
+        <button type="button" className="route-editor-button" disabled={libraryDisabled || !Object.keys(imports).length}
+          onClick={async () => {
+            setImporting(true);
+            const session = navigation.getRouteLibrarySession();
+            const remaining = { ...imports };
+            for (const [source, target] of Object.entries(imports)) {
+              try {
+                await navigation.importLocalRoute(source, target, session);
+                delete remaining[source];
+                setImportResults((previous) => ({ ...previous, [source]: `Importada como «${target}»` }));
+              } catch (error) {
+                setImportResults((previous) => ({ ...previous, [source]: errorText(error) }));
+              }
+            }
+            setImports(remaining);
+            setImporting(false);
+          }}>Importar seleccionadas al robot conectado</button>
+      </details> : null}
+
       {state.savedRouteNames.length ? (
         <details className="route-editor-card route-editor-saved-routes">
-          <summary>Rutas guardadas en Cockpit ({state.savedRouteNames.length})</summary>
+          <summary>Rutas guardadas en el robot ({state.savedRouteNames.length})</summary>
           <ul>
             {state.savedRouteNames.map((name) => <li key={name}>
               <span>{name}{name === state.routeEditor.activeRouteName ? " · abierta" : ""}</span>
-              <button type="button" className="route-editor-button" onClick={() => void loadRoute(name)}>Abrir</button>
-              <button type="button" className="route-editor-button danger" onClick={async () => {
-                if (!(await dialogs.confirm({ title: "Eliminar ruta guardada", message: `¿Eliminar «${name}» de Cockpit?`, confirmLabel: "Eliminar", danger: true }))) return;
-                navigation.deleteNamedRoute(name);
-                setMessage(`Ruta «${name}» eliminada de Cockpit.`);
+              <button type="button" className="route-editor-button" disabled={libraryDisabled || missionEditingDisabled} onClick={() => void loadRoute(name)}>Abrir</button>
+              <button type="button" className="route-editor-button danger" disabled={libraryDisabled} onClick={async () => {
+                if (!(await dialogs.confirm({ title: "Eliminar ruta guardada", message: `¿Eliminar «${name}» del robot?`, confirmLabel: "Eliminar", danger: true }))) return;
+                try { await navigation.deleteNamedRoute(name); setMessage(`Ruta «${name}» eliminada del robot.`); }
+                catch (error) { reportError(error); }
               }}>Eliminar</button>
             </li>)}
           </ul>

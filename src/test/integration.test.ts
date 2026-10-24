@@ -25,14 +25,14 @@ describe("integration", () => {
     const runtime = await bootstrapApp();
     expect(runtime.contributions.has("core.footer.metrics")).toBe(true);
     expect(runtime.contributions.has("core.modal.diagnostics")).toBe(true);
-    expect(runtime.contributions.has("core.toolbar.diagnostics")).toBe(true);
+    expect(runtime.contributions.has("core.toolbar.diagnostics")).toBe(false);
     expect(runtime.commands.has("core.diagnostics.open")).toBe(true);
     expect(runtime.contributions.has("nav2.footer.connection")).toBe(false);
     expect(runtime.contributions.has("nav2.footer.connection-status")).toBe(true);
     expect(runtime.contributions.has("nav2.toolbar.navigation")).toBe(false);
     expect(runtime.contributions.has("nav2.sidebar.debug")).toBe(true);
     expect(runtime.contributions.has("sidebar.settings")).toBe(true);
-    expect(runtime.contributions.has("nav2.toolbar.processes")).toBe(true);
+    expect(runtime.contributions.has("nav2.toolbar.processes")).toBe(false);
     expect(runtime.contributions.has("nav2.modal.processes")).toBe(true);
     expect(runtime.commands.has("nav2.processes.openModal")).toBe(true);
     expect(runtime.commands.has(NavigationCommands.openLiveNavWindow)).toBe(true);
@@ -49,17 +49,16 @@ describe("integration", () => {
 
     const debugSidebar = runtime.contributions.get("nav2.sidebar.debug");
     expect(debugSidebar?.slot).toBe("sidebar");
-    expect(debugSidebar && "label" in debugSidebar ? debugSidebar.label : "").toBe("Debug");
+    expect(debugSidebar && "label" in debugSidebar ? debugSidebar.label : "").toBe("Diagnóstico");
 
     const settingsSidebar = runtime.contributions.get("sidebar.settings");
     expect(settingsSidebar?.slot).toBe("sidebar");
-    expect(settingsSidebar && "label" in settingsSidebar ? settingsSidebar.label : "").toBe("Settings");
+    expect(settingsSidebar && "label" in settingsSidebar ? settingsSidebar.label : "").toBe("Configuración");
 
-    const processesToolbar = runtime.contributions.get("nav2.toolbar.processes");
-    expect(processesToolbar?.slot).toBe("toolbar");
-    expect(processesToolbar && "commandId" in processesToolbar ? processesToolbar.commandId : "").toBe(
-      "nav2.processes.openModal"
-    );
+    expect(runtime.contributions.has("nav2.toolbar.rtk")).toBe(false);
+    expect(runtime.contributions.has("nav2.toolbar.debug")).toBe(false);
+    expect(debugSidebar && "placement" in debugSidebar ? debugSidebar.placement : "").toBe("secondary");
+
   });
 
   it("loads package config from config.json and persists local overrides", async () => {

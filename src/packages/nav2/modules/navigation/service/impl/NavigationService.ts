@@ -228,6 +228,7 @@ export interface NavigationState {
   lastStatus: string;
   lastSnapshot: SnapshotData | null;
   savedRouteNames: string[];
+  routeLibrary: { connected: boolean; busy: boolean; error: string; conflict: boolean };
 }
 
 type NavigationListener = (state: NavigationState) => void;
@@ -600,7 +601,7 @@ function readSavedRoutesMap(): Record<string, StoredRouteRecord> {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const routes: Record<string, StoredRouteRecord> = {};
+    const routes: Record<string, StoredRouteRecord> = Object.create(null);
     for (const [name, value] of Object.entries(parsed)) {
       if (!name.trim()) continue;
       try {
@@ -631,9 +632,6 @@ function readSavedRoutesMap(): Record<string, StoredRouteRecord> {
   }
 }
 
-function writeSavedRoutesMap(routes: Record<string, StoredRouteRecord>): void {
-  getStorageAdapter().setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(routes));
-}
 
 function sortedRouteNames(routes: Record<string, StoredRouteRecord>): string[] {
   return Object.keys(routes).sort((a, b) => a.localeCompare(b));
@@ -1144,6 +1142,13 @@ export class NavigationService {
   private readonly listeners = new Set<NavigationListener>();
   private readonly routeUndoStack: RouteEditorSnapshot[] = [];
   private readonly routeRedoStack: RouteEditorSnapshot[] = [];
+  private routeCatalog: Array<{ id: string; name: string; revision: number }> = [];
+  private loadedRobotRoute: { id: string; name: string; revision: number } | null = null;
+  private routeConnectionKey = "";
+  private routeEpoch = 0;
+  private routeRefreshSequence = 0;
+  private routeDraftGeneration = 0;
+  private routeRequests = 0;
   private savedRouteSnapshotKey: string | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatCount = 0;
@@ -1210,7 +1215,8 @@ export class NavigationService {
     },
     lastStatus: "No active goal",
     lastSnapshot: null,
-    savedRouteNames: []
+    savedRouteNames: [],
+    routeLibrary: { connected: false, busy: false, error: "", conflict: false }
   };
 
   constructor(private readonly robotDispatcher: RobotDispatcher, manualDefaults?: Partial<NavigationManualDefaults>) {
@@ -1252,10 +1258,13 @@ export class NavigationService {
       manualLinearMax: this.manualLinearMax,
       manualSteeringAngleMinDeg: this.manualSteeringAngleMinDeg,
       manualSteeringAngleMaxDeg: this.manualSteeringAngleMaxDeg,
-      savedRouteNames: sortedRouteNames(readSavedRoutesMap())
+      savedRouteNames: []
     };
     this.savedRouteSnapshotKey = this.currentRouteSnapshotKey();
 
+    this.robotDispatcher.subscribeRoutesChanged?.(() => {
+      void this.refreshSavedRoutes().catch(() => undefined);
+    });
     this.startControlHeartbeat();
 
     const dispatcher = this.robotDispatcher as unknown as {
@@ -1341,6 +1350,8 @@ export class NavigationService {
   }
 
   private setRouteBaseline(activeRouteName: string | null): void {
+    this.routeDraftGeneration += 1;
+    if (activeRouteName === null) this.loadedRobotRoute = null;
     this.savedRouteSnapshotKey = this.currentRouteSnapshotKey();
     this.routeUndoStack.length = 0;
     this.routeRedoStack.length = 0;
@@ -1399,6 +1410,7 @@ export class NavigationService {
       ...this.state,
       waypoints: this.state.waypoints.map((waypoint) => cloneGoal(waypoint)),
       routeEditor: { ...this.state.routeEditor },
+      routeLibrary: { ...this.state.routeLibrary },
       patrolMissionProfile: {
         loopWaypoints: this.state.patrolMissionProfile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
         homeWaypoint: this.state.patrolMissionProfile.homeWaypoint ? cloneGoal(this.state.patrolMissionProfile.homeWaypoint) : null,
@@ -1467,11 +1479,12 @@ export class NavigationService {
     return next;
   }
 
-  async setGoalMode(enabled: boolean): Promise<void> {
-    if (enabled && this.state.controlLocked) {
+  async setGoalMode(enabled: boolean, offlineDraft = false): Promise<void> {
+    const localDraft = offlineDraft && !this.state.routeLibrary.connected;
+    if (enabled && this.state.controlLocked && !localDraft) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
     }
-    if (enabled && this.state.manualMode) {
+    if (enabled && this.state.manualMode && !localDraft) {
       const response = await this.robotDispatcher.requestManualMode(false);
       if (response.ok === false) {
         throw new Error(response.error ?? "Disable manual mode failed");
@@ -1494,13 +1507,14 @@ export class NavigationService {
 
   beginWaypointInsertion(
     afterIndex: number,
-    segmentOptions?: { segment: PatrolRouteSegment; segmentIndex: number }
+    segmentOptions?: { segment: PatrolRouteSegment; segmentIndex: number },
+    offlineDraft = false
   ): void {
     const target = Math.trunc(Number(afterIndex));
     if (target < -1 || target >= this.state.waypoints.length) {
       throw new Error("Waypoint insertion position is unavailable");
     }
-    if (this.state.controlLocked) {
+    if (this.state.controlLocked && !(offlineDraft && !this.state.routeLibrary.connected)) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
     }
     const anchor = target >= 0 ? this.state.waypoints[target] : null;
@@ -2131,6 +2145,7 @@ export class NavigationService {
     if (this.state.routeMission.active || this.state.routeMission.paused || this.state.patrolMission.active) {
       throw new Error("No se puede crear una ruta nueva durante una misión");
     }
+    this.loadedRobotRoute = null;
     this.state = {
       ...this.state,
       waypoints: [],
@@ -2145,76 +2160,189 @@ export class NavigationService {
     this.emit();
   }
 
-  saveNamedRoute(name: string): number {
+  setRouteLibraryConnection(connected: boolean, key: string): void {
+    if (connected === this.state.routeLibrary.connected && key === this.routeConnectionKey) return;
+    this.routeEpoch += 1;
+    this.routeConnectionKey = key;
+    this.routeRequests = 0;
+    this.routeCatalog = [];
+    this.loadedRobotRoute = null;
+    this.state = { ...this.state, savedRouteNames: [],
+      routeEditor: { ...this.state.routeEditor, activeRouteName: null },
+      routeLibrary: { connected, busy: false, error: "", conflict: false } };
+    // A detached draft must be explicitly saved to the newly connected robot.
+    this.savedRouteSnapshotKey = null;
+    this.updateRouteEditorState();
+    this.emit();
+    if (connected) void this.refreshSavedRoutes().catch(() => undefined);
+  }
+
+  private async routeRequest(op: "list_routes" | "get_route" | "save_route" | "delete_route", payload: unknown = {}): Promise<Nav2IncomingMessage> {
+    if (!this.state.routeLibrary.connected) throw new Error("Conectate al robot para acceder a sus rutas");
+    const epoch = this.routeEpoch;
+    this.routeRequests += 1;
+    this.state.routeLibrary = { ...this.state.routeLibrary, busy: true, error: "" };
+    this.emit();
+    try {
+      const response = await this.robotDispatcher.requestRouteLibrary(op, payload);
+      if (epoch !== this.routeEpoch) throw new Error("La conexión cambió; consultá las rutas del robot actual");
+      if (response.ok !== true) {
+        if (response.error_code === "ROUTE_CONFLICT" || response.error_code === "ROUTE_NOT_FOUND") this.state.routeLibrary.conflict = true;
+        throw new Error(String(response.error ?? "El robot no pudo completar la operación"));
+      }
+      return response;
+    } catch (error) {
+      if (epoch === this.routeEpoch) {
+        this.state.routeLibrary = { ...this.state.routeLibrary, error: error instanceof Error ? error.message : String(error) };
+      }
+      throw error;
+    } finally {
+      if (epoch === this.routeEpoch) {
+        this.routeRequests -= 1;
+        this.state.routeLibrary = { ...this.state.routeLibrary, busy: this.routeRequests > 0 };
+        this.emit();
+      }
+    }
+  }
+
+  async refreshSavedRoutes(): Promise<void> {
+    const sequence = ++this.routeRefreshSequence;
+    const epoch = this.routeEpoch;
+    const response = await this.routeRequest("list_routes");
+    if (sequence !== this.routeRefreshSequence || epoch !== this.routeEpoch) return;
+    if (!Array.isArray(response.routes)) throw new Error("Catálogo de rutas inválido");
+    this.routeCatalog = response.routes as typeof this.routeCatalog;
+    const loaded = this.loadedRobotRoute;
+    const current = loaded ? this.routeCatalog.find((route) => route.id === loaded.id) : null;
+    const conflict = Boolean(loaded && (!current || current.revision !== loaded.revision));
+    this.state = { ...this.state, savedRouteNames: this.routeCatalog.map((route) => route.name),
+      routeLibrary: { ...this.state.routeLibrary, conflict } };
+    this.emit();
+  }
+
+  private routeDocument(): StoredRouteRecord {
+    return { waypoints: this.state.waypoints.map(cloneGoal), loopRoute: this.state.loopRoute,
+      patrolMissionProfileRefs: buildPatrolMissionProfileRefs(this.state.waypoints, this.state.patrolMissionProfile) };
+  }
+
+  async saveNamedRoute(name: string): Promise<number> {
     const trimmed = name.trim();
-    if (!trimmed) {
-      throw new Error("El nombre de la ruta no puede estar vacío");
+    if (!trimmed) throw new Error("El nombre de la ruta no puede estar vacío");
+    if (!this.state.waypoints.length) throw new Error("No hay waypoints para guardar");
+    const document = this.routeDocument();
+    const snapshotKey = this.currentRouteSnapshotKey();
+    const generation = this.routeDraftGeneration;
+    const loaded = this.loadedRobotRoute?.name === trimmed ? this.loadedRobotRoute : null;
+    const epoch = this.routeEpoch;
+    const response = await this.routeRequest("save_route", { name: trimmed, document,
+      ...(loaded ? { id: loaded.id, expected_revision: loaded.revision } : {}) });
+    if (epoch !== this.routeEpoch) throw new Error("La conexión cambió durante el guardado");
+    if (generation === this.routeDraftGeneration) {
+      this.loadedRobotRoute = response.route as NonNullable<typeof this.loadedRobotRoute>;
+      this.state.routeEditor = { ...this.state.routeEditor, activeRouteName: trimmed };
+      this.savedRouteSnapshotKey = snapshotKey;
+      this.updateRouteEditorState();
+      this.state.lastStatus = `Ruta «${trimmed}» guardada en el robot`;
+      this.state.routeLibrary.conflict = false;
     }
-    if (this.state.waypoints.length === 0) {
-      throw new Error("No hay waypoints para guardar");
-    }
-    const routes = readSavedRoutesMap();
-    routes[trimmed] = {
-      waypoints: this.state.waypoints.map((waypoint) => cloneGoal(waypoint)),
-      patrolMissionProfileRefs: buildPatrolMissionProfileRefs(this.state.waypoints, this.state.patrolMissionProfile),
-      loopRoute: this.state.loopRoute
-    };
-    writeSavedRoutesMap(routes);
-    this.setRouteBaseline(trimmed);
-    this.state = {
-      ...this.state,
-      savedRouteNames: sortedRouteNames(routes),
-      lastStatus: `Ruta "${trimmed}" guardada (${routes[trimmed].waypoints.length} waypoints)`
-    };
     this.emit();
-    return routes[trimmed].waypoints.length;
+    // A failed catalog refresh must not turn a confirmed save into a failed save.
+    await this.refreshSavedRoutes().catch(() => undefined);
+    return document.waypoints.length;
   }
 
-  saveCurrentNamedRoute(): number {
-    const routeName = this.state.routeEditor.activeRouteName;
-    if (!routeName) {
-      throw new Error("No named route is currently loaded");
-    }
-    return this.saveNamedRoute(routeName);
+  async saveCurrentNamedRoute(): Promise<number> {
+    const name = this.state.routeEditor.activeRouteName;
+    if (!name) throw new Error("No named route is currently loaded");
+    return this.saveNamedRoute(name);
   }
 
-  loadNamedRoute(name: string): number {
-    const routes = readSavedRoutesMap();
-    const loaded = routes[name];
-    if (!loaded) {
-      throw new Error(`No existe la ruta "${name}"`);
+  async loadNamedRoute(name: string): Promise<number> {
+    if (this.state.routeMission.active || this.state.routeMission.paused || this.state.patrolMission.active) {
+      throw new Error("No se puede cargar una ruta durante una misión");
     }
-    const waypoints = loaded.waypoints.map((waypoint) => cloneGoal(waypoint));
-    this.state = {
-      ...this.state,
-      waypoints,
-      patrolMissionProfile: createPatrolMissionProfileFromRefs(waypoints, loaded.patrolMissionProfileRefs),
-      loopRoute: loaded.loopRoute !== false,
-      selectedWaypointIndexes: [],
-      savedRouteNames: sortedRouteNames(routes),
-      lastStatus: `Ruta "${name}" cargada (${waypoints.length} waypoints)`
-    };
-    this.setRouteBaseline(name);
-    this.state = { ...this.state, lastStatus: `Ruta "${name}" cargada (${waypoints.length} waypoints)` };
+    const summary = this.routeCatalog.find((route) => route.name === name);
+    if (!summary) throw new Error(`No existe la ruta «${name}» en el robot`);
+    const snapshotKey = this.currentRouteSnapshotKey();
+    const epoch = this.routeEpoch;
+    const generation = this.routeDraftGeneration;
+    const response = await this.routeRequest("get_route", { id: summary.id });
+    if (epoch !== this.routeEpoch) throw new Error("La conexión cambió durante la carga");
+    if (generation !== this.routeDraftGeneration || snapshotKey !== this.currentRouteSnapshotKey()) throw new Error("El borrador cambió durante la carga; volvé a abrir la ruta");
+    if (this.state.routeMission.active || this.state.routeMission.paused || this.state.patrolMission.active) {
+      throw new Error("No se puede cargar una ruta durante una misión");
+    }
+    const route = response.route as typeof summary & { document: StoredRouteRecord };
+    const loaded = parseStoredWaypoints(JSON.stringify(route.document));
+    this.state = { ...this.state, waypoints: loaded.waypoints,
+      patrolMissionProfile: loaded.patrolMissionProfile, loopRoute: loaded.loopRoute, selectedWaypointIndexes: [] };
+    this.loadedRobotRoute = route;
+    this.setRouteBaseline(route.name);
+    this.state.routeLibrary.conflict = false;
+    this.state.lastStatus = `Ruta «${name}» cargada del robot`;
     this.emit();
-    return waypoints.length;
+    return loaded.waypoints.length;
   }
 
-  deleteNamedRoute(name: string): void {
-    const routes = readSavedRoutesMap();
-    if (!(name in routes)) return;
-    delete routes[name];
-    writeSavedRoutesMap(routes);
-    this.state = {
-      ...this.state,
-      routeEditor:
-        this.state.routeEditor.activeRouteName === name
-          ? { ...this.state.routeEditor, activeRouteName: null, dirty: true }
-          : this.state.routeEditor,
-      savedRouteNames: sortedRouteNames(routes),
-      lastStatus: `Ruta "${name}" eliminada`
-    };
+  async deleteNamedRoute(name: string): Promise<void> {
+    const route = this.routeCatalog.find((item) => item.name === name);
+    if (!route) throw new Error(`No existe la ruta «${name}»`);
+    const epoch = this.routeEpoch;
+    await this.routeRequest("delete_route", { id: route.id, expected_revision: route.revision });
+    if (epoch !== this.routeEpoch) throw new Error("La conexión cambió durante la eliminación");
+    if (this.loadedRobotRoute?.id === route.id) {
+      this.loadedRobotRoute = null;
+      this.state.routeEditor = { ...this.state.routeEditor, activeRouteName: null };
+      this.savedRouteSnapshotKey = null;
+      this.updateRouteEditorState();
+    }
+    this.state.lastStatus = `Ruta «${name}» eliminada del robot`;
     this.emit();
+    await this.refreshSavedRoutes().catch(() => undefined);
+  }
+
+  exportRouteDocument(): string {
+    return JSON.stringify(this.routeDocument(), null, 2);
+  }
+
+  importRouteDocument(text: string): void {
+    if (this.state.routeMission.active || this.state.routeMission.paused || this.state.patrolMission.active) {
+      throw new Error("No se puede importar una ruta durante una misión");
+    }
+    const parsed = JSON.parse(text) as StoredRouteRecord;
+    if (!Array.isArray(parsed?.waypoints) || !parsed.waypoints.length || parsed.waypoints.length > MAX_WAYPOINTS) {
+      throw new Error("Archivo de ruta inválido: se requieren entre 1 y 200 puntos");
+    }
+    const loaded = parseStoredWaypoints(text);
+    this.loadedRobotRoute = null;
+    this.state = { ...this.state, waypoints: loaded.waypoints, patrolMissionProfile: loaded.patrolMissionProfile,
+      loopRoute: loaded.loopRoute, selectedWaypointIndexes: [] };
+    this.setRouteBaseline(null);
+    this.savedRouteSnapshotKey = null;
+    this.updateRouteEditorState();
+    this.emit();
+  }
+
+  listLocalRouteNames(): string[] {
+    return sortedRouteNames(readSavedRoutesMap());
+  }
+
+  getRouteLibrarySession(): string {
+    return `${this.routeEpoch}:${this.routeConnectionKey}`;
+  }
+
+  getRouteLibraryTarget(): string {
+    return this.routeConnectionKey;
+  }
+
+  async importLocalRoute(sourceName: string, targetName: string, session = this.getRouteLibrarySession()): Promise<void> {
+    if (session !== this.getRouteLibrarySession()) throw new Error("La conexión cambió; revisá el robot de destino antes de importar");
+    const document = readSavedRoutesMap()[sourceName];
+    if (!document) throw new Error(`No existe la ruta local «${sourceName}»`);
+    // Keep source records untouched. Repeated requests cannot replace existing names.
+    await this.routeRequest("save_route", { name: targetName.trim(), document });
+    if (session !== this.getRouteLibrarySession()) throw new Error("La conexión cambió durante la importación");
+    await this.refreshSavedRoutes().catch(() => undefined);
   }
 
   async loadWaypointsFile(): Promise<number> {

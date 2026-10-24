@@ -1,3 +1,4 @@
+import { robotRouteLibraryFixture } from "./robotRouteLibraryFixture";
 import { describe, expect, it, vi } from "vitest";
 import { MapService } from "../packages/nav2/modules/map/service/impl/MapService";
 import { MissionService } from "../packages/nav2/modules/debug/service/impl/MissionService";
@@ -264,22 +265,15 @@ describe("services", () => {
     expect(service.getState().waypoints[1]).toMatchObject({ x: 3, y: 4 });
   });
 
-  it("saves, lists, loads and deletes named routes via localStorage", () => {
+  it("saves, lists, loads and deletes named routes on the robot", async () => {
     installStorageMock();
-    const dispatcher = {
-      requestGoal: vi.fn(),
-      requestCancelGoal: vi.fn(),
-      requestManualMode: vi.fn(),
-      requestManualCommand: vi.fn(),
-      requestSnapshot: vi.fn(),
-      requestCameraPan: vi.fn(),
-      requestCameraZoomToggle: vi.fn(),
-      requestCameraStatus: vi.fn()
-    };
+    const { dispatcher } = robotRouteLibraryFixture();
     const service = new NavigationService(dispatcher as never);
 
+    service.setRouteLibraryConnection(true, "robot");
+    await service.refreshSavedRoutes();
     // Cannot save with empty name or with no waypoints.
-    expect(() => service.saveNamedRoute("ruta")).toThrowError(/waypoints/i);
+    await expect(service.saveNamedRoute("ruta")).rejects.toThrowError(/waypoints/i);
     service.queueWaypoint({ x: 1, y: 2, yawDeg: 90 });
     service.queueWaypoint({ x: 3, y: 4 });
     service.toggleWaypointSelection(0);
@@ -288,30 +282,32 @@ describe("services", () => {
     service.clearWaypointSelection();
     service.toggleWaypointSelection(1);
     service.setPatrolDepartEntryFromSelected();
-    expect(() => service.saveNamedRoute("   ")).toThrowError(/vacío/i);
+    await expect(service.saveNamedRoute("   ")).rejects.toThrowError(/vacío/i);
 
-    const saved = service.saveNamedRoute("Ronda noche");
+    const saved = await service.saveNamedRoute("Ronda noche");
     expect(saved).toBe(2);
     expect(service.getState().savedRouteNames).toEqual(["Ronda noche"]);
     expect(service.listSavedRouteNames()).toEqual(["Ronda noche"]);
 
-    // A second service instance reads the persisted routes on construction.
+    // Another operator sees the same library after connecting.
     const reopened = new NavigationService(dispatcher as never);
+    reopened.setRouteLibraryConnection(true, "robot");
+    await reopened.refreshSavedRoutes();
     expect(reopened.listSavedRouteNames()).toEqual(["Ronda noche"]);
     reopened.clearWaypoints();
     expect(reopened.getState().waypoints).toHaveLength(0);
-    const loaded = reopened.loadNamedRoute("Ronda noche");
+    const loaded = await reopened.loadNamedRoute("Ronda noche");
     expect(loaded).toBe(2);
     expect(reopened.getState().waypoints[0]).toMatchObject({ x: 1, y: 2, yawDeg: 90 });
     expect(reopened.getState().waypoints[1]).toMatchObject({ x: 3, y: 4 });
     expect(reopened.getState().patrolMissionProfile.loopWaypoints).toHaveLength(2);
     expect(reopened.getState().patrolMissionProfile.departEntryLoopIndex).toBe(1);
 
-    expect(() => reopened.loadNamedRoute("inexistente")).toThrowError(/No existe/i);
+    await expect(reopened.loadNamedRoute("inexistente")).rejects.toThrowError(/No existe/i);
 
-    reopened.deleteNamedRoute("Ronda noche");
+    await reopened.deleteNamedRoute("Ronda noche");
     expect(reopened.getState().savedRouteNames).toEqual([]);
-    expect(() => reopened.loadNamedRoute("Ronda noche")).toThrowError(/No existe/i);
+    await expect(reopened.loadNamedRoute("Ronda noche")).rejects.toThrowError(/No existe/i);
   });
 
   it("supports waypoint selection and selective removal", () => {
@@ -395,12 +391,15 @@ describe("services", () => {
     ]);
   });
 
-  it("tracks the active named route and saves edits back to it", () => {
+  it("tracks the active named route and saves edits back to it", async () => {
     installStorageMock();
-    const service = new NavigationService({} as never);
+    const { dispatcher } = robotRouteLibraryFixture();
+    const service = new NavigationService(dispatcher as never);
+    service.setRouteLibraryConnection(true, "robot");
+    await service.refreshSavedRoutes();
     service.queueWaypoint({ x: 1, y: 2 });
     service.queueWaypoint({ x: 3, y: 4 });
-    service.saveNamedRoute("Ronda editable");
+    await service.saveNamedRoute("Ronda editable");
     expect(service.getState().routeEditor).toMatchObject({
       activeRouteName: "Ronda editable",
       dirty: false
@@ -408,11 +407,11 @@ describe("services", () => {
 
     service.insertWaypoint(1, { x: 2, y: 3 });
     expect(service.getState().routeEditor.dirty).toBe(true);
-    expect(service.saveCurrentNamedRoute()).toBe(3);
+    expect(await service.saveCurrentNamedRoute()).toBe(3);
     expect(service.getState().routeEditor.dirty).toBe(false);
 
     service.clearWaypoints();
-    service.loadNamedRoute("Ronda editable");
+    await service.loadNamedRoute("Ronda editable");
     expect(service.getState().waypoints).toHaveLength(3);
     expect(service.getState().routeEditor).toMatchObject({
       activeRouteName: "Ronda editable",

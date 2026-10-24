@@ -73,23 +73,6 @@ interface TelemetryServiceLike {
   subscribeTelemetry(listener: (snapshot: ReturnType<TelemetryServiceLike["getSnapshot"]>) => void): () => void;
 }
 
-type ShellStatusTone = "ok" | "warn" | "bad" | "neutral";
-
-interface ShellStatusItem {
-  id: string;
-  label: string;
-  value: string;
-  detail?: string;
-  tone: ShellStatusTone;
-}
-
-interface ShellTelemetryState {
-  alerts: number;
-  recentEvents: number;
-  datumSet: boolean;
-  rtkConnected: boolean;
-}
-
 interface HostCommandMessage {
   type: "cockpit.host.command";
   commandId?: string;
@@ -125,34 +108,6 @@ const SPLITTER_THICKNESS = 4;
 const SHELL_BODY_GAP = 6;
 const DIAGNOSTICS_MODAL_ID = "modal.diagnostics";
 
-function routeStatusLabel(state: ReturnType<NavigationServiceLike["getState"]> | null): string {
-  if (!state) return "No data";
-  if (state.manualMode) return "Manual";
-  if (state.goalMode) return "Goal";
-  if (state.selectedWaypointIndexes.length > 0) return `${state.selectedWaypointIndexes.length} selected`;
-  return "Standby";
-}
-
-function routeStatusTone(state: ReturnType<NavigationServiceLike["getState"]> | null): ShellStatusTone {
-  if (!state) return "neutral";
-  if (state.controlLocked) return "bad";
-  if (state.manualMode) return "warn";
-  if (state.goalMode || state.selectedWaypointIndexes.length > 0) return "ok";
-  return "neutral";
-}
-
-function connectionDetail(state: SidebarConnectionState | null): string {
-  if (!state) return "Service unavailable";
-  const endpoint = [state.host, state.port].filter(Boolean).join(":");
-  if (state.connecting) return endpoint ? `Dialing ${endpoint}` : "Opening session";
-  if (state.connected) {
-    const preset = state.preset ? state.preset.toUpperCase() : "LIVE";
-    return endpoint ? `${preset} · ${endpoint}` : preset;
-  }
-  if (state.lastError?.trim()) return endpoint ? `Fault · ${endpoint}` : "Fault reported";
-  return endpoint ? `Idle · ${endpoint}` : "Idle";
-}
-
 export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JSX.Element {
   const usingVscodeLayout = layoutMode === "vscode";
   const toolbarMenus = useSlot(runtime.contributions, "toolbar");
@@ -168,14 +123,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [zoomController] = useState(() => new UiZoomController());
-  const [shellConnectionState, setShellConnectionState] = useState<SidebarConnectionState | null>(null);
-  const [shellNavigationState, setShellNavigationState] = useState<ReturnType<NavigationServiceLike["getState"]> | null>(null);
-  const [shellTelemetryState, setShellTelemetryState] = useState<ShellTelemetryState>({
-    alerts: 0,
-    recentEvents: 0,
-    datumSet: false,
-    rtkConnected: false
-  });
 
   const resolveModalId = (modalId: string): string => {
     if (modalDialogs.some((dialog) => dialog.id === modalId)) return modalId;
@@ -262,145 +209,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       }))
     );
   }, [footerItems]);
-
-  useEffect(() => {
-    let connectionService: ConnectionServiceLike | null = null;
-    let navigationService: NavigationServiceLike | null = null;
-    let sensorInfoService: SensorInfoServiceLike | null = null;
-    let telemetryService: TelemetryServiceLike | null = null;
-
-    try {
-      connectionService = runtime.getService<ConnectionServiceLike>(CONNECTION_SERVICE_ID);
-    } catch {
-      connectionService = null;
-    }
-
-    try {
-      navigationService = runtime.getService<NavigationServiceLike>(NAVIGATION_SERVICE_ID);
-    } catch {
-      navigationService = null;
-    }
-
-    try {
-      sensorInfoService = runtime.getService<SensorInfoServiceLike>(SENSOR_INFO_SERVICE_ID);
-    } catch {
-      sensorInfoService = null;
-    }
-
-    try {
-      telemetryService = runtime.getService<TelemetryServiceLike>(TELEMETRY_SERVICE_ID);
-    } catch {
-      telemetryService = null;
-    }
-
-    const publishTelemetry = (): void => {
-      const sensorState = sensorInfoService?.getState();
-      const payloads = asRecord(sensorState?.payloads ?? null);
-      const generalSnapshot = asRecord(asRecord(payloads?.general)?.snapshot);
-      const datum = asRecord(generalSnapshot?.datum);
-      const rtkSource = asRecord(generalSnapshot?.rtk_source_state);
-      const telemetrySnapshot = telemetryService?.getSnapshot();
-
-      setShellTelemetryState({
-        alerts: Array.isArray(telemetrySnapshot?.alerts) ? telemetrySnapshot.alerts.length : 0,
-        recentEvents: Array.isArray(telemetrySnapshot?.recentEvents) ? telemetrySnapshot.recentEvents.length : 0,
-        datumSet: datum?.already_set === true,
-        rtkConnected: rtkSource?.connected === true
-      });
-    };
-
-    const unsubscribers: Array<() => void> = [];
-
-    if (connectionService) {
-      setShellConnectionState(connectionService.getState());
-      unsubscribers.push(connectionService.subscribe((state) => setShellConnectionState(state)));
-    } else {
-      setShellConnectionState(null);
-    }
-
-    if (navigationService) {
-      setShellNavigationState(navigationService.getState());
-      unsubscribers.push(navigationService.subscribe((state) => setShellNavigationState(state)));
-    } else {
-      setShellNavigationState(null);
-    }
-
-    publishTelemetry();
-
-    if (sensorInfoService) {
-      unsubscribers.push(
-        sensorInfoService.subscribe(() => {
-          publishTelemetry();
-        })
-      );
-    }
-
-    if (telemetryService) {
-      unsubscribers.push(
-        telemetryService.subscribeTelemetry(() => {
-          publishTelemetry();
-        })
-      );
-    }
-
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [runtime]);
-
-  const shellStatusItems = useMemo<ShellStatusItem[]>(
-    () => [
-      {
-        id: "link",
-        label: "Link",
-        value:
-          shellConnectionState?.connecting ? "Connecting" :
-          shellConnectionState?.connected ? [shellConnectionState.host, shellConnectionState.port].filter(Boolean).join(":") || "Online" :
-          "Disconnected",
-        detail: connectionDetail(shellConnectionState),
-        tone:
-          shellConnectionState?.connecting ? "warn" :
-          shellConnectionState?.connected ? "ok" :
-          "bad"
-      },
-      {
-        id: "route",
-        label: "Route",
-        value: routeStatusLabel(shellNavigationState),
-        detail:
-          shellNavigationState?.controlLocked ?
-            shellNavigationState.controlLockReason || "Operator lock engaged" :
-          shellNavigationState?.cameraStreamConnected ?
-            "Camera feed synchronized" :
-            "No live route activity",
-        tone: routeStatusTone(shellNavigationState)
-      },
-      {
-        id: "camera",
-        label: "Camera",
-        value: shellNavigationState?.cameraStreamConnected ? "Live" : "Idle",
-        detail:
-          shellTelemetryState.datumSet ?
-            shellTelemetryState.rtkConnected ? "Datum set · RTK linked" : "Datum set · RTK idle" :
-            "Datum pending",
-        tone:
-          shellNavigationState?.cameraStreamConnected ? "ok" :
-          shellTelemetryState.datumSet ? "neutral" :
-          "warn"
-      },
-      {
-        id: "alerts",
-        label: "Alerts",
-        value: shellTelemetryState.alerts > 0 ? String(shellTelemetryState.alerts) : "Clear",
-        detail: `${shellTelemetryState.recentEvents} recent events`,
-        tone:
-          shellTelemetryState.alerts > 0 ? "bad" :
-          shellTelemetryState.recentEvents > 0 ? "neutral" :
-          "ok"
-      }
-    ],
-    [shellConnectionState, shellNavigationState, shellTelemetryState]
-  );
 
   useEffect(() => {
     if (!usingVscodeLayout || !isHostBridgeAvailable()) return;
@@ -713,8 +521,8 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   };
 
   const shellBodyColumns = sidebarCollapsed
-    ? `${SIDEBAR_RAIL_WIDTH}px minmax(0, 1fr)`
-    : `${SIDEBAR_RAIL_WIDTH}px ${sidebarWidth}px ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
+    ? `var(--sidebar-rail-width, ${SIDEBAR_RAIL_WIDTH}px) minmax(0, 1fr)`
+    : `var(--sidebar-rail-width, ${SIDEBAR_RAIL_WIDTH}px) ${sidebarWidth}px ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
   const shellColumns = usingVscodeLayout ? "minmax(0, 1fr)" : shellBodyColumns;
   const presentedWorkspaceId = focusedWorkspaceId ?? activeWorkspaceId;
   const workspaceFocused = focusedWorkspaceId !== null;
@@ -723,7 +531,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
     <div className="shell">
       <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
-      <ToolbarMenu runtime={runtime} menus={toolbarMenus} statusItems={shellStatusItems} />
+      <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
       <div
         className="shell-body"
         style={{

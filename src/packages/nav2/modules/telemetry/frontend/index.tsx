@@ -1,3 +1,4 @@
+import { NavigationCommands } from "../../navigation/commands";
 import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
@@ -815,9 +816,12 @@ export function createTelemetryModule(): CockpitModule {
       ctx.contributions.register({
         id: "sidebar.telemetry",
         slot: "sidebar",
-        label: "Telemetry",
+        label: "Estado del robot",
         icon: "📡",
-        render: () => <TelemetrySidebarPanel runtime={ctx} />
+        render: () => <div className="stack">
+          <button type="button" className="button-secondary" onClick={() => void ctx.commands.execute(NavigationCommands.openRtkModal)}>GPS y precisión · Consultar RTK</button>
+          <TelemetrySidebarPanel runtime={ctx} />
+        </div>
       });
 
       ctx.contributions.register({
