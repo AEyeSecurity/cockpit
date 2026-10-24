@@ -37,3 +37,13 @@ Integración aprobada por el operador el 2026-10-24 junto con la biblioteca de
 rutas compartidas y su ajuste visual. La interfaz de Grabaciones sigue indicando
 explícitamente que su backend no está conectado; no se presenta como funcional.
 Se conserva el soporte Docker Compose incorporado posteriormente en `main`.
+
+
+Actualización 2026-10-24: Grabaciones integra recordings_status/list/start/stop
+por el WebSocket existente y descarga MP4 por enlaces HTTP firmados temporales.
+Inicio/parada manual requiere tomar el control existente en Operación. La parada
+manual no cancela captura por misión. La biblioteca distingue error de servicio y
+lista vacía; las URLs se renuevan antes de descargar. La fecha es local y las
+consultas incluyen zona horaria. Videos de hasta diez minutos por entrada.
+La captura automática y los 30 segundos posteriores pertenecen al backend y no
+requieren que Cockpit permanezca abierto.
