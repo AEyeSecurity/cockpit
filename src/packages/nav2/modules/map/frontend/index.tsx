@@ -1750,17 +1750,6 @@ function LeafletMapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !robotPose) return;
-    const centerRequested = centerRequestKey > 0 && centerRequestHandledRef.current !== centerRequestKey;
-    if (centerRequested) centerRequestHandledRef.current = centerRequestKey;
-    if (!centerRequested && !followRobot) return;
-    const target = L.latLng(robotPose.lat, robotPose.lon);
-    if (!centerRequested && map.distance(map.getCenter(), target) < 0.1) return;
-    map.setView(target, centerRequested ? Math.max(map.getZoom(), 17) : map.getZoom(), { animate: false });
-  }, [centerRequestKey, followRobot, robotPose]);
-
-  useEffect(() => {
-    const map = mapRef.current;
     if (!map || !interactive) return;
     map.on("dragstart", onStopFollowingRobot);
     return () => { map.off("dragstart", onStopFollowingRobot); };
@@ -1771,6 +1760,19 @@ function LeafletMapCanvas({
     if (!map) return;
     map.setView([initialCenterLat, initialCenterLon], initialZoom);
   }, [initialCenterLat, initialCenterLon, initialZoom]);
+
+  // Tracking takes precedence over the initial/default view and map-origin updates.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !robotPose) return;
+    const centerRequested = centerRequestKey > 0 && centerRequestHandledRef.current !== centerRequestKey;
+    if (centerRequested) centerRequestHandledRef.current = centerRequestKey;
+    if (!centerRequested && !followRobot) return;
+    const target = L.latLng(robotPose.lat, robotPose.lon);
+    if (!centerRequested && map.distance(map.getCenter(), target) < 0.1) return;
+    map.setView(target, centerRequested ? Math.max(map.getZoom(), 17) : map.getZoom(), { animate: false });
+  }, [centerRequestKey, followRobot, robotPose, interactive, initialCenterLat, initialCenterLon, initialZoom,
+    state.map?.mapId, state.map?.originLat, state.map?.originLon]);
 
   useEffect(() => {
     if (state.toolMode !== "idle") {
@@ -3237,7 +3239,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                 robotPose={telemetrySnapshot?.robotPose ?? null}
                 datumPose={datumPose}
                 centerRequestKey={centerRequestKey}
-                followRobot={followRobot}
+                followRobot={true}
                 onStopFollowingRobot={() => setFollowRobot(false)}
                 onQueueWaypoint={queueWaypointFromMap}
                 onToggleWaypointSelection={toggleWaypointSelectionFromMap}
