@@ -1139,7 +1139,8 @@ function LeafletMapCanvas({
       {
         maxZoom: 26,
         maxNativeZoom: 19,
-        detectRetina: true,
+        // Retina adds a URL zoom offset beyond maxNativeZoom; upscale level 19 instead.
+        detectRetina: false,
         attribution: "Tiles © Esri"
       }
     ).addTo(map);
