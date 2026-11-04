@@ -26,6 +26,9 @@ interface Nav2CameraConfig {
   camera_transport?: unknown;
   camera_mjpeg_url?: unknown;
   camera_webrtc_url?: unknown;
+  camera_normal_webrtc_url?: unknown;
+  camera_mobile_normal_webrtc_url?: unknown;
+  camera_reverse_normal_webrtc_url?: unknown;
   camera_webrtc_receive_audio?: unknown;
   camera_ptz_rotation_deg?: unknown;
   camera_probe_timeout_ms?: unknown;
@@ -52,17 +55,29 @@ function readNav2CameraConfig(runtime: ModuleContext): Nav2CameraConfig {
   return runtime.getPackageConfig<Record<string, unknown>>("nav2") as Nav2CameraConfig;
 }
 
-export function readCameraStreamConfig(runtime: ModuleContext): CameraStreamRuntimeConfig {
+export type CameraStreamQuality = "saving" | "normal";
+
+export function supportsNormalCameraQuality(runtime: ModuleContext): boolean {
   const config = readNav2CameraConfig(runtime);
+  return normalizeTransport(config.camera_transport) === "webrtc"
+    && Boolean(normalizeUrl(config.camera_webrtc_url))
+    && Boolean(normalizeUrl(config.camera_normal_webrtc_url))
+    && (!normalizeUrl(config.camera_mobile_webrtc_url) || Boolean(normalizeUrl(config.camera_mobile_normal_webrtc_url)))
+    && (!normalizeUrl(config.camera_reverse_webrtc_url) || Boolean(normalizeUrl(config.camera_reverse_normal_webrtc_url)));
+}
+
+export function readCameraStreamConfig(runtime: ModuleContext, quality: CameraStreamQuality = "saving"): CameraStreamRuntimeConfig {
+  const config = readNav2CameraConfig(runtime);
+  const normal = quality === "normal" && supportsNormalCameraQuality(runtime);
   return {
-    mobileWebrtcUrl: normalizeUrl(config.camera_mobile_webrtc_url),
-    reverseWebrtcUrl: normalizeUrl(config.camera_reverse_webrtc_url),
+    mobileWebrtcUrl: normalizeUrl(config.camera_mobile_webrtc_url) ? normalizeUrl(normal ? config.camera_mobile_normal_webrtc_url : config.camera_mobile_webrtc_url) : "",
+    reverseWebrtcUrl: normalizeUrl(config.camera_reverse_webrtc_url) ? normalizeUrl(normal ? config.camera_reverse_normal_webrtc_url : config.camera_reverse_webrtc_url) : "",
     ptzEnabled: config.camera_ptz_enabled !== false,
     ptzPanInverted: config.camera_ptz_pan_inverted === true,
     ptzZoomEnabled: config.camera_ptz_zoom_enabled !== false,
     transport: normalizeTransport(config.camera_transport),
     mjpegUrl: normalizeUrl(config.camera_mjpeg_url) || DEFAULT_CAMERA_MJPEG_URL,
-    webrtcUrl: normalizeUrl(config.camera_webrtc_url),
+    webrtcUrl: normalizeUrl(normal ? config.camera_normal_webrtc_url : config.camera_webrtc_url),
     webrtcReceiveAudio: config.camera_webrtc_receive_audio === true,
     ptzRotationDeg: Number(config.camera_ptz_rotation_deg) === 180 ? 180 : 0,
     probeTimeoutMs: parsePositiveInt(config.camera_probe_timeout_ms, Number(runtime.env.cameraProbeTimeoutMs ?? 3000), 500),

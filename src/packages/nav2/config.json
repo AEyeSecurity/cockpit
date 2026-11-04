@@ -25,7 +25,10 @@
     "camera_reverse_webrtc_url": "http://100.66.15.45:8889/cam5/whep",
     "camera_ptz_enabled": true,
     "camera_ptz_zoom_enabled": false,
-    "camera_webrtc_receive_audio": false
+    "camera_webrtc_receive_audio": false,
+    "camera_normal_webrtc_url": "http://100.66.15.45:8889/cam3_normal/whep",
+    "camera_mobile_normal_webrtc_url": "http://100.66.15.45:8889/cam4_normal/whep",
+    "camera_reverse_normal_webrtc_url": "http://100.66.15.45:8889/cam5_normal/whep"
   },
   "settings": {
     "title": "Nav2",
@@ -159,6 +162,24 @@
         "key": "camera_webrtc_receive_audio",
         "label": "Recibir audio de la cámara frontal (puede aumentar la demora)",
         "type": "boolean"
+      },
+      {
+        "key": "camera_normal_webrtc_url",
+        "label": "Frontal: WebRTC de calidad normal",
+        "type": "string",
+        "placeholder": "http://robot:8889/cam3_normal/whep"
+      },
+      {
+        "key": "camera_mobile_normal_webrtc_url",
+        "label": "Móvil: WebRTC de calidad normal",
+        "type": "string",
+        "placeholder": "http://robot:8889/cam4_normal/whep"
+      },
+      {
+        "key": "camera_reverse_normal_webrtc_url",
+        "label": "Trasera: WebRTC de calidad normal",
+        "type": "string",
+        "placeholder": "http://robot:8889/cam5_normal/whep"
       }
     ]
   }

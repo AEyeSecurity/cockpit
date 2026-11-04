@@ -1,10 +1,11 @@
+import { CameraQualityButton } from "./CameraQualityButton";
+import { useCameraStreamConfig } from "../../../shared/cameraStreamQuality";
 import { ShellCommands } from "../../../../../app/shellCommands";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./styles.css";
 import { SecondaryCameraTile } from "./SecondaryCameraTile";
 import { CameraAuxControls } from "./CameraAuxControls";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
-import { CORE_EVENTS } from "../../../../../core/events/topics";
 import { CameraDispatcher } from "../dispatcher/impl/CameraDispatcher";
 import {
   CameraVisionService,
@@ -18,7 +19,7 @@ import {
   type NavigationState
 } from "../../navigation/service/impl/NavigationService";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
-import { isCameraFeedConfigured, orientCameraPtzDelta, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
+import { isCameraFeedConfigured, orientCameraPtzDelta } from "../../../shared/cameraStreamConfig";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.camera";
@@ -409,7 +410,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
     connectionService = null;
   }
   const [state, setState] = useState<CameraVisionState>(service.getState());
-  const [cameraConfig, setCameraConfig] = useState(() => readCameraStreamConfig(runtime));
+  const { config: cameraConfig } = useCameraStreamConfig(runtime);
   const [mobileStartRequest, setMobileStartRequest] = useState(0);
   const [videoRequested, setVideoRequested] = useState(false);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(navigationService?.getState() ?? null);
@@ -437,12 +438,6 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
   const [detectionsExpanded, setDetectionsExpanded] = useState<boolean>(true);
 
   useEffect(() => service.subscribe((next) => setState(next)), [service]);
-  useEffect(() => {
-    return runtime.eventBus.on<{ packageId?: unknown }>(CORE_EVENTS.packageConfigUpdated, (payload) => {
-      if (payload?.packageId !== "nav2") return;
-      setCameraConfig(readCameraStreamConfig(runtime));
-    });
-  }, [runtime]);
   useEffect(() => {
     if (!navigationService) return;
     return navigationService.subscribe((next) => setNavigationState(next));
@@ -1277,6 +1272,7 @@ export function createCameraModule(): CockpitModule {
         render: () => <div className="stack support-sidebar">
           <div className="panel-card"><h3>Cámara</h3><p className="muted">Video en vivo, orientación y zoom de la cámara del robot.</p></div>
           <button type="button" className="button-primary" onClick={() => void ctx.commands.execute(ShellCommands.openWorkspace, "workspace.camera")}>Ver cámara y controles PTZ</button>
+          <CameraQualityButton runtime={ctx} />
         </div>
       });
 
