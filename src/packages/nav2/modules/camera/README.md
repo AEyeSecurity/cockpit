@@ -86,9 +86,11 @@ reader (mocks sin red) cubre false/true/omitido.
 
 ## Calidad de transmisión
 
-El botón debajo de «Ver cámara y controles PTZ» alterna Ahorro de datos y Calidad
-normal para las tres cámaras y la vista del mapa. La preferencia se guarda en
-este navegador; el primer uso es Ahorro. No requiere tomar control ni cambia
+El interruptor de dos posiciones debajo de «Ver cámara y controles PTZ» permite
+elegir Ahorro de datos o Transmisión normal, con ambas opciones siempre visibles
+y la posición activa resaltada. Se puede usar con Tab y flechas del teclado;
+cada posición selecciona explícitamente su modo. El cambio se aplica a las tres
+cámaras y la vista del mapa. La preferencia se guarda en este navegador; el primer uso es Ahorro. No requiere tomar control ni cambia
 encoders, otros operadores o grabaciones. Una cámara pausada sigue pausada.
 
 Las URLs existentes son Ahorro. Configurar además `camera_normal_webrtc_url`,

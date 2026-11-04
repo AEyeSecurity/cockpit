@@ -45,7 +45,7 @@ describe("camera quality selection", () => {
     expect(supportsNormalCameraQuality(ctx)).toBe(false);
     expect(readCameraStreamConfig(ctx, "normal").webrtcUrl).toBe("front-saving");
     render(<CameraQualityButton runtime={ctx} />);
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("radio", { name: "Transmisión normal" }) as HTMLInputElement).disabled).toBe(true);
   });
   it("does not require normal URLs for unconfigured secondary cameras", () => {
     expect(supportsNormalCameraQuality(runtime({ camera_reverse_webrtc_url: "", camera_reverse_normal_webrtc_url: "" }).ctx)).toBe(true);
@@ -53,14 +53,17 @@ describe("camera quality selection", () => {
   it("synchronizes mounted views, persists preference and restores it on remount", () => {
     const { ctx } = runtime();
     const view = render(<><CameraQualityButton runtime={ctx} /><Feed ctx={ctx} name="map" /><Feed ctx={ctx} name="workspace" /></>);
-    fireEvent.click(screen.getByRole("button", { name: "Calidad de transmisión" }));
+    expect(screen.getByRole("radiogroup", { name: "Calidad de transmisión" })).toBeTruthy();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect((screen.getByRole("radio", { name: "Ahorro de datos" }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: "Transmisión normal" }));
     expect(screen.getByTestId("map").textContent).toBe("front-normal,mobile-normal,rear-normal");
     expect(screen.getByTestId("workspace").textContent).toBe(screen.getByTestId("map").textContent);
     expect(window.localStorage.getItem("cockpit.camera.streamQuality")).toBe("normal");
     view.unmount();
     render(<CameraQualityButton runtime={ctx} />);
-    expect(screen.getByRole("button").textContent).toBe("Calidad normal");
-    fireEvent.click(screen.getByRole("button"));
+    expect((screen.getByRole("radio", { name: "Transmisión normal" }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: "Ahorro de datos" }));
     expect(window.localStorage.getItem("cockpit.camera.streamQuality")).toBe("saving");
   });
   it("reacts to package configuration changes", () => {
