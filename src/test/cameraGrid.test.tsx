@@ -22,4 +22,14 @@ describe("secondary camera feeds", () => {
     render(<SecondaryCameraTile autoStart title="Reversa" description="Trasera" config={config} url="rear" />);
     expect(screen.getByTestId("feed").textContent).toBe("rear");
   });
+  it("keeps paused feeds paused across quality changes and updates an active feed", () => {
+    const view = render(<SecondaryCameraTile title="Móvil" description="Secundaria" config={config} url="mobile-saving" />);
+    view.rerender(<SecondaryCameraTile title="Móvil" description="Secundaria" config={config} url="mobile-normal" />);
+    expect(screen.queryByTestId("feed")).toBeNull();
+    fireEvent.click(screen.getByText("Ver video"));
+    expect(screen.getByTestId("feed").textContent).toBe("mobile-normal");
+    view.rerender(<SecondaryCameraTile title="Móvil" description="Secundaria" config={config} url="mobile-saving" />);
+    expect(screen.getByTestId("feed").textContent).toBe("mobile-saving");
+  });
+
 });

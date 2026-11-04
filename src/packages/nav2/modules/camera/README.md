@@ -83,3 +83,22 @@ Patch local del reader vendorizado: `receiveAudio` opcional, omite transceiver
 de audio sólo con false; su default mantiene el comportamiento upstream.
 Preservar este cambio al actualizar el vendor. Prueba de negociación real del
 reader (mocks sin red) cubre false/true/omitido.
+
+## Calidad de transmisión
+
+El botón debajo de «Ver cámara y controles PTZ» alterna Ahorro de datos y Calidad
+normal para las tres cámaras y la vista del mapa. La preferencia se guarda en
+este navegador; el primer uso es Ahorro. No requiere tomar control ni cambia
+encoders, otros operadores o grabaciones. Una cámara pausada sigue pausada.
+
+Las URLs existentes son Ahorro. Configurar además `camera_normal_webrtc_url`,
+`camera_mobile_normal_webrtc_url` y `camera_reverse_normal_webrtc_url` para los
+principales H.264 bajo MediaMTX (`cam3_normal/4_normal/5_normal`, sufijo `/whep`).
+Normal queda deshabilitado si falta una URL de alguna cámara configurada o el
+transporte no es WebRTC. Al cambiar se reconectan los lectores activos y sus
+estados muestran conexión o error; se puede volver a Ahorro ante problemas.
+La política actual de audio y las orientaciones PTZ permanecen vigentes.
+
+Las rutas nuevas requieren desplegar primero la configuración del host descrita
+en `salus_robot/deploy/mediamtx/README.md`. El 2026-11-04 el operador autorizó convertir el principal trasero de HEVC a
+H.264; se verificaron los seis feeds por RTSP y WebRTC en Cockpit local.

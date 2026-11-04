@@ -1,3 +1,4 @@
+import { useCameraStreamConfig } from "../../../shared/cameraStreamQuality";
 import { describeRouteBlock } from "../../navigation/blockedRouteStatus";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import L from "leaflet";
@@ -24,7 +25,7 @@ import { getBatteryPresentation } from "./batteryPresentation";
 import { getPatrolPresentation } from "./patrolPresentation";
 import { calculateProtractorAngleDeg, snapToCartesianAxis } from "./protractor";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
-import { isCameraFeedConfigured, readCameraStreamConfig } from "../../../shared/cameraStreamConfig";
+import { isCameraFeedConfigured } from "../../../shared/cameraStreamConfig";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.map";
@@ -2686,7 +2687,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const cameraPaneAvailable = !isSimPreset;
   const mainIsMap = !cameraPaneAvailable || mainPane === "map";
   const showMiniCameraPane = mainIsMap;
-  const cameraConfig = readCameraStreamConfig(runtime);
+  const { config: cameraConfig } = useCameraStreamConfig(runtime);
   const cameraEnabled = connectionState?.preset !== "sim" && isCameraFeedConfigured(cameraConfig);
   const initialCenter = parseCenter(nav2Config);
   const initialCenterLat = initialCenter[0];
