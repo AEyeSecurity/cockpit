@@ -1,11 +1,22 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { ShellCommands } from "../../../../../app/shellCommands";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
-import { PersonWatchService } from "../service/PersonWatchService";
+import { PersonWatchService, type PersonAlert } from "../service/PersonWatchService";
 import "./styles.css";
 
 const labels: Record<string, string> = { watching: "Vigilando", starting: "Iniciando", unavailable: "Sin imagen reciente", resource_paused: "En pausa por recursos" };
+function AlertSnapshot({ alert }: { alert: PersonAlert }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!alert.image_url) return <small>Este aviso no tiene captura.</small>;
+  return <div className="pw-evidence">
+    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Ocultar captura" : "Ver captura"}</button>
+    {open && (failed ? <p role="status">La captura ya no está disponible.</p> :
+      <a href={alert.image_url} target="_blank" rel="noreferrer"><img src={alert.image_url}
+        alt={`Persona detectada en ${alert.label}, con recuadros y confianza`} onError={() => setFailed(true)} /></a>)}
+  </div>;
+}
 export function PersonWatchPanel({ service }: { service: PersonWatchService }): JSX.Element {
   const state = useSyncExternalStore(service.subscribe, service.getSnapshot);
   return <section className="pw-panel">
@@ -17,9 +28,11 @@ export function PersonWatchPanel({ service }: { service: PersonWatchService }): 
       <strong>{c.status === "watching" ? `${c.detections.length} personas en la última muestra` : "Detección no disponible"}</strong>
     </article>)}</div>
     <h3>Avisos recientes</h3>
+    <p className="muted">Hasta 50 avisos con captura. Se borran al reiniciar el detector.</p>
     {state.alerts.length === 0 ? <p className="muted">Todavía no hay avisos confirmados.</p> :
       <ul className="pw-history">{[...state.alerts].reverse().map(a => <li key={a.id}>
         <strong>Persona detectada · {a.label}</strong><span>{new Date(a.timestamp_ms).toLocaleString()} · {a.count} {a.count === 1 ? "persona" : "personas"}</span>
+        <AlertSnapshot alert={a} />
       </li>)}</ul>}
     <p className="muted">Los avisos ayudan a supervisar; no ordenan frenar ni cambian la navegación. Pueden omitir personas pequeñas, lejanas u ocultas.</p>
   </section>;

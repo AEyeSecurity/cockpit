@@ -11,3 +11,6 @@
 .pw-camera p { display: inline-block; margin: 0 0 12px; padding: 4px 9px; border-radius: 20px; background: #fff3d6; color: #805300; font-size: 13px; }
 .pw-camera[data-status="watching"] p { background: #dff4eb; color: #176341; }
 .pw-camera strong { display: block; font-size: 14px; font-weight: 500; }
+
+.pw-evidence button { padding: 6px 12px; border: 1px solid #bed1e4; background: #f1f7ff; color: #203751; border-radius: 6px; cursor: pointer; }
+.pw-evidence img { display: block; max-width: 100%; width: 640px; height: auto; border-radius: 8px; margin-top: 10px; }

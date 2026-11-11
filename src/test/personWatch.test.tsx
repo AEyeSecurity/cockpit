@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseWatchState, PersonWatchService } from "../packages/nav2/modules/person-watch/service/PersonWatchService";
 import { PersonWatchPanel } from "../packages/nav2/modules/person-watch/frontend";
@@ -34,4 +34,18 @@ describe("person watch", () => {
     expect(screen.getByText("Persona detectada · Frontal")).toBeInTheDocument();
     expect(screen.getAllByText("Vigilando")).toHaveLength(3);
   });
+  it("loads evidence only on request and rejects a server-provided image URL", async () => {
+    const id = "a0292a23-4ccc-4c04-8b73-0123456789ab";
+    const data = { ...payload(), alerts: [{ ...payload().alerts[0], id, image_available: true, image_url: "https://untrusted.test/photo" }] };
+    const parsed = parseWatchState(data, 10000, "http://private:8791/v1/state");
+    expect(parsed.alerts[0].image_url).toBe(`http://private:8791/v1/alerts/${id}.jpg`);
+    const service = new PersonWatchService(() => "http://private:8791/v1/state", vi.fn().mockResolvedValue({ ok: true, json: async () => data }));
+    await act(async () => { render(<PersonWatchPanel service={service} />); });
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ver captura" }));
+    expect(screen.getByRole("img")).toHaveAttribute("src", `http://private:8791/v1/alerts/${id}.jpg`);
+    fireEvent.error(screen.getByRole("img"));
+    expect(screen.getByRole("status")).toHaveTextContent("La captura ya no está disponible");
+  });
+
 });

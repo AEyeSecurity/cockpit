@@ -15,7 +15,11 @@ New confirmed detections appear in the footer for 15 seconds and in a bounded
 camera/time-labelled history. Confirmation and 30-second per-camera cooldown
 belong to the detector, not the browser. Reloading Cockpit does not cause a new
 backend alert. The server's in-memory history resets on detector restart.
-No external notifications, identity recognition, snapshots or extra video readers
+Each new alert can open its annotated JPEG on demand. Image URLs are derived
+from the configured detector endpoint and a valid alert UUID; server-supplied
+URLs are ignored. Missing/evicted images show an explicit unavailable message.
+The last 50 snapshots live in detector memory and disappear on its restart.
+No external notifications, identity recognition or extra video readers
 are created by this module. The detector itself consumes all three local saving
 streams even when a live view is paused or in Normal quality.
 

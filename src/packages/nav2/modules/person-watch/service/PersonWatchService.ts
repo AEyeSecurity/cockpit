@@ -1,5 +1,5 @@
 export interface PersonAlert {
-  id: string; camera_id: string; label: string; timestamp_ms: number; count: number; confidence: number;
+  id: string; camera_id: string; label: string; timestamp_ms: number; count: number; confidence: number; image_available?: boolean; image_url?: string;
 }
 export interface PersonCamera {
   id: string; label: string; status: string; sample_ms: number; detections: unknown[]; inference_ms: number;
@@ -9,7 +9,7 @@ export interface WatchState {
 }
 const empty: WatchState = { available: false, cameras: [], alerts: [], error: "Conectando detector…" };
 const cameraIds = new Set(["cam3", "cam4", "cam5"]);
-export function parseWatchState(value: unknown, now = Date.now()): WatchState {
+export function parseWatchState(value: unknown, now = Date.now(), endpoint = ""): WatchState {
   const v = value as Record<string, unknown> | null;
   if (!v || v.schema !== 1 || !Array.isArray(v.cameras) || !Array.isArray(v.alerts)
     || typeof v.server_ms !== "number" || !Number.isFinite(v.server_ms)) throw new Error("Respuesta de detector inválida");
@@ -24,7 +24,9 @@ export function parseWatchState(value: unknown, now = Date.now()): WatchState {
   const alerts = v.alerts.filter((a: PersonAlert) => a && typeof a.id === "string" && cameraIds.has(a.camera_id)
     && typeof a.label === "string" && typeof a.timestamp_ms === "number" && Number.isFinite(a.timestamp_ms)
     && Number.isInteger(a.count) && a.count > 0 && Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1)
-    .slice(-50).map((a: PersonAlert) => ({ ...a, timestamp_ms: now - (serverNow-a.timestamp_ms) }));
+    .slice(-50).map((a: PersonAlert) => ({ ...a, timestamp_ms: now - (serverNow-a.timestamp_ms),
+      image_url: a.image_available === true && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(a.id) && endpoint
+        ? new URL(`./alerts/${a.id}.jpg`, endpoint).href : undefined }));
   return { available: true, cameras, alerts, error: "" };
 }
 
@@ -56,7 +58,7 @@ export class PersonWatchService {
       if (!endpoint) throw new Error("Detector no configurado para esta conexión");
       const response = await this.fetchFn(endpoint, { signal: controller.signal, cache: "no-store", credentials: "omit" });
       if (!response.ok) throw new Error("Detector no disponible");
-      const next = parseWatchState(await response.json());
+      const next = parseWatchState(await response.json(), Date.now(), endpoint);
       if (generation === this.generation) this.emit(next);
     } catch {
       if (generation === this.generation) this.emit({ ...this.state, available: false,
