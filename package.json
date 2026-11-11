@@ -154,7 +154,7 @@
     "tauri:build": "tauri build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:auth": "node --test server/test/identity.integration.mjs",
+    "test:auth": "node --test server/test/identity.integration.mjs server/test/roverControl.test.mjs",
     "test:watch": "vitest",
     "test:extension": "npm run build:webview && npm run build:extension && node ./scripts/run-vscode-tests.mjs",
     "test:all": "npm run test && npm run test:extension",
