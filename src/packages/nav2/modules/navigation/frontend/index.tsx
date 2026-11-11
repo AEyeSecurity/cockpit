@@ -790,8 +790,8 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <option value="sim">Sim</option>
           </select>
           <div className="input-grid">
-            <input value={state.host} onChange={(event) => service.setHost(event.target.value)} placeholder="Host" />
-            <input value={state.port} onChange={(event) => service.setPort(event.target.value)} placeholder="Port" />
+            <input readOnly={runtime.env.managed} value={state.host} onChange={(event) => service.setHost(event.target.value)} placeholder="Host" />
+            <input readOnly={runtime.env.managed} value={state.port} onChange={(event) => service.setPort(event.target.value)} placeholder="Port" />
           </div>
           <div className="action-grid">
             <button
@@ -986,11 +986,13 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         <div className="input-grid">
           <input
             value={connState.host}
+            readOnly={runtime.env.managed}
             onChange={(event) => connService.setHost(event.target.value)}
             placeholder="Dirección del robot"
           />
           <input
             value={connState.port}
+            readOnly={runtime.env.managed}
             onChange={(event) => connService.setPort(event.target.value)}
             placeholder="Puerto"
           />

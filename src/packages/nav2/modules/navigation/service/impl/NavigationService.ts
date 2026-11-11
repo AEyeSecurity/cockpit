@@ -1,3 +1,4 @@
+import { accountStorage } from "../../../../../../core/config/accountStorage";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 import { shouldPreserveRouteMissionSnapshot } from "../../routeMissionActivity";
@@ -304,7 +305,7 @@ function getStorageAdapter(): {
     typeof window.localStorage.getItem === "function" &&
     typeof window.localStorage.setItem === "function"
   ) {
-    return window.localStorage;
+    return accountStorage();
   }
   return {
     getItem: (key: string) => (navigationMemoryStorage.has(key) ? navigationMemoryStorage.get(key)! : null),

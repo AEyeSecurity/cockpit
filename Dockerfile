@@ -11,7 +11,7 @@ COPY .env.example .env
 RUN npm run build
 
 FROM build AS test
-CMD ["npm", "run", "test"]
+CMD ["sh", "-c", "npm run test && npm run test:auth"]
 
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev
@@ -26,6 +26,24 @@ ENV PTY_HOST=0.0.0.0 PTY_CWD=/home/node SHELL=/bin/bash
 USER node
 EXPOSE 7681
 CMD ["node", "pty-server.js"]
+
+FROM build AS build-pilot
+RUN VITE_COCKPIT_AUTH=required npm run build
+
+FROM nginx:stable-alpine AS web-pilot
+COPY docker/nginx.pilot.conf /etc/nginx/conf.d/default.conf
+COPY --from=build-pilot /app/dist /usr/share/nginx/html
+EXPOSE 80
+
+FROM node:24-bookworm-slim AS auth
+WORKDIR /app
+RUN mkdir /data && chown node:node /data
+COPY --from=dependencies /app/node_modules/ws ./node_modules/ws
+COPY server/auth ./server/auth
+ENV NODE_ENV=production
+USER node
+EXPOSE 8080
+CMD ["node", "server/auth/server.mjs"]
 
 FROM nginx:stable-alpine AS web
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf

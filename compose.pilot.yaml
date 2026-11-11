@@ -1,0 +1,51 @@
+services:
+  web:
+    image: ${COCKPIT_PILOT_WEB_IMAGE:?Set the versioned pilot web image}
+    build:
+      context: .
+      target: web-pilot
+      labels:
+        org.opencontainers.image.revision: ${COCKPIT_PILOT_REVISION:?Set the Git revision}
+    ports:
+      - "127.0.0.1:${COCKPIT_PILOT_PORT:-5180}:80"
+    depends_on:
+      auth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  auth:
+    image: ${COCKPIT_PILOT_AUTH_IMAGE:?Set the versioned pilot auth image}
+    build:
+      context: .
+      target: auth
+      labels:
+        org.opencontainers.image.revision: ${COCKPIT_PILOT_REVISION:?Set the Git revision}
+    environment:
+      COCKPIT_ORIGIN: ${COCKPIT_ORIGIN:?Set the public HTTPS origin}
+      COCKPIT_KEYS_FILE: /run/secrets/cockpit_keys
+      COCKPIT_NAVIGATION_URL: ${COCKPIT_NAVIGATION_URL:?Set the private navigation WebSocket}
+      COCKPIT_SIMULATION_URL: ${COCKPIT_SIMULATION_URL:-}
+      COCKPIT_ROSBRIDGE_URL: ${COCKPIT_ROSBRIDGE_URL:-}
+      COCKPIT_DISPATCH_URL: ${COCKPIT_DISPATCH_URL:-}
+      COCKPIT_VISION_URL: ${COCKPIT_VISION_URL:-}
+      COCKPIT_PERSON_URL: ${COCKPIT_PERSON_URL:-}
+      COCKPIT_MJPEG_URL: ${COCKPIT_MJPEG_URL:-}
+      COCKPIT_CAMERA_URL: ${COCKPIT_CAMERA_URL:-}
+      COCKPIT_RECORDINGS_URL: ${COCKPIT_RECORDINGS_URL:-}
+    secrets:
+      - cockpit_keys
+    volumes:
+      - identity-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 4s
+      retries: 5
+    restart: unless-stopped
+
+secrets:
+  cockpit_keys:
+    file: ${COCKPIT_KEYS_PATH:?Set the path to the keyring outside the repository}
+
+volumes:
+  identity-data:

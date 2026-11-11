@@ -1,3 +1,4 @@
+import { accountStorage } from "../../../../../../core/config/accountStorage";
 import type { EnvConfig } from "../../../../../../core/config/envConfig";
 import type { EventBus } from "../../../../../../core/events/eventBus";
 import type { TransportStatus } from "../../../../../core/modules/runtime/transport/base/Transport";
@@ -44,7 +45,7 @@ function getStorageAdapter(): {
     typeof window.localStorage.getItem === "function" &&
     typeof window.localStorage.setItem === "function"
   ) {
-    return window.localStorage;
+    return accountStorage();
   }
   return {
     getItem: () => null,
@@ -104,7 +105,7 @@ export class ConnectionService {
         port: String(presetDefaults?.sim?.port ?? defaults.sim.port)
       }
     };
-    this.presetValues = this.readPresetStorage(mergedDefaults);
+    this.presetValues = env.managed ? defaults : this.readPresetStorage(mergedDefaults);
     this.initialPreset = this.readStoredPreset();
     const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
@@ -159,6 +160,7 @@ export class ConnectionService {
   }
 
   setHost(host: string): void {
+    if (this.env.managed) return;
     this.presetValues[this.state.preset] = {
       ...this.presetValues[this.state.preset],
       host
@@ -173,6 +175,7 @@ export class ConnectionService {
   }
 
   setPort(port: string): void {
+    if (this.env.managed) return;
     this.presetValues[this.state.preset] = {
       ...this.presetValues[this.state.preset],
       port
@@ -204,7 +207,14 @@ export class ConnectionService {
         throw new Error("Port must be an integer between 1 and 65535");
       }
 
-      this.env.wsUrl = buildConnectionWebSocketUrl(host, port, this.clientProfile);
+      if (this.env.managed) {
+        const path = this.state.preset === "real" ? "/operation/navigation" : "/operation/simulation";
+        const url = new URL(path, this.env.wsUrl);
+        if (this.clientProfile) url.searchParams.set("client", this.clientProfile);
+        this.env.wsUrl = url.href;
+      } else {
+        this.env.wsUrl = buildConnectionWebSocketUrl(host, port, this.clientProfile);
+      }
       await this.transportManager.disconnectTransport(this.transportId);
       await this.transportManager.connectTransport(this.transportId, { env: this.env });
       this.state = {

@@ -6,7 +6,7 @@ const status = { manual: false, mission: true, tail_seconds: 0, mission_stale: f
   requested: true, disk_ok: true, cameras: [{ camera: "main", recording: true, error: "" }] };
 function mount(execute: typeof RecordingsDispatcher.prototype.execute) {
   const contributions: any[] = [];
-  createRecordingsModule().register({ dispatchers: { registerDispatcher: vi.fn() },
+  createRecordingsModule().register({ env: { managed: false }, dispatchers: { registerDispatcher: vi.fn() },
     contributions: { register: (value: unknown) => contributions.push(value) } } as never);
   vi.spyOn(RecordingsDispatcher.prototype, "execute").mockImplementation(execute);
   render(contributions.find(c => c.id === "workspace.recordings").render());
