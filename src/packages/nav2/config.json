@@ -28,7 +28,8 @@
     "camera_webrtc_receive_audio": false,
     "camera_normal_webrtc_url": "http://100.66.15.45:8889/cam3_normal/whep",
     "camera_mobile_normal_webrtc_url": "http://100.66.15.45:8889/cam4_normal/whep",
-    "camera_reverse_normal_webrtc_url": "http://100.66.15.45:8889/cam5_normal/whep"
+    "camera_reverse_normal_webrtc_url": "http://100.66.15.45:8889/cam5_normal/whep",
+    "person_watch_url": "http://100.66.15.45:8791/v1/state"
   },
   "settings": {
     "title": "Nav2",
@@ -180,6 +181,11 @@
         "label": "Trasera: WebRTC de calidad normal",
         "type": "string",
         "placeholder": "http://robot:8889/cam5_normal/whep"
+      },
+      {
+        "key": "person_watch_url",
+        "label": "Person detection status URL",
+        "type": "string"
       }
     ]
   }
