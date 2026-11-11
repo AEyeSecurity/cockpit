@@ -885,7 +885,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     telemetryService ? telemetryService.getSnapshot() : null
   );
   const [navigationProfilePending, setNavigationProfilePending] = useState(false);
-  const [routeStartPending, setRouteStartPending] = useState(false);
+  const [routeStartPhase, setRouteStartPhase] = useState<"sending" | "confirming" | null>(null);
+  const routeStartPending = routeStartPhase !== null;
   const [routeStartError, setRouteStartError] = useState("");
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
@@ -925,7 +926,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         ? "Conecta y desbloquea los controles para iniciar."
         : "Patrulla lista.";
   const routeStartDisabled = navState.controlLocked || routeStartPending || patrolProfileConfigured || wps < 2;
-  const patrolStartDisabled = navState.controlLocked || patrolStartPending || !patrolReady;
+  const patrolStartDisabled = navState.controlLocked || routeStartPending || patrolStartPending || !patrolReady;
   const goalModeSelected = navState.goalMode;
   const navigationProfileLocked =
     navState.controlLocked ||
@@ -960,6 +961,26 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
   }, [telemetryService]);
 
+  useEffect(() => {
+    if (missionInProgress) {
+      setRouteStartPhase(null);
+      setRouteStartError("");
+      return;
+    }
+    if (routeStartPhase !== "confirming") return;
+    if (navState.controlLocked) {
+      setRouteStartPhase(null);
+      setRouteStartError("No se confirmó el inicio de la ruta: los controles están bloqueados.");
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setRouteStartPhase(null);
+      setRouteStartError("El robot aceptó el comando, pero no confirmó el inicio de la ruta.");
+    }, 15000);
+    return () => window.clearTimeout(timeout);
+  }, [routeStartPhase, missionInProgress, navState.controlLocked]);
+
   const emitInfo = (text: string): void => {
     runtime.eventBus.emit("console.event", { level: "info", text, timestamp: Date.now() });
   };
@@ -984,17 +1005,17 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       return;
     }
     if (routeStartPending) return;
-    setRouteStartPending(true);
+    setRouteStartPhase("sending");
     setRouteStartError("");
     try {
       const started = await navService.sendRouteMission();
-      emitInfo(`Ruta iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
+      setRouteStartPhase((phase) => phase === "sending" ? "confirming" : phase);
+      emitInfo(`Comando de ruta aceptado (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
     } catch (error) {
       const errorMessage = `No se pudo iniciar la ruta: ${String(error)}`;
+      setRouteStartPhase(null);
       setRouteStartError(errorMessage);
       emitError(errorMessage);
-    } finally {
-      setRouteStartPending(false);
     }
   };
   return (
@@ -1236,9 +1257,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <>
               <div className="nav-sidebar-execution-option">
                 <button type="button" className="ncb-wide send-btn" disabled={routeStartDisabled} onClick={() => void startMission("route")}>
-                  <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR RUTA" meta="Recorrer puntos en orden" />
+                  <ButtonFace icon={<NavGlyph kind="route" />} label={routeStartPending ? "INICIANDO RUTA…" : "INICIAR RUTA"} meta="Recorrer puntos en orden" />
                 </button>
-                <p className="nav-sidebar-execution-hint">{routeStartPending ? "Iniciando…" : routeStartReason}</p>
+                <p className="nav-sidebar-execution-hint">{routeStartPending ? "Esperando confirmación del robot." : routeStartReason}</p>
               </div>
               <div className="nav-sidebar-execution-option">
                 <button type="button" className="ncb-wide send-btn" disabled={patrolStartDisabled} onClick={() => void startMission("patrol")}>
