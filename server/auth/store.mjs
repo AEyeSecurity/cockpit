@@ -54,12 +54,12 @@ export function identity(username, name) {
   return { username, name: name.trim() };
 }
 
-export function provision(db, vault, { username, name, role }, now = Date.now()) {
+export function provision(db, vault, { username, name, role, initialPassword }, now = Date.now()) {
   const id = randomUUID();
-  const password = randomToken();
+  const password = initialPassword ?? randomToken();
   const copy = role === "user" ? vault.seal(password, "password:" + id) : null;
-  db.prepare("INSERT INTO accounts (id,username,name,role,hash,password_copy,setup_until) VALUES (?,?,?,?,?,?,?)")
-    .run(id, username, name, role, passwordHash(password), copy, now + setupWindow);
+  db.prepare("INSERT INTO accounts (id,username,name,role,hash,password_copy,setup_until,must_change) VALUES (?,?,?,?,?,?,?,?)")
+    .run(id, username, name, role, passwordHash(password), copy, initialPassword ? null : now + setupWindow, initialPassword ? 0 : 1);
   return { id, password };
 }
 

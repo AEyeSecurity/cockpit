@@ -35,3 +35,6 @@ export async function api<T>(path: string, method = "GET", body?: unknown, csrf?
 
 export const message = (error: unknown) => error instanceof ApiError
   ? error.message : "No se pudo conectar al servicio de identidad.";
+
+export const localPasswordOnly = import.meta.env.VITE_COCKPIT_LOCAL_PASSWORD_ONLY === "true";
+export const minimumPasswordLength = localPasswordOnly ? 8 : 15;

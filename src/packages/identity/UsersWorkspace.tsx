@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, message, type Account, type Session } from "./api";
+import { api, message, localPasswordOnly, minimumPasswordLength, type Account, type Session } from "./api";
 
 type Action = { kind: "create" } | { kind: "edit" | "reveal" | "reset"; account: Account };
 
@@ -86,6 +86,7 @@ export function UsersWorkspace({ session }: { session: Session }) {
         <h3>{action.kind === "create" ? "Crear cuenta" : "Modificar cuenta"}</h3>
         <label>Usuario<input name="username" pattern="[a-z0-9][a-z0-9._\-]{2,63}" defaultValue={action.kind === "edit" ? action.account.username : ""} required /></label>
         <label>Nombre<input name="name" maxLength={100} defaultValue={action.kind === "edit" ? action.account.name : ""} required /></label>
+        {action.kind === "create" && <label>Clave inicial<input name="initialPassword" type="password" autoComplete="new-password" minLength={minimumPasswordLength} maxLength={256} required /></label>}
         <label>Rol<select name="role" disabled={action.kind === "edit" && action.account.id === session.account.id} defaultValue={action.kind === "edit" ? action.account.role : "user"}>
           <option value="user">Usuario</option><option value="admin">Administrador</option>
         </select></label>
@@ -93,8 +94,8 @@ export function UsersWorkspace({ session }: { session: Session }) {
       </> : <>
         <h3>{action.kind === "reveal" ? "Consultar clave" : "Restablecer clave"} de {action.account.username}</h3>
         <label>Tu clave de administrador<input name="password" type="password" autoComplete="current-password" required /></label>
-        <p>Usá un código nuevo de tu autenticador.</p>
-        <label>Código de seis dígitos<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required /></label>
+        {!localPasswordOnly && <><p>Usá un código nuevo de tu autenticador.</p>
+        <label>Código de seis dígitos<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required /></label></>}
       </>}
       <div><button disabled={busy}>Confirmar</button>{" "}<button type="button" disabled={busy} onClick={() => choose(null)}>Cancelar</button></div>
     </form>}

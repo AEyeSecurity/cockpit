@@ -3,43 +3,43 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: #101820;
-  color: #eaf1f5;
+  background: var(--bg);
+  color: var(--text);
 }
 .identity-card, .identity-users {
-  color: #eaf1f5;
-  background: #16212b;
-  border: 1px solid #334758;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid #d9e4ef;
   border-radius: 10px;
   padding: 22px;
 }
 .identity-card { width: min(100%, 430px); }
-.identity-brand { color: #9adccf; font-weight: 700; }
+.identity-brand { color: #215a9e; font-weight: 700; }
 .identity-card form, .identity-users form { display: grid; gap: 12px; }
 .identity-card label, .identity-users label { display: grid; gap: 5px; }
 .identity-card input, .identity-users input, .identity-users select {
   width: 100%;
-  background: #0e171f;
-  border: 1px solid #496073;
+  background: #f8fbfe;
+  border: 1px solid #cbd9e8;
   border-radius: 5px;
   padding: 9px;
-  color: #f5f8fa;
+  color: var(--text);
 }
 .identity-card button, .identity-users button {
-  background: #215b56;
-  color: #fff;
-  border: 1px solid #548c84;
+  background: #eef4fa;
+  color: var(--text);
+  border: 1px solid #cbd9e8;
   border-radius: 5px;
   padding: 7px 10px;
   cursor: pointer;
 }
-.identity-card .identity-secondary { background: #273845; }
+.identity-card .identity-secondary { background: #f4f7fa; }
 .identity-card button:disabled, .identity-users button:disabled { opacity: .65; cursor: default; }
-.identity-error { color: #ffb1a8; }
-.identity-secret { overflow-wrap: anywhere; font-family: monospace; color: #9adccf; user-select: all; }
+.identity-error { color: #a12626; }
+.identity-secret { overflow-wrap: anywhere; font-family: monospace; color: #215a9e; user-select: all; }
 .identity-users { height: 100%; overflow: auto; }
 .identity-users table { width: 100%; border-collapse: collapse; margin: 14px 0; }
-.identity-users th, .identity-users td { text-align: left; border-bottom: 1px solid #334758; padding: 8px; }
+.identity-users th, .identity-users td { text-align: left; border-bottom: 1px solid #d9e4ef; padding: 8px; }
 .identity-users td button { margin: 2px; }
 .identity-users form { max-width: 420px; margin: 12px 0; }
 .identity-account-button {

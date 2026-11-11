@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, message, type Session } from "./api";
+import { api, ApiError, message, localPasswordOnly, minimumPasswordLength, type Session } from "./api";
 import { setStorageAccount } from "../../core/config/accountStorage";
 import "./identity.css";
 
@@ -68,13 +68,13 @@ export function SessionGate({ initial, unavailable }: { initial: Session | null;
         {!session && <>
           <label>Usuario<input name="username" autoComplete="username" required /></label>
           <label>Clave<input name="password" type="password" autoComplete="current-password" required /></label>
-          <label>Código de administrador <span>(si ya configuraste el segundo factor)</span>
+          {!localPasswordOnly && <label>Código de administrador <span>(si ya configuraste el segundo factor)</span>
             <input name="code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" />
-          </label>
+          </label>}
         </>}
         {session?.stage === "password" && <>
           <label>Clave actual<input name="currentPassword" type="password" autoComplete="current-password" required /></label>
-          <label>Nueva clave<input name="password" type="password" autoComplete="new-password" minLength={15} maxLength={256} required /></label>
+          <label>Nueva clave<input name="password" type="password" autoComplete="new-password" minLength={minimumPasswordLength} maxLength={256} required /></label>
         </>}
         {session?.stage === "totp" && <>
           <p>Agregá una cuenta en tu app autenticadora. Elegí código basado en tiempo y usá esta clave de configuración.</p>
@@ -114,8 +114,8 @@ export function SessionActions({ session }: { session: Session }) {
         void update("password", Object.fromEntries(new FormData(event.currentTarget)));
       }}>
         <label>Clave actual<input name="currentPassword" type="password" autoComplete="current-password" required /></label>
-        <label>Nueva clave<input name="password" type="password" autoComplete="new-password" minLength={15} maxLength={256} required /></label>
-        {session.account.role === "admin" && <label>Código de seis dígitos<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required /></label>}
+        <label>Nueva clave<input name="password" type="password" autoComplete="new-password" minLength={minimumPasswordLength} maxLength={256} required /></label>
+        {!localPasswordOnly && session.account.role === "admin" && <label>Código de seis dígitos<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required /></label>}
         <button disabled={busy}>Cambiar clave</button>
         <button className="identity-secondary" type="button" disabled={busy} onClick={() => void update("logout", {})}>Cerrar sesión</button>
         {error && <p role="alert" className="identity-error">{error}</p>}

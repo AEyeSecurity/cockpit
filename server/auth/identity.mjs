@@ -203,9 +203,11 @@ export function createIdentity(db, vault, origin, now = Date.now) {
       if (!profile || !["admin", "user"].includes(body.role)) fail(400, "Perfil inválido.");
       return transaction(db, () => {
         if (byUsername(db, profile.username)) fail(409, "El nombre de usuario ya existe.");
-        const result = provision(db, vault, { ...profile, role: body.role }, now());
+        const initialPassword = body.initialPassword === undefined
+          ? undefined : validatePassword(body.initialPassword, profile.username);
+        const result = provision(db, vault, { ...profile, role: body.role, initialPassword }, now());
         audit(db, actor.id, result.id, "account.create");
-        return { account: publicAccount(byId(db, result.id)), password: result.password };
+        return { account: publicAccount(byId(db, result.id)), password: initialPassword ? undefined : result.password };
       });
     }
     const match = /^\/api\/users\/([a-f\d-]{36})(?:\/(reveal|reset))?$/.exec(path);
