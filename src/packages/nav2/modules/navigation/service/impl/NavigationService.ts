@@ -1,3 +1,4 @@
+import { accountStorage } from "../../../../../../core/config/accountStorage";
 import type { RobotDispatcher } from "../../dispatcher/impl/RobotDispatcher";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 import { shouldPreserveRouteMissionSnapshot } from "../../routeMissionActivity";
@@ -248,6 +249,11 @@ const MANUAL_LOOP_INTERVAL_MS = 50;
 const navigationMemoryStorage = new Map<string, string>();
 let waypointLocalIdCounter = 0;
 
+function operatorLinearSpeed(value: number): number {
+  if (value > 1.65 && value < 1.75) return 1.65;
+  return Math.max(1.2, value);
+}
+
 export interface NavigationManualDefaults {
   linearSpeed: number;
   steeringAngleDeg: number;
@@ -304,7 +310,7 @@ function getStorageAdapter(): {
     typeof window.localStorage.getItem === "function" &&
     typeof window.localStorage.setItem === "function"
   ) {
-    return window.localStorage;
+    return accountStorage();
   }
   return {
     getItem: (key: string) => (navigationMemoryStorage.has(key) ? navigationMemoryStorage.get(key)! : null),
@@ -1219,7 +1225,7 @@ export class NavigationService {
     routeLibrary: { connected: false, busy: false, error: "", conflict: false }
   };
 
-  constructor(private readonly robotDispatcher: RobotDispatcher, manualDefaults?: Partial<NavigationManualDefaults>) {
+  constructor(private readonly robotDispatcher: RobotDispatcher, manualDefaults?: Partial<NavigationManualDefaults>, private readonly operatorUser = false) {
     const linearRange = normalizeRange(
       manualDefaults?.linearMin,
       manualDefaults?.linearMax,
@@ -1252,7 +1258,7 @@ export class NavigationService {
 
     this.state = {
       ...this.state,
-      manualLinearSpeed: safeLinearSpeed,
+      manualLinearSpeed: this.operatorUser ? operatorLinearSpeed(safeLinearSpeed) : safeLinearSpeed,
       manualSteeringAngleDeg: safeSteeringAngleDeg,
       manualLinearMin: this.manualLinearMin,
       manualLinearMax: this.manualLinearMax,
@@ -3256,7 +3262,7 @@ export class NavigationService {
     const clamped = clampInRange(value, this.state.manualLinearSpeed, this.manualLinearMin, this.manualLinearMax);
     this.state = {
       ...this.state,
-      manualLinearSpeed: clamped
+      manualLinearSpeed: this.operatorUser ? operatorLinearSpeed(clamped) : clamped
     };
     this.emit();
   }
@@ -3326,7 +3332,7 @@ export class NavigationService {
     this.manualSteeringAngleMaxDeg = nextSteeringAngleRange.max;
     this.state = {
       ...this.state,
-      manualLinearSpeed: nextLinear,
+      manualLinearSpeed: this.operatorUser ? operatorLinearSpeed(nextLinear) : nextLinear,
       manualSteeringAngleDeg: nextSteeringAngleDeg,
       manualLinearMin: this.manualLinearMin,
       manualLinearMax: this.manualLinearMax,

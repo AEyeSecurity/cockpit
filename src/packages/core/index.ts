@@ -58,7 +58,7 @@ const uiModule: CockpitModule = {
       order: -10,
       render: () => createElement(LogConsoleTab, { runtime: ctx })
     });
-    ctx.contributions.register({
+    if (!ctx.env.managed) ctx.contributions.register({
       id: "console.terminal",
       slot: "console",
       label: "Terminal",

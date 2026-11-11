@@ -21,6 +21,19 @@ function installStorageMock(seed: Record<string, string> = {}): void {
 }
 
 describe("services", () => {
+  it("enforces the standard user speed floor and skips the forbidden interval", () => {
+    const user = new NavigationService({} as never, { linearSpeed: 1.7 }, true);
+    expect(user.getState().manualLinearSpeed).toBe(1.65);
+    user.setManualLinearSpeed(1);
+    expect(user.getState().manualLinearSpeed).toBe(1.2);
+    user.setManualLinearSpeed(1.75);
+    expect(user.getState().manualLinearSpeed).toBe(1.75);
+    user.applyRuntimeDefaults({ linearSpeed: 1.7 });
+    expect(user.getState().manualLinearSpeed).toBe(1.65);
+    const admin = new NavigationService({} as never);
+    admin.setManualLinearSpeed(1.7);
+    expect(admin.getState().manualLinearSpeed).toBe(1.7);
+  });
   it("applies the selected navigation profile before starting a route", async () => {
     const dispatcher = {
       requestNavigationProfile: vi.fn().mockResolvedValue({ op: "ack", ok: true, active_profile: "rural" }),

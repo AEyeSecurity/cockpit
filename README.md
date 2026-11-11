@@ -29,6 +29,8 @@ Inicio rápido: `docker compose up -d --build`, luego abrir http://localhost:517
 - Rust toolchain
 - Dependencias de sistema para Tauri (según tu SO)
 
+Para el piloto web con inicio de sesión y gestión de usuarios, ver [Identidad y acceso operativo del piloto](docs/piloto-identidad.md).
+
 ## Variables de entorno
 
 Copiar y ajustar:

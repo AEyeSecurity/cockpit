@@ -1,3 +1,4 @@
+import { accountStorage } from "../../../../../../core/config/accountStorage";
 import type { MapDispatcher } from "../../dispatcher/impl/MapDispatcher";
 
 export interface MapData {
@@ -67,7 +68,7 @@ function getStorageAdapter(): {
     typeof window.localStorage.getItem === "function" &&
     typeof window.localStorage.setItem === "function"
   ) {
-    return window.localStorage;
+    return accountStorage();
   }
   return {
     getItem: (key: string) => (mapMemoryStorage.has(key) ? mapMemoryStorage.get(key)! : null),
