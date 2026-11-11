@@ -17,8 +17,9 @@ import { getPackageCatalog } from "./packageCatalog";
 import { PackageManager } from "./packageManager";
 import { registerCoreSettingsUi } from "./registerCoreSettingsUi";
 
-export async function bootstrapApp({ managed = false } = {}): Promise<AppRuntime> {
+export async function bootstrapApp({ managed = false, operatorUser = false } = {}): Promise<AppRuntime> {
   const env = managed ? managedEnvConfig() : loadEnvConfig();
+  env.operatorUser = operatorUser;
   const moduleConfig = await loadModuleConfig();
   const container = createContainer();
   const eventBus = createEventBus();

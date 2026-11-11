@@ -1,3 +1,4 @@
+import { SessionActions } from "./SessionGate";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, message, localPasswordOnly, minimumPasswordLength, type Account, type Session } from "./api";
 
@@ -99,6 +100,12 @@ export function UsersWorkspace({ session }: { session: Session }) {
       </>}
       <div><button disabled={busy}>Confirmar</button>{" "}<button type="button" disabled={busy} onClick={() => choose(null)}>Cancelar</button></div>
     </form>}
+    {action?.kind === "edit" && action.account.id === session.account.id && (
+      <details>
+        <summary>Cambiar mi clave</summary>
+        <SessionActions session={session} />
+      </details>
+    )}
     {credential && <section aria-label="Credencial de la cuenta">
       <p>Clave de {credential.username}</p>
       <output className="identity-secret">{credential.password}</output>{" "}

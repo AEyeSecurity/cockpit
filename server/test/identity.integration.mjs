@@ -182,3 +182,26 @@ test("pilot identity, account lifecycle, operational revocation and backup", { t
     db.close();
   }
 });
+
+test("Rover password-only mode accepts eight letters and digits and skips TOTP", async () => {
+  const db = openStore(":memory:");
+  const vault = { seal: (value) => value, unseal: (value) => value };
+  const admin = provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
+  const server = startServer({ db, vault, origin, env: { COCKPIT_PASSWORD_ONLY: "true" } });
+  const base = await listen(server);
+  try {
+    const session = browser(base);
+    assert.equal((await session.call("/api/session/login", "POST", { username: "operator", password: "admin234" })).stage, "ready");
+    const profile = { username: "pilot-user", name: "Pilot User", role: "user" };
+    for (const initialPassword of ["abc1234", "abcdefgh", "12345678"]) {
+      assert.equal((await session.call("/api/users", "POST", { ...profile, initialPassword })).status, 400);
+    }
+    const created = await session.call("/api/users", "POST", { ...profile, initialPassword: "pilot234" });
+    assert.equal(created.status, 200);
+    assert.equal((await session.call("/api/users/" + created.account.id + "/reveal", "POST", { password: "admin234" })).password, "pilot234");
+    assert.equal(db.prepare("SELECT totp FROM accounts WHERE id=?").get(admin.id).totp, null);
+  } finally {
+    await close(server);
+    db.close();
+  }
+});

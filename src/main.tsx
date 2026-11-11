@@ -42,7 +42,7 @@ async function start(): Promise<void> {
     }
     activateSession(session);
   }
-  const runtime = await bootstrapApp({ managed });
+  const runtime = await bootstrapApp({ operatorUser: session?.account.role === "user", managed: managed && import.meta.env.VITE_COCKPIT_KEEP_CONNECTIONS !== "true" });
   if (session) registerIdentity(runtime, session);
   const params = new URLSearchParams(window.location.search);
   const isNavLiveWindow = params.get("view") === "nav-live";

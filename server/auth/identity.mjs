@@ -17,7 +17,7 @@ export class HttpError extends Error {
 const fail = (status, message) => { throw new HttpError(status, message); };
 const denied = () => fail(401, "Credenciales incorrectas o vencidas.");
 const publicAccount = ({ id, username, name, role, status }) => ({ id, username, name, role, status });
-const stage = (account) => account.must_change ? "password" : account.role === "admin" && !account.totp ? "totp" : "ready";
+
 
 function setCookie(res, value, age) {
   res.setHeader("Set-Cookie", cookieName + "=" + value + "; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=" + age);
@@ -28,9 +28,15 @@ function cookie(req) {
   return match ? digest(match[1]) : null;
 }
 
-function validatePassword(value, username) {
+function validatePassword(value, username, passwordOnly) {
   if (typeof value !== "string" || value.length > 256) fail(400, "Clave inválida.");
   const password = value.normalize("NFC");
+  if (passwordOnly) {
+    if ([...password].length < 8 || !/\p{L}/u.test(password) || !/[0-9]/.test(password)) {
+      fail(400, "Usá al menos 8 caracteres, con letras y números.");
+    }
+    return password;
+  }
   if ([...password].length < 15 || [...password].length > 128 ||
       [username, "passwordpassword", "123456789012345", "contraseñacontraseña", "cockpitcockpitcockpit"].includes(password.toLowerCase())) {
     fail(400, "Elegí una clave de 15 a 128 caracteres que no sea común.");
@@ -57,8 +63,12 @@ async function readJson(req) {
   return fail(400, "Solicitud inválida.");
 }
 
-export function createIdentity(db, vault, origin, now = Date.now) {
+export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false } = {}) {
   const attempts = new Map();
+  function stage(account) {
+    if (account.must_change) return "password";
+    return !passwordOnly && account.role === "admin" && !account.totp ? "totp" : "ready";
+  }
 
   function throttle(key, limit) {
     const time = now();
@@ -126,7 +136,7 @@ export function createIdentity(db, vault, origin, now = Date.now) {
       if (!matchesPassword(body.password, account?.hash ?? dummyHash) || account?.status !== "active" ||
           (account.must_change && !(account.setup_until > now()))) denied();
       const result = transaction(db, () => {
-        if (account.totp) useTotp(account, body.code);
+        if (!passwordOnly && account.totp) useTotp(account, body.code);
         const previous = cookie(req);
         if (previous) db.prepare("DELETE FROM sessions WHERE id=?").run(previous);
         if (account.must_change) db.prepare("UPDATE accounts SET setup_until=0 WHERE id=?").run(account.id);
@@ -145,10 +155,10 @@ export function createIdentity(db, vault, origin, now = Date.now) {
     const { account } = session;
     throttle("change:" + account.id, 10);
     if (!matchesPassword(body.currentPassword, account.hash)) denied();
-    const password = validatePassword(body.password, account.username);
+    const password = validatePassword(body.password, account.username, passwordOnly);
     if (matchesPassword(password, account.hash)) fail(400, "Elegí una clave diferente de la actual.");
     return transaction(db, () => {
-      if (account.role === "admin" && account.totp && !account.must_change) useTotp(account, body.code);
+      if (!passwordOnly && account.role === "admin" && account.totp && !account.must_change) useTotp(account, body.code);
       const copy = account.role === "user" ? vault.seal(password, "password:" + account.id) : null;
       db.prepare("UPDATE accounts SET hash=?,password_copy=?,must_change=0,setup_until=NULL WHERE id=?")
         .run(passwordHash(password), copy, account.id);
@@ -204,7 +214,7 @@ export function createIdentity(db, vault, origin, now = Date.now) {
       return transaction(db, () => {
         if (byUsername(db, profile.username)) fail(409, "El nombre de usuario ya existe.");
         const initialPassword = body.initialPassword === undefined
-          ? undefined : validatePassword(body.initialPassword, profile.username);
+          ? undefined : validatePassword(body.initialPassword, profile.username, passwordOnly);
         const result = provision(db, vault, { ...profile, role: body.role, initialPassword }, now());
         audit(db, actor.id, result.id, "account.create");
         return { account: publicAccount(byId(db, result.id)), password: initialPassword ? undefined : result.password };
@@ -224,7 +234,7 @@ export function createIdentity(db, vault, origin, now = Date.now) {
         }
         return transaction(db, () => {
           if (!matchesPassword(body.password, actor.hash)) fail(403, "Reautenticación incorrecta.");
-          useTotp(actor, body.code);
+          if (!passwordOnly) useTotp(actor, body.code);
           const password = action === "reveal"
             ? vault.unseal(target.password_copy, "password:" + target.id)
             : reset(db, vault, target, now());

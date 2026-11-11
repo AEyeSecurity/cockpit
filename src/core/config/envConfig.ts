@@ -1,6 +1,7 @@
 export interface EnvConfig {
   appName: string;
   managed?: boolean;
+  operatorUser?: boolean;
   wsUrl: string;
   wsRealHost?: string;
   wsSimHost?: string;

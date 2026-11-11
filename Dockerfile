@@ -28,10 +28,14 @@ EXPOSE 7681
 CMD ["node", "pty-server.js"]
 
 FROM build AS build-pilot
-RUN VITE_COCKPIT_AUTH=required npm run build
+ARG COCKPIT_PASSWORD_ONLY=false
+ARG COCKPIT_KEEP_CONNECTIONS=false
+RUN VITE_COCKPIT_AUTH=required VITE_COCKPIT_LOCAL_PASSWORD_ONLY=$COCKPIT_PASSWORD_ONLY VITE_COCKPIT_KEEP_CONNECTIONS=$COCKPIT_KEEP_CONNECTIONS npm run build
 
 FROM nginx:stable-alpine AS web-pilot
+ARG COCKPIT_KEEP_CONNECTIONS=false
 COPY docker/nginx.pilot.conf /etc/nginx/conf.d/default.conf
+RUN if [ "$COCKPIT_KEEP_CONNECTIONS" = true ]; then sed -i '/add_header Content-Security-Policy/d' /etc/nginx/conf.d/default.conf; fi
 COPY --from=build-pilot /app/dist /usr/share/nginx/html
 EXPOSE 80
 

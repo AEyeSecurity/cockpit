@@ -106,7 +106,7 @@ export class ConnectionService {
       }
     };
     this.presetValues = env.managed ? defaults : this.readPresetStorage(mergedDefaults);
-    this.initialPreset = this.readStoredPreset();
+    this.initialPreset = env.operatorUser ? "real" : this.readStoredPreset();
     const initialTraffic = this.transportManager.getTrafficStats(this.transportId);
     this.state = {
       preset: this.initialPreset,
@@ -143,6 +143,7 @@ export class ConnectionService {
   }
 
   setPreset(preset: ConnectionPreset): void {
+    if (this.env.operatorUser && preset !== "real") return;
     this.presetValues[this.state.preset] = {
       host: this.state.host,
       port: this.state.port
