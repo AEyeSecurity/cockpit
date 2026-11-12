@@ -9,13 +9,13 @@ import { createSalusLink } from "../auth/salusLink.mjs";
 
 const stopped = { locked: true, stationary: true, missionQuiescent: true };
 
-test("a gateway restart can require new stop evidence before granting control", async () => {
-  const control = createRoverControl({ startFenced: true, stop: async () => stopped });
-  const next = control.open("next", "user");
-  assert.equal(next.phase, "fault");
-  assert.equal(next.occupied, false);
-  assert.equal(control.permits(next.id, "next", "drive"), false);
-  assert.equal((await control.take(next.id, "next", next.revision)).mode, "controller");
+test("the first operator connects to a free Rover without requesting a stop", () => {
+  for (const role of ["admin", "user"]) {
+    const control = createRoverControl({ stop: () => assert.fail("A free Rover needs no handover") });
+    const first = control.open("first", role);
+    assert.equal(first.phase, "owned");
+    assert.equal(first.mode, "controller");
+  }
 });
 
 test("same-account tabs compete and only one takeover succeeds", async () => {
