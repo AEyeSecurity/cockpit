@@ -5,9 +5,9 @@ import { createIdentity, HttpError } from "./identity.mjs";
 import { openVault } from "./crypto.mjs";
 import { openStore } from "./store.mjs";
 
-export function startServer({ db, vault, origin, env = {}, now = Date.now }) {
+export function startServer({ db, vault, origin, env = {}, now = Date.now, control }) {
   const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true" });
-  const gateway = createGateway(identity, env);
+  const gateway = createGateway(identity, env, control);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");

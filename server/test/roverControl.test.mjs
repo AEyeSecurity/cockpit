@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { authorizeNavigationFrame } from "../auth/navigationPolicy.mjs";
 import { createRoverControl } from "../auth/roverControl.mjs";
 
 const stopped = { locked: true, stationary: true, missionQuiescent: true };
@@ -68,4 +69,26 @@ test("preserving the route requires fresh autonomous evidence and does not invok
   assert.equal(stopCalls, 0);
   assert.equal(control.status(first.id, "first").displaced, true);
   assert.equal(control.permits(first.id, "first", "drive"), false);
+});
+
+test("spectator frames allow snapshots and a canonical emergency stop only", () => {
+  const control = createRoverControl({ stop: async () => stopped });
+  const owner = control.open("same-session", "admin");
+  const viewer = control.open("same-session", "admin");
+  control.spectate(viewer.id, "same-session");
+  const filter = (message) => authorizeNavigationFrame(
+    control, viewer.id, "same-session", Buffer.from(JSON.stringify(message)), false
+  );
+  for (const op of ["set_manual_cmd", "set_route_ll", "set_patrol_ll", "save_route", "delete_route", "control_heartbeat"]) {
+    assert.equal(filter({ op }), null);
+  }
+  assert.equal(filter({ op: "set_control_lock", locked: false }), null);
+  assert.equal(filter({ op: "set_control_lock", payload: { locked: true } }), null);
+  assert.deepEqual(JSON.parse(filter({
+    op: "set_control_lock", locked: true, payload: { locked: false }, client_req_id: "stop"
+  })), { op: "set_control_lock", locked: true, client_req_id: "stop" });
+  assert.deepEqual(JSON.parse(filter({ op: "get_nav_snapshot", payload: { op: "set_route_ll" } })), {
+    op: "get_nav_snapshot"
+  });
+  assert.equal(authorizeNavigationFrame(control, owner.id, "same-session", Buffer.from("{}"), true), null);
 });

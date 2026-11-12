@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { pipeline } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { HttpError } from "./identity.mjs";
+import { authorizeNavigationFrame } from "./navigationPolicy.mjs";
 
 const routes = {
   navigation: ["ws", "COCKPIT_NAVIGATION_URL"],
@@ -20,7 +21,7 @@ const requestHeaders = ["accept", "content-type", "content-length", "range", "if
 const responseHeaders = ["content-type", "content-length", "content-range", "accept-ranges", "etag", "link"];
 const safeType = /^(application\/(json|sdp|trickle-ice-sdpfrag|octet-stream)(;|$)|(?:video|audio)\/|image\/(jpeg|png|webp)(;|$)|multipart\/x-mixed-replace(;|$))/i;
 
-export function createGateway(identity, env) {
+export function createGateway(identity, env, control) {
   const upstreams = new Map();
   for (const [name, [protocol, variable]] of Object.entries(routes)) {
     if (!env[variable]) continue;
@@ -34,6 +35,7 @@ export function createGateway(identity, env) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
   const active = new Set();
   const cameraSessions = new Map();
+  const controlSockets = new Set();
 
   function track(session, close) {
     const entry = { session, close };
@@ -59,7 +61,9 @@ export function createGateway(identity, env) {
     }
     const upstream = new URL(base);
     if (suffix) upstream.pathname = base.pathname.replace(/\/$/, "") + suffix;
-    for (const [key, value] of url.searchParams) upstream.searchParams.set(key, value);
+    for (const [key, value] of url.searchParams) {
+      if (key !== "instance") upstream.searchParams.set(key, value);
+    }
     return { upstream, base, name };
   }
 
@@ -79,6 +83,7 @@ export function createGateway(identity, env) {
     http(req, res, url) {
       const session = authorize(req);
       const { upstream, base, name } = target(url, "http");
+      if (control && name === "dispatch") throw new HttpError(403, "Usá el canal de navegación autorizado.");
       const resource = url.pathname + url.search;
       const cameraSession = cameraSessions.get(resource);
       if (name === "camera") {
@@ -164,10 +169,30 @@ export function createGateway(identity, env) {
       try {
         identity.checkOrigin(req);
         const session = authorize(req);
-        const { upstream } = target(url, "ws");
+        const { upstream, name } = target(url, "ws");
+        const instanceId = control ? url.searchParams.get("instance") : null;
+        if (control) {
+          if (name !== "navigation") throw new HttpError(403, "Canal operativo deshabilitado.");
+          if (!instanceId || controlSockets.has(instanceId)) throw new HttpError(403, "Instancia inválida.");
+          try {
+            if (control.status(instanceId, session.id).mode === "waiting") throw new Error("Waiting");
+          } catch {
+            throw new HttpError(403, "Instancia sin acceso al Rover.");
+          }
+        }
         wss.handleUpgrade(req, socket, head, (client) => {
+          if (instanceId) controlSockets.add(instanceId);
           const backend = new WebSocket(upstream, { handshakeTimeout: 8000, maxPayload: 16 * 1024 * 1024, followRedirects: false });
+          let closed = false;
           const close = () => {
+            if (closed) return;
+            closed = true;
+            if (instanceId) {
+              controlSockets.delete(instanceId);
+              Promise.resolve().then(() => control.close(instanceId, session.id)).catch(() => {
+                console.error("Cockpit control session close could not be confirmed");
+              });
+            }
             client.terminate();
             backend.terminate();
           };
@@ -176,15 +201,29 @@ export function createGateway(identity, env) {
           let queuedBytes = 0;
           backend.once("open", () => {
             if (!identity.isLive(session)) return close();
-            for (const [data, binary] of queued) backend.send(data, { binary });
+            for (const [data, binary] of queued) forward(data, binary);
             queued.length = 0;
           });
+          function forward(data, binary) {
+            if (!instanceId) return backend.send(data, { binary });
+            let authorized;
+            try {
+              authorized = authorizeNavigationFrame(control, instanceId, session.id, data, binary);
+            } catch {
+              close();
+              return;
+            }
+            if (authorized !== null) backend.send(authorized);
+          }
           for (const [source, destination] of [[client, backend], [backend, client]]) {
             source.on("error", close);
             source.on("close", () => { untrack(); close(); });
             source.on("message", (data, binary) => {
               if (!identity.isLive(session) || destination.bufferedAmount > 16 * 1024 * 1024) return close();
-              if (destination.readyState === WebSocket.OPEN) destination.send(data, { binary });
+              if (destination.readyState === WebSocket.OPEN) {
+                if (destination === backend) forward(data, binary);
+                else destination.send(data, { binary });
+              }
               else if (destination === backend && destination.readyState === WebSocket.CONNECTING) {
                 queuedBytes += data.length;
                 if (queuedBytes > 1024 * 1024 || queued.length >= 64) return close();
