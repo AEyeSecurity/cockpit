@@ -64,7 +64,7 @@ async function readJson(req) {
   return fail(400, "Solicitud inválida.");
 }
 
-export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control } = {}) {
+export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control, destination } = {}) {
   const attempts = new Map();
   function stage(account) {
     if (account.must_change) return "password";
@@ -313,6 +313,11 @@ export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly
       const session = getSession(req);
       if (!session) fail(401, "Iniciá sesión.");
       if (write && req.headers["x-cockpit-csrf"] !== session.csrf) fail(403, "Solicitud no autorizada.");
+      if (path === "/api/rover/destination" && (method === "GET" || method === "PUT")) {
+        if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
+        if (!destination) fail(404, "Destino del Rover no disponible.");
+        return method === "GET" ? destination.read() : destination.write(body);
+      }
       if (method === "POST" && path.startsWith("/api/rover/control/")) {
         if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
         return handleRoverControl(control, path, session, body, HttpError);

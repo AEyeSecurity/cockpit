@@ -282,7 +282,8 @@ test("running server keeps a single SALUS socket through both handovers", { time
   });
   const server = startServer({ db, vault, origin, env: {
     COCKPIT_PASSWORD_ONLY: "true", COCKPIT_ROVER_CONTROL: "true",
-    COCKPIT_NAVIGATION_URL: "ws://127.0.0.1:" + upstream.address().port
+    COCKPIT_NAVIGATION_URL: "ws://127.0.0.1:1",
+    COCKPIT_NAVIGATION_ALTERNATIVES: "ws://127.0.0.1:" + upstream.address().port
   } });
   const base = await listen(server);
   const path = "/api/rover/control/";
@@ -290,7 +291,13 @@ test("running server keeps a single SALUS socket through both handovers", { time
   try {
     const session = browser(base);
     await session.call("/api/session/login", "POST", { username: "operator", password: "admin234" });
+    const destination = "/api/rover/destination";
+    const selected = { host: "127.0.0.1", port: String(upstream.address().port) };
+    assert.equal((await session.call(destination)).port, "1");
+    assert.equal((await session.call(destination, "PUT", { ...selected, host: "unconfigured.example" })).status, 400);
+    assert.equal((await session.call(destination, "PUT", selected)).port, selected.port);
     const first = await session.call(path + "open", "POST");
+    assert.equal((await session.call(destination, "PUT", { ...selected, port: "1" })).status, 409);
     const firstWs = session.connect("/operation/navigation?instance=" + first.id);
     clients.push(firstWs);
     await once(firstWs, "message");
