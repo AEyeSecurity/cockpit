@@ -1,10 +1,22 @@
 import { applyHandoverBrake } from "../auth/handoverBrake.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { once } from "node:events";
+import { WebSocketServer } from "ws";
 import { authorizeNavigationFrame } from "../auth/navigationPolicy.mjs";
 import { createRoverControl } from "../auth/roverControl.mjs";
+import { createSalusLink } from "../auth/salusLink.mjs";
 
 const stopped = { locked: true, stationary: true, missionQuiescent: true };
+
+test("a gateway restart can require new stop evidence before granting control", async () => {
+  const control = createRoverControl({ startFenced: true, stop: async () => stopped });
+  const next = control.open("next", "user");
+  assert.equal(next.phase, "fault");
+  assert.equal(next.occupied, false);
+  assert.equal(control.permits(next.id, "next", "drive"), false);
+  assert.equal((await control.take(next.id, "next", next.revision)).mode, "controller");
+});
 
 test("same-account tabs compete and only one takeover succeeds", async () => {
   let confirmStop;
@@ -48,8 +60,54 @@ test("unconfirmed stop fences commands after controller expiry", async () => {
   await assert.rejects(control.sweep(() => true), { code: "STOP_UNCONFIRMED" });
   assert.throws(() => control.status(first.id, "first"), { code: "INSTANCE_EXPIRED" });
   assert.equal(control.status(observer.id, "observer").phase, "fault");
+  assert.equal(control.status(observer.id, "observer").occupied, false);
   assert.equal(control.permits(observer.id, "observer", "drive"), false);
   assert.equal(control.permits(observer.id, "observer", "stop"), true);
+});
+
+test("a lost SALUS socket leaves control fenced until a fresh connection confirms the lock", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const link = createSalusLink(`ws://127.0.0.1:${server.address().port}`);
+  const control = createRoverControl({ stop: link.stop });
+  const first = control.open("first", "user");
+  const state = {
+    op: "state", control_locked: true, goal_active: false,
+    route_mission: { active: false }, patrol_mission: { active: false }
+  };
+  try {
+    const connected = once(server, "connection");
+    let reportLoss;
+    const lost = new Promise(resolve => { reportLoss = resolve; });
+    const detach = link.attach(first.id, () => {}, reportLoss);
+    const [socket] = await connected;
+    socket.terminate();
+    await lost;
+    detach();
+
+    server.once("connection", socket => socket.close(1013));
+    await assert.rejects(control.close(first.id, "first"), { code: "SALUS_UNAVAILABLE" });
+    const next = control.open("next", "user");
+    assert.equal(next.mode, "waiting");
+    assert.equal(next.occupied, false);
+    assert.equal(control.permits(next.id, "next", "drive"), false);
+
+    server.once("connection", socket => {
+      socket.on("message", raw => {
+        const request = JSON.parse(raw);
+        assert.equal(request.op, "set_control_lock");
+        assert.equal(request.locked, true);
+        socket.send(JSON.stringify({ op: "ack", ok: true, control_locked: true, requestId: request.requestId }));
+        socket.send(JSON.stringify(state));
+      });
+      setTimeout(() => socket.send(JSON.stringify(state)), 100);
+    });
+    const result = await control.take(next.id, "next", next.revision);
+    assert.equal(result.mode, "controller");
+  } finally {
+    link.close();
+    await new Promise(resolve => server.close(resolve));
+  }
 });
 
 test("preserving the route requires fresh autonomous evidence and does not invoke stop", async () => {

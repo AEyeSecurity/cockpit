@@ -9,11 +9,11 @@ export class ControlConflict extends Error {
 
 // A single coordinator represents one physical Rover. The gateway must supply
 // the authenticated session and role, and keep robot command sockets private.
-export function createRoverControl({ stop, canKeepRoute = () => false, now = Date.now, leaseMs = 8000, stopMs = 5000, record = () => {} }) {
+export function createRoverControl({ stop, canKeepRoute = () => false, startFenced = false, now = Date.now, leaseMs = 8000, stopMs = 5000, record = () => {} }) {
   const instances = new Map();
   let owner = null;
   let revision = 0;
-  let phase = "idle";
+  let phase = startFenced ? "fault" : "idle";
 
   function get(id, sessionId) {
     const entry = instances.get(id);
@@ -78,10 +78,11 @@ export function createRoverControl({ stop, canKeepRoute = () => false, now = Dat
 
   async function release(id, reason) {
     instances.delete(id);
-    if (owner !== id || phase === "stopping") return;
+    if (owner !== id) return;
+    owner = null;
+    if (phase === "stopping") return;
     record("control.released", id);
     await stopAndFence(id, reason);
-    owner = null;
     phase = "idle";
     revision++;
   }

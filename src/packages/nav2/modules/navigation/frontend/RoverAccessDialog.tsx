@@ -6,6 +6,7 @@ interface Access {
   id: string;
   mode: "waiting" | "spectator" | "controller";
   revision: number;
+  phase?: "idle" | "owned" | "stopping" | "fault";
   canTake: boolean;
   canKeepRoute: boolean;
   displaced: boolean;
@@ -70,11 +71,13 @@ function useRoverAccess(service: ConnectionService, csrf?: string) {
   async function join(next: Access) {
     update(next);
     if (next.mode === "waiting" || service.getState().connected) return;
-    service.setPreset("real");
-    await service.connect(next.id);
-    if (!service.getState().connected) {
+    try {
+      service.setPreset("real");
+      await service.connect(next.id);
+    } catch (failure) {
       update(null);
-      await request("close", { instanceId: next.id });
+      await request("close", { instanceId: next.id }).catch(() => {});
+      throw failure;
     }
   }
 
@@ -138,11 +141,15 @@ export function RoverAccessDialog({ control }: { control: RoverAccess }) {
     if (visible && element && !element.open) element.showModal();
   }, [visible]);
   if (!visible) return null;
+  const recovering = waiting && (access.phase === "fault" || access.phase === "stopping");
+  const title = displaced ? "Otro usuario tomó el control del Rover"
+    : recovering ? "Control del Rover en pausa" : "Ya hay un usuario conectado al Rover";
 
   return <dialog ref={dialog} className="nav-rover-access-dialog" aria-labelledby="rover-access-title"
     onCancel={(event) => { event.preventDefault(); }}>
-    <h2 id="rover-access-title">{displaced ? "Otro usuario tomó el control del Rover" : "Ya hay un usuario conectado al Rover"}</h2>
-    {waiting && access.canTake && <p>¿Querés tomar el control?</p>}
+    <h2 id="rover-access-title">{title}</h2>
+    {recovering && <p>Cockpit debe confirmar la detención del Rover antes de habilitar el control.</p>}
+    {waiting && !recovering && access.canTake && <p>¿Querés tomar el control?</p>}
     {error && <p role="alert">{error}</p>}
     <div className="nav-rover-access-actions">
       <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void disconnect()}>

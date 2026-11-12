@@ -193,11 +193,18 @@ export function createGateway(identity, env, control, salus) {
               closeCause = cause;
               client.terminate();
             };
+            const releaseControl = async () => {
+              try { await control.close(instanceId, session.id); } catch { /* The instance may already be gone. */ }
+            };
             const detach = salus.attach(instanceId, (message) => {
               if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
                 client.send(JSON.stringify(message));
               }
-            }, () => terminate("salus_connection_lost"));
+            }, () => {
+              closeCause = "salus_connection_lost";
+              releaseControl();
+              client.close(1013, "Se perdió el enlace entre Cockpit y SALUS.");
+            });
             const untrack = track(session, () => terminate("session_expired_or_revoked"));
             // Browsers answer WebSocket pings even when background JavaScript timers are throttled.
             client.on("pong", () => {
@@ -216,7 +223,7 @@ export function createGateway(identity, env, control, salus) {
               detach();
               untrack();
               controlSockets.delete(instanceId);
-              Promise.resolve().then(() => control.close(instanceId, session.id)).catch(() => {});
+              releaseControl();
             });
             client.on("message", (data, binary) => {
               if (!identity.isLive(session)) return terminate("session_expired_or_revoked");

@@ -46,4 +46,11 @@ describe("Rover control dialogs", () => {
     fireEvent.click(screen.getByRole("button", { name: "Desconectar" }));
     expect(control.disconnect).toHaveBeenCalledOnce();
   });
+
+  it("shows a pending safety confirmation after a SALUS outage", () => {
+    render(<RoverAccessDialog control={fixture({ phase: "fault", canKeepRoute: false })} />);
+    expect(screen.getByRole("heading", { name: "Control del Rover en pausa" })).toBeInTheDocument();
+    expect(screen.queryByText("Ya hay un usuario conectado al Rover")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /mantener la ruta/i })).not.toBeInTheDocument();
+  });
 });

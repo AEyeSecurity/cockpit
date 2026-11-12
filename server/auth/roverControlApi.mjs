@@ -7,6 +7,7 @@ const messages = {
   AUTONOMOUS_ROUTE_UNCONFIRMED: "La misión autónoma ya no está confirmada.",
   STOP_TIMEOUT: "El Rover no confirmó la detención a tiempo.",
   STOP_UNCONFIRMED: "El Rover no confirmó la detención.",
+  SALUS_UNAVAILABLE: "La pasarela no tiene conexión con SALUS. Volvé a intentar cuando se restablezca.",
   RELEASE_CONTROL_FIRST: "Primero liberá el control."
 };
 
@@ -32,7 +33,10 @@ export async function handleRoverControl(control, path, session, body, HttpError
       default: throw new HttpError(404, "Ruta inexistente.");
     }
   } catch (error) {
-    if (error instanceof ControlConflict) throw new HttpError(409, messages[error.code] ?? "El control del Rover no está disponible.");
+    if (error instanceof ControlConflict) {
+      if (path === "/api/rover/control/take") console.warn("Cockpit Rover takeover rejected", { code: error.code });
+      throw new HttpError(409, messages[error.code] ?? "El control del Rover no está disponible.");
+    }
     throw error;
   }
 }
