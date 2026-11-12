@@ -15,7 +15,10 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
       throw new Error("COCKPIT_NAVIGATION_URL must be a WebSocket URL");
     }
     salus = createSalusLink(url);
-    control = createRoverControl({ stop: salus.stop, canKeepRoute: salus.canKeepRoute });
+    control = createRoverControl({
+      stop: salus.stop, canKeepRoute: salus.canKeepRoute,
+      startFenced: env.COCKPIT_ROVER_START_FENCED === "true"
+    });
   }
   const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control });
   const gateway = createGateway(identity, env, control, salus);
