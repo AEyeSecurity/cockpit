@@ -2,6 +2,7 @@ export interface EnvConfig {
   appName: string;
   managed?: boolean;
   operatorUser?: boolean;
+  roverControlCsrf?: string;
   wsUrl: string;
   wsRealHost?: string;
   wsSimHost?: string;

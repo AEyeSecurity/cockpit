@@ -1,3 +1,4 @@
+import { useRoverAccessContext } from "./RoverAccessDialog";
 import { describeRouteBlock } from "../blockedRouteStatus";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
@@ -881,6 +882,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const telemetryService = getTelemetryService(runtime);
   const [navState, setNavState] = useState<NavigationState>(navService.getState());
   const [connState, setConnState] = useState(connService.getState());
+  const roverAccess = useRoverAccessContext();
+  const spectator = roverAccess?.access?.mode === "spectator";
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
@@ -999,8 +1002,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   };
   return (
     <div className="nav-sidebar">
+
       <NavSidebarCollapsibleSection title="CONEXIÓN" className="nav-sidebar-connection-section">
-        {!operatorUser && <select
+        {!operatorUser && !runtime.env.roverControlCsrf && <select
           className="connection-preset-select"
           value={connState.preset}
           onChange={(event) => connService.setPreset(event.target.value === "sim" ? "sim" : "real")}
@@ -1028,10 +1032,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <button
             type="button"
             className={joinClassNames("bt prim-btn", (connState.connected || connState.connecting) && "active")}
-            disabled={connState.connecting || connState.connected}
+            disabled={roverAccess?.busy || connState.connecting || connState.connected}
             onClick={async () => {
               try {
-                await connService.connect();
+                await (roverAccess ? roverAccess.connect() : connService.connect());
               } catch {
                 // error persisted in connState.lastError
               }
@@ -1055,7 +1059,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             disabled={!connState.connected && !connState.connecting}
             onClick={async () => {
               try {
-                await connService.disconnect();
+                await (roverAccess ? roverAccess.disconnect() : connService.disconnect());
               } catch {
                 // error persisted in connState.lastError
               }
@@ -1083,7 +1087,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         <div className={operatorUser ? "nav-connection-status-row" : undefined}>
         <div className={connectionStatusClassName}>
           <span className="status-dot" aria-hidden="true" />
-          <span>{connectionStatusText}</span>
+          <span>{spectator ? "Modo espectador" : connectionStatusText}</span>
         </div>
         {operatorUser && <button type="button" className="bt sec-btn nav-connection-edit" aria-pressed={editingConnection}
           disabled={runtime.env.managed} onClick={() => setEditingConnection(!editingConnection)}>
@@ -1092,16 +1096,20 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
+      {roverAccess?.error && !roverAccess?.access?.displaced && roverAccess?.access?.mode !== "waiting" && <p role="alert">{roverAccess.error}</p>}
+      {spectator && roverAccess?.access?.canTake && <button type="button" className="bt sec-btn" disabled={roverAccess?.busy}
+        onClick={() => void roverAccess.choose("take")}>Tomar control y frenar</button>}
+
       {/* ── 2. CONTROL MANUAL ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection title="CONTROL MANUAL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
-          className={joinClassNames("ncb-wide", "sec-btn", operatorUser ? navState.controlLocked && "nav-emergency-active" : !navState.controlLocked && "active")}
-          aria-pressed={operatorUser ? navState.controlLocked : undefined}
+          className={joinClassNames("ncb-wide", "sec-btn", (operatorUser || spectator) ? navState.controlLocked && "nav-emergency-active" : !navState.controlLocked && "active")}
+          aria-pressed={operatorUser || spectator ? navState.controlLocked : undefined}
           disabled={!connState.connected}
           onClick={async () => {
             try {
-              if (navState.controlLocked) {
+              if (navState.controlLocked && !spectator) {
                 await navService.unlockControls();
                 emitInfo("Controles desbloqueados");
               } else {
@@ -1115,10 +1123,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         >
           <ButtonFace
             icon={<NavGlyph kind="manual" />}
-            label={operatorUser ? "Parada de emergencia" : navState.controlLocked ? "DESBLOQUEAR CONTROLES" : "BLOQUEAR CONTROLES"}
+            label={operatorUser || spectator ? "Parada de emergencia" : navState.controlLocked ? "DESBLOQUEAR CONTROLES" : "BLOQUEAR CONTROLES"}
             meta={navState.controlLocked ? lockReasonText : "Control habilitado"}
           />
         </button>
+        <fieldset className="nav-spectator-controls" disabled={spectator}>
         <button
           type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
@@ -1158,8 +1167,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             onChange={(value) => navService.setManualSteeringAngleDeg(value)}
           />
         </div>
+        </fieldset>
       </NavSidebarCollapsibleSection>
 
+      <fieldset className="nav-spectator-controls" disabled={spectator}>
       <NavSidebarCollapsibleSection
         title="RUTA ACTUAL"
         badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
@@ -1297,6 +1308,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       </NavSidebarCollapsibleSection>
 
       <DatumSidebarSection runtime={runtime} />
+      </fieldset>
     </div>
   );
 }

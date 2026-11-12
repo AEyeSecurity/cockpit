@@ -190,7 +190,7 @@ export class ConnectionService {
     this.emit();
   }
 
-  async connect(): Promise<void> {
+  async connect(instanceId?: string): Promise<void> {
     this.state = {
       ...this.state,
       connecting: true,
@@ -211,6 +211,8 @@ export class ConnectionService {
       if (this.env.managed) {
         const path = this.state.preset === "real" ? "/operation/navigation" : "/operation/simulation";
         const url = new URL(path, this.env.wsUrl);
+        if (this.env.roverControlCsrf && !instanceId) throw new Error("La pestaña debe solicitar acceso al Rover.");
+        if (instanceId) url.searchParams.set("instance", instanceId);
         if (this.clientProfile) url.searchParams.set("client", this.clientProfile);
         this.env.wsUrl = url.href;
       } else {

@@ -32,6 +32,7 @@ export function createRoverControl({ stop, canKeepRoute = () => false, now = Dat
       phase,
       occupied: Boolean(owner),
       canTake: phase !== "stopping" && (currentOwner?.role !== "admin" || entry.role === "admin" || owner === entry.id),
+      canKeepRoute: phase === "owned" && Boolean(owner) && owner !== entry.id && canKeepRoute(owner),
       displaced: entry.displaced
     };
   }

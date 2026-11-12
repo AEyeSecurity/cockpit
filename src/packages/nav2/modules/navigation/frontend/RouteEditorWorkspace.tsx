@@ -4,6 +4,7 @@ import { ShellCommands } from "../../../../../app/shellCommands";
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
 import { NavigationService, type GoalInput, type NavigationState, type PatrolRouteSegment } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
+import { useRoverAccessContext } from "./RoverAccessDialog";
 import "./routeEditor.css";
 
 const NAVIGATION_SERVICE_ID = "service.navigation";
@@ -67,6 +68,7 @@ export function SavedRoutePicker({ state, importing = false, onOpen }: {
 }
 
 export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const roverAccess = useRoverAccessContext();
   const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const dialogs = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const [state, setState] = useState<NavigationState>(navigation.getState());
@@ -233,6 +235,9 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     }];
   }) : [];
 
+  if (roverAccess?.access?.mode === "spectator") {
+    return <main className="route-editor" aria-label="Editor de rutas"><p>El editor está deshabilitado en modo espectador.</p></main>;
+  }
   return (
     <main className="route-editor" aria-label="Editor de rutas">
       <header className="route-editor-header">
