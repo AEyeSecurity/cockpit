@@ -1094,11 +1094,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           {editingConnection ? "Listo" : "Editar"}
         </button>}
         </div>
+        {roverAccess?.error && !roverAccess?.access?.displaced && roverAccess?.access?.mode !== "waiting" && <p role="alert">{roverAccess.error}</p>}
+        {spectator && roverAccess?.access?.canTake && <button type="button" className="bt sec-btn" disabled={roverAccess?.busy}
+          onClick={() => void roverAccess.choose("take")}>Tomar control y frenar</button>}
       </NavSidebarCollapsibleSection>
-
-      {roverAccess?.error && !roverAccess?.access?.displaced && roverAccess?.access?.mode !== "waiting" && <p role="alert">{roverAccess.error}</p>}
-      {spectator && roverAccess?.access?.canTake && <button type="button" className="bt sec-btn" disabled={roverAccess?.busy}
-        onClick={() => void roverAccess.choose("take")}>Tomar control y frenar</button>}
 
       {/* ── 2. CONTROL MANUAL ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection title="CONTROL MANUAL" className="nav-sidebar-control-section nav-sidebar-manual-section">

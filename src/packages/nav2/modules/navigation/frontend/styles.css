@@ -8306,10 +8306,10 @@ pre {
 
 .nav-sidebar > .nav-sidebar-connection-section { order: 1; }
 .nav-sidebar > .nav-sidebar-manual-section { order: 2; }
-.nav-sidebar > .nav-sidebar-route-summary-section { order: 3; }
-.nav-sidebar > .nav-sidebar-automatic-section { order: 4; }
-.nav-sidebar > .nav-sidebar-profile-section { order: 5; }
-.nav-sidebar > .nav-sidebar-datum-section { order: 6; }
+.nav-sidebar > .nav-spectator-controls > .nav-sidebar-route-summary-section { order: 3; }
+.nav-sidebar > .nav-spectator-controls > .nav-sidebar-automatic-section { order: 4; }
+.nav-sidebar > .nav-spectator-controls > .nav-sidebar-profile-section { order: 5; }
+.nav-sidebar > .nav-spectator-controls > .nav-sidebar-datum-section { order: 6; }
 
 #root .nav-sidebar .nav-sidebar-section-content .nav-sidebar-execution .ncb-wide:disabled:not(.active),
 #root .nav-sidebar .nav-sidebar-section-content .nav-sidebar-execution .ncb-wide:disabled:not(.active) * {

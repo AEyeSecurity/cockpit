@@ -8460,6 +8460,11 @@ button:disabled,
 }
 
 .nav-rover-access-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-height: 90vh;
+  overflow: auto;
   max-width: min(90vw, 480px);
   padding: 22px;
   border: 1px solid #cbd9e8;
