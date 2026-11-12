@@ -175,5 +175,12 @@
 
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      setTimeout(() => {
+        const intro = document.getElementById('cockpit-intro');
+        intro.classList.add('done');
+        intro.addEventListener('animationend', () => intro.remove(), { once: true });
+      }, 5400);
+    </script>
   </body>
 </html>

@@ -1,4 +1,3 @@
-import { accountStorage } from "../../core/config/accountStorage";
 import { hostRequest } from "./bridge";
 
 const STORAGE_PREFIX = "cockpit.config.";
@@ -28,7 +27,7 @@ function getBrowserStorage(): {
     typeof window.localStorage.setItem === "function" &&
     typeof window.localStorage.removeItem === "function"
   ) {
-    return accountStorage();
+    return window.localStorage;
   }
   return {
     getItem: fallbackGetItem,

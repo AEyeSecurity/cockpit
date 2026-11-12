@@ -1,7 +1,5 @@
 export interface EnvConfig {
   appName: string;
-  managed?: boolean;
-  operatorUser?: boolean;
   wsUrl: string;
   wsRealHost?: string;
   wsSimHost?: string;
@@ -12,22 +10,6 @@ export interface EnvConfig {
   cameraIframeUrl: string;
   cameraProbeTimeoutMs?: number;
   cameraLoadTimeoutMs?: number;
-}
-
-export function managedEnvConfig(): EnvConfig {
-  const ws = new URL("/operation/", window.location.origin);
-  ws.protocol = ws.protocol === "https:" ? "wss:" : "ws:";
-  return {
-    ...loadEnvConfig(),
-    managed: true,
-    wsUrl: new URL("navigation", ws).href,
-    rosbridgeUrl: new URL("rosbridge", ws).href,
-    httpBaseUrl: "/operation",
-    cameraIframeUrl: "/operation/mjpeg",
-    wsRealHost: window.location.hostname,
-    wsSimHost: window.location.hostname,
-    wsDefaultPort: window.location.port || "443"
-  };
 }
 
 function parsePositiveInt(value: unknown, fallback: number): number {
