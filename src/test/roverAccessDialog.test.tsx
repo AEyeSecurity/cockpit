@@ -48,8 +48,15 @@ describe("Rover control dialogs", () => {
   });
 
   it("shows a pending safety confirmation after a SALUS outage", () => {
-    render(<RoverAccessDialog control={fixture({ phase: "fault", canKeepRoute: false })} />);
+    const control = fixture({ phase: "fault", canKeepRoute: false });
+    const { rerender } = render(<RoverAccessDialog control={control} />);
     expect(screen.getByRole("heading", { name: "Control del Rover en pausa" })).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "Verificar SALUS y tomar control" });
+    fireEvent.click(retry);
+    expect(control.choose).toHaveBeenCalledWith("take");
+    rerender(<RoverAccessDialog control={{ ...control, busy: true }} />);
+    expect(retry).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Verificando");
     expect(screen.queryByText("Ya hay un usuario conectado al Rover")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /mantener la ruta/i })).not.toBeInTheDocument();
   });

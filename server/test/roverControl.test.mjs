@@ -100,7 +100,7 @@ test("a lost SALUS socket leaves control fenced until a fresh connection confirm
         socket.send(JSON.stringify({ op: "ack", ok: true, control_locked: true, requestId: request.requestId }));
         socket.send(JSON.stringify(state));
       });
-      setTimeout(() => socket.send(JSON.stringify(state)), 100);
+      setTimeout(() => socket.send(JSON.stringify(state)), 2100);
     });
     const result = await control.take(next.id, "next", next.revision);
     assert.equal(result.mode, "controller");
