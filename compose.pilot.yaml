@@ -7,6 +7,7 @@ services:
       args:
         COCKPIT_PASSWORD_ONLY: ${COCKPIT_PASSWORD_ONLY:-false}
         COCKPIT_KEEP_CONNECTIONS: ${COCKPIT_KEEP_CONNECTIONS:-false}
+        COCKPIT_ROVER_CONTROL: ${COCKPIT_ROVER_CONTROL:-false}
       labels:
         org.opencontainers.image.revision: ${COCKPIT_PILOT_REVISION:?Set the Git revision}
     ports:
@@ -27,6 +28,7 @@ services:
       COCKPIT_ORIGIN: ${COCKPIT_ORIGIN:?Set the public HTTPS origin}
       COCKPIT_KEYS_FILE: /run/secrets/cockpit_keys
       COCKPIT_PASSWORD_ONLY: ${COCKPIT_PASSWORD_ONLY:-false}
+      COCKPIT_ROVER_CONTROL: ${COCKPIT_ROVER_CONTROL:-false}
       COCKPIT_NAVIGATION_URL: ${COCKPIT_NAVIGATION_URL:-}
       COCKPIT_SIMULATION_URL: ${COCKPIT_SIMULATION_URL:-}
       COCKPIT_ROSBRIDGE_URL: ${COCKPIT_ROSBRIDGE_URL:-}

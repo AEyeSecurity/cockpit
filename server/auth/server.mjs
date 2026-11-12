@@ -1,3 +1,5 @@
+import { createSalusLink } from "./salusLink.mjs";
+import { createRoverControl } from "./roverControl.mjs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { createGateway } from "./gateway.mjs";
@@ -6,8 +8,17 @@ import { openVault } from "./crypto.mjs";
 import { openStore } from "./store.mjs";
 
 export function startServer({ db, vault, origin, env = {}, now = Date.now, control }) {
+  let salus;
+  if (env.COCKPIT_ROVER_CONTROL === "true") {
+    const url = new URL(env.COCKPIT_NAVIGATION_URL);
+    if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password || url.hash) {
+      throw new Error("COCKPIT_NAVIGATION_URL must be a WebSocket URL");
+    }
+    salus = createSalusLink(url);
+    control = createRoverControl({ stop: salus.stop, canKeepRoute: salus.canKeepRoute });
+  }
   const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control });
-  const gateway = createGateway(identity, env, control);
+  const gateway = createGateway(identity, env, control, salus);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -42,7 +53,7 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
     });
   }, 1000);
   timer.unref();
-  server.on("close", () => { clearInterval(timer); gateway.close(); });
+  server.on("close", () => { clearInterval(timer); gateway.close(); salus?.close(); });
   return server;
 }
 

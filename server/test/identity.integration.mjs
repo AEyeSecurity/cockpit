@@ -245,3 +245,78 @@ test("authenticated tabs negotiate control with both handover options", async ()
     db.close();
   }
 });
+
+test("running server keeps a single SALUS socket through both handovers", { timeout: 10000 }, async () => {
+  const db = openStore(":memory:");
+  const vault = { seal: (value) => value, unseal: (value) => value };
+  provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
+  const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(upstream, "listening");
+  let sockets = 0;
+  let brake = 0;
+  const state = {
+    op: "state", control_owner: true, control_locked: false, manual_enabled: false,
+    goal_active: true, route_mission: { active: true, paused: false }, patrol_mission: { active: false }
+  };
+  upstream.on("connection", (peer) => {
+    sockets++;
+    peer.send(JSON.stringify(state));
+    peer.on("message", (data) => {
+      const request = JSON.parse(data.toString());
+      if (request.op === "set_manual_cmd") {
+        assert.equal(state.manual_enabled, true);
+        assert.equal(request.brake_pct, 100);
+        assert.equal(request.linear_x, 0);
+        assert.equal(request.angular_z, 0);
+        brake++;
+      }
+      if (request.op === "set_manual_mode") state.manual_enabled = request.enabled;
+      if (request.op === "set_control_lock") {
+        assert.equal(request.locked, true);
+        Object.assign(state, { control_locked: true, goal_active: false, route_mission: { active: false } });
+      }
+      peer.send(JSON.stringify({ op: "ack", request: request.op, ok: true,
+        client_req_id: request.client_req_id, control_locked: state.control_locked }));
+      if (request.op === "set_control_lock") peer.send(JSON.stringify(state));
+    });
+  });
+  const server = startServer({ db, vault, origin, env: {
+    COCKPIT_PASSWORD_ONLY: "true", COCKPIT_ROVER_CONTROL: "true",
+    COCKPIT_NAVIGATION_URL: "ws://127.0.0.1:" + upstream.address().port
+  } });
+  const base = await listen(server);
+  const path = "/api/rover/control/";
+  const clients = [];
+  try {
+    const session = browser(base);
+    await session.call("/api/session/login", "POST", { username: "operator", password: "admin234" });
+    const first = await session.call(path + "open", "POST");
+    const firstWs = session.connect("/operation/navigation?instance=" + first.id);
+    clients.push(firstWs);
+    await once(firstWs, "message");
+    const second = await session.call(path + "open", "POST");
+    assert.equal(second.canKeepRoute, true);
+    const takeover = await session.call(path + "take", "POST", {
+      instanceId: second.id, revision: second.revision, keepRoute: true
+    });
+    assert.equal(takeover.mode, "controller");
+    assert.equal(brake, 0);
+    const secondWs = session.connect("/operation/navigation?instance=" + second.id);
+    clients.push(secondWs);
+    await once(secondWs, "message");
+    const previous = await session.call(path + "heartbeat", "POST", { instanceId: first.id });
+    assert.equal(previous.displaced, true);
+    firstWs.send(JSON.stringify({ op: "set_manual_cmd", brake_pct: 0, linear_x: 2 }));
+    const transferred = await session.call(path + "take", "POST", { instanceId: first.id, revision: previous.revision });
+    assert.equal(transferred.mode, "controller");
+    assert.ok(brake > 1);
+    assert.equal(sockets, 1);
+    assert.equal(state.control_locked, true);
+  } finally {
+    clients.forEach((client) => client.terminate());
+    for (const peer of upstream.clients) peer.terminate();
+    upstream.close();
+    await close(server);
+    db.close();
+  }
+});

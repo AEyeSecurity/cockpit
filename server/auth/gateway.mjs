@@ -21,7 +21,7 @@ const requestHeaders = ["accept", "content-type", "content-length", "range", "if
 const responseHeaders = ["content-type", "content-length", "content-range", "accept-ranges", "etag", "link"];
 const safeType = /^(application\/(json|sdp|trickle-ice-sdpfrag|octet-stream)(;|$)|(?:video|audio)\/|image\/(jpeg|png|webp)(;|$)|multipart\/x-mixed-replace(;|$))/i;
 
-export function createGateway(identity, env, control) {
+export function createGateway(identity, env, control, salus) {
   const upstreams = new Map();
   for (const [name, [protocol, variable]] of Object.entries(routes)) {
     if (!env[variable]) continue;
@@ -181,6 +181,34 @@ export function createGateway(identity, env, control) {
           }
         }
         wss.handleUpgrade(req, socket, head, (client) => {
+          if (instanceId && salus) {
+            controlSockets.add(instanceId);
+            const detach = salus.attach(instanceId, (message) => {
+              if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
+                client.send(JSON.stringify(message));
+              }
+            }, () => client.terminate());
+            const untrack = track(session, () => client.terminate());
+            client.once("error", () => client.terminate());
+            client.once("close", () => {
+              detach();
+              untrack();
+              controlSockets.delete(instanceId);
+              Promise.resolve().then(() => control.close(instanceId, session.id)).catch(() => {});
+            });
+            client.on("message", (data, binary) => {
+              if (!identity.isLive(session)) return client.terminate();
+              let authorized;
+              try {
+                authorized = authorizeNavigationFrame(control, instanceId, session.id, data, binary);
+              } catch {
+                client.terminate();
+                return;
+              }
+              if (authorized !== null) salus.forward(instanceId, authorized);
+            });
+            return;
+          }
           if (instanceId) controlSockets.add(instanceId);
           const backend = new WebSocket(upstream, { handshakeTimeout: 8000, maxPayload: 16 * 1024 * 1024, followRedirects: false });
           let closed = false;

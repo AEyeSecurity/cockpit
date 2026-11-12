@@ -63,7 +63,7 @@ export function createRoverControl({ stop, canKeepRoute = () => false, now = Dat
         Promise.resolve().then(() => stop({ instanceId: previous, signal: controller.signal, reason })),
         deadline
       ]);
-      if (evidence?.locked !== true || evidence?.stationary !== true || evidence?.missionQuiescent !== true) {
+      if (evidence?.locked !== true || (evidence?.stationary !== true && evidence?.brakeSequenceComplete !== true) || evidence?.missionQuiescent !== true) {
         throw new ControlConflict("STOP_UNCONFIRMED");
       }
     } catch (error) {
