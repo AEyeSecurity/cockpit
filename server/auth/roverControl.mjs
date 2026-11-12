@@ -9,7 +9,7 @@ export class ControlConflict extends Error {
 
 // A single coordinator represents one physical Rover. The gateway must supply
 // the authenticated session and role, and keep robot command sockets private.
-export function createRoverControl({ stop, now = Date.now, leaseMs = 8000, stopMs = 5000, record = () => {} }) {
+export function createRoverControl({ stop, canKeepRoute = () => false, now = Date.now, leaseMs = 8000, stopMs = 5000, record = () => {} }) {
   const instances = new Map();
   let owner = null;
   let revision = 0;
@@ -107,7 +107,7 @@ export function createRoverControl({ stop, now = Date.now, leaseMs = 8000, stopM
       entry.mode = "spectator";
       return state(entry);
     },
-    async take(id, sessionId, expectedRevision) {
+    async take(id, sessionId, expectedRevision, { keepRoute = false } = {}) {
       const entry = get(id, sessionId);
       if (phase === "stopping" || revision !== expectedRevision) throw new ControlConflict("CONTROL_CHANGED");
       if (owner === id && phase === "owned") return state(entry);
@@ -115,9 +115,12 @@ export function createRoverControl({ stop, now = Date.now, leaseMs = 8000, stopM
         record("control.denied", id);
         throw new ControlConflict("ADMIN_HAS_CONTROL");
       }
+      if (keepRoute && (phase !== "owned" || !owner || !canKeepRoute(owner))) {
+        throw new ControlConflict("AUTONOMOUS_ROUTE_UNCONFIRMED");
+      }
       if (phase === "idle" && !owner) return promote(entry);
       const previous = owner;
-      await stopAndFence(previous, "takeover");
+      if (!keepRoute) await stopAndFence(previous, "takeover");
       const displaced = instances.get(previous);
       if (displaced) {
         displaced.mode = "spectator";

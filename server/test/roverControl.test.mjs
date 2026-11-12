@@ -49,3 +49,23 @@ test("unconfirmed stop fences commands after controller expiry", async () => {
   assert.equal(control.permits(observer.id, "observer", "drive"), false);
   assert.equal(control.permits(observer.id, "observer", "stop"), true);
 });
+
+test("preserving the route requires fresh autonomous evidence and does not invoke stop", async () => {
+  let autonomous = false;
+  let stopCalls = 0;
+  const control = createRoverControl({
+    stop: async () => { stopCalls++; return stopped; },
+    canKeepRoute: () => autonomous
+  });
+  const first = control.open("first", "user");
+  const second = control.open("second", "admin");
+  await assert.rejects(control.take(second.id, "second", second.revision, { keepRoute: true }), {
+    code: "AUTONOMOUS_ROUTE_UNCONFIRMED"
+  });
+  assert.equal(control.permits(first.id, "first", "drive"), true);
+  autonomous = true;
+  assert.equal((await control.take(second.id, "second", second.revision, { keepRoute: true })).mode, "controller");
+  assert.equal(stopCalls, 0);
+  assert.equal(control.status(first.id, "first").displaced, true);
+  assert.equal(control.permits(first.id, "first", "drive"), false);
+});
