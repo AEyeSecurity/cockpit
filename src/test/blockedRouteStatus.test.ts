@@ -20,7 +20,8 @@ describe("planner maneuver block presentation", () => {
     const reason = "Giro en U: cancelá y volvé a iniciar después de revisar.";
     expect(describeRouteBlock({ ...pending, blockedState: "NEEDS_OPERATOR",
       blockedReasonCode: "PLANNER_U_TURN", blockedReasonText: reason })).toEqual({
-      title: "Se necesita intervención", tone: "error", detail: reason
+      title: "Robot detenido · Requiere intervención", tone: "error", detail: reason,
+      guidance: "Cancela la misión y vuelve a iniciarla. Si el error persiste, mueve el robot manualmente a otra posición."
     });
     expect(describeRouteBlock({ ...pending, blockedState: "CLEAR" })).toBeNull();
   });

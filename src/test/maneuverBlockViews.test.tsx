@@ -22,7 +22,7 @@ describe("operator maneuver block", () => {
         throw new Error("view not registered");
       }
       render(<>{contribution.render()}</>);
-      expect(screen.getByText("Se necesita intervención")).toBeInTheDocument();
+      expect(screen.getByText("Robot detenido · Requiere intervención")).toBeInTheDocument();
       expect(screen.getByText(reason)).toBeInTheDocument();
       expect(screen.queryByText(/retry 1\/3/)).not.toBeInTheDocument();
       service.stopControlHeartbeat();

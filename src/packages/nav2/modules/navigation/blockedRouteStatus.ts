@@ -6,7 +6,7 @@ type BlockedFields = Pick<NavigationState["routeMission"],
 
 /** Presentation shared by the navigation panel and the map; ROS owns the clock. */
 export function describeRouteBlock(mission?: BlockedFields | null): {
-  title: string; detail: string; tone: "error" | "paused";
+  title: string; detail: string; guidance?: string; tone: "error" | "paused";
 } | null {
   if (!mission?.blockedState || mission.blockedState === "CLEAR") return null;
   const terminal = mission.blockedState === "NEEDS_OPERATOR";
@@ -20,7 +20,8 @@ export function describeRouteBlock(mission?: BlockedFields | null): {
   const remaining = Math.max(0, Number(mission.blockedWaitRemainingS));
   const waitText = !terminal && remaining > 0 ? `${Math.ceil(remaining)}s` : "";
   return {
-    title: terminal ? "Se necesita intervención" : maneuver ? "Esperando camino alternativo"
+    ...(terminal ? { guidance: "Cancela la misión y vuelve a iniciarla. Si el error persiste, mueve el robot manualmente a otra posición." } : {}),
+    title: terminal ? "Robot detenido · Requiere intervención" : maneuver ? "Esperando camino alternativo"
       : mission.blockedState === "RECOVERING" ? "Reintentando la ruta" : "Camino bloqueado",
     detail: [reason, retryText, waitText].filter(Boolean).join(" · "),
     tone: terminal ? "error" : "paused"

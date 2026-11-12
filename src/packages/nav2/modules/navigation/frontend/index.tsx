@@ -1,3 +1,4 @@
+import { MissionAlertSound } from "./MissionAlertSound";
 import { describeRouteBlock } from "../blockedRouteStatus";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
@@ -1200,10 +1201,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       >
         <div className="nav-sidebar-execution">
           {routeBlock ? (
-            <div className={routeBlock.tone === "error" ? "ps-status-error" : "ps-status-note"}
+            <div className={routeBlock.tone === "error" ? "ps-status-error nav-mission-block-alert" : "ps-status-note"}
               role={routeBlock.tone === "error" ? "alert" : "status"}>
               <strong>{routeBlock.title}</strong>
               <p>{routeBlock.detail}</p>
+              {routeBlock.guidance ? <p className="nav-mission-block-guidance">{routeBlock.guidance}</p> : null}
             </div>
           ) : null}
           {missionInProgress ? (
@@ -2694,6 +2696,10 @@ export function createNavigationModule(): CockpitModule {
       registerTransport(ctx);
       const dispatcher = registerDispatcher(ctx);
       const { navigationService, connectionService } = registerServices(ctx, dispatcher);
+      ctx.services.registerService({
+        id: "service.navigation-alert-sound",
+        service: new MissionAlertSound(navigationService)
+      });
       registerCommands(ctx, navigationService, connectionService);
       registerSidebarPanels(ctx);
       registerModals(ctx);

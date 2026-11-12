@@ -3328,12 +3328,14 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                     </div>
                   </div>
                 ) : null}
-                <div className={`mission-status ${missionToneClass}`.trim()}>
+                <div className={`mission-status ${missionToneClass} ${blocked?.guidance ? "mission-block-alert" : ""}`.trim()}
+                  role={blocked?.guidance ? "alert" : undefined}>
                   <div className="ms-main">
                     <span className="ms-dot" aria-hidden="true" />
                     <div className="ms-copy">
                       <div className="ms-title">{missionTitle}</div>
                       <div className="ms-detail">{missionDetail}</div>
+                      {blocked?.guidance ? <p className="ms-guidance">{blocked.guidance}</p> : null}
                     </div>
                   </div>
                   <div className="ms-progress">
