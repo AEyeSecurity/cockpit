@@ -17,8 +17,7 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
     salus = createSalusLink(url);
     control = createRoverControl({
       stop: salus.stop, canKeepRoute: salus.canKeepRoute,
-      stopMs: 10000,
-      startFenced: env.COCKPIT_ROVER_START_FENCED === "true"
+      stopMs: 10000
     });
   }
   const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control });
