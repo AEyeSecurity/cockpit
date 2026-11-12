@@ -1,3 +1,4 @@
+import { applyHandoverBrake } from "../auth/handoverBrake.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { authorizeNavigationFrame } from "../auth/navigationPolicy.mjs";
@@ -91,4 +92,29 @@ test("spectator frames allow snapshots and a canonical emergency stop only", () 
     op: "get_nav_snapshot"
   });
   assert.equal(authorizeNavigationFrame(control, owner.id, "same-session", Buffer.from("{}"), true), null);
+});
+
+test("handover braking repeats the spacebar command for one second, then locks", async () => {
+  let time = 0;
+  const commands = [];
+  await applyHandoverBrake({
+    now: () => time,
+    wait: async (ms) => { time += ms; },
+    send: async (command) => { commands.push({ time, command }); return { ok: true }; },
+    lock: async () => { commands.push({ time, command: { op: "set_control_lock", locked: true } }); }
+  });
+  assert.deepEqual(commands.slice(0, -1).map(({ time }) => time), Array.from({ length: 20 }, (_, i) => i * 50));
+  for (const { command } of commands.slice(0, -1)) {
+    assert.deepEqual(command, { op: "set_manual_cmd", linear_x: 0, angular_z: 0, brake_pct: 100 });
+  }
+  assert.deepEqual(commands.at(-1), { time: 1000, command: { op: "set_control_lock", locked: true } });
+});
+
+test("handover braking attempts the lock even when the brake command is rejected", async () => {
+  let locked = false;
+  await assert.rejects(applyHandoverBrake({
+    send: async () => ({ ok: false }),
+    lock: async () => { locked = true; }
+  }), /no aceptó/);
+  assert.equal(locked, true);
 });
