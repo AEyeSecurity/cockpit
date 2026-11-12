@@ -48,6 +48,7 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
   });
   const timer = setInterval(() => {
     gateway.sweep();
+    gateway.pingControlSockets();
     control?.sweep((id) => identity.isLive({ id })).catch(() => {
       console.error("Cockpit could not confirm Rover stop after session expiry");
     });

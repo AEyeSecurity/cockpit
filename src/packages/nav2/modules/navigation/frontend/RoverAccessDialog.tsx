@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, message } from "../../../../identity/api";
+import { api, ApiError, message } from "../../../../identity/api";
 import type { ConnectionService } from "../service/impl/ConnectionService";
 
 interface Access {
@@ -41,6 +41,7 @@ function useRoverAccess(service: ConnectionService, csrf?: string) {
             next.revision >= current.current.revision) update(next);
       } catch (failure) {
         if (!active || actionPending.current || current.current?.id !== id) return;
+        if (!(failure instanceof ApiError) || ![401, 403, 409].includes(failure.status)) return;
         update(null);
         setError(message(failure));
         void service.disconnect();

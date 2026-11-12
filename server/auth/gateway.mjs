@@ -35,7 +35,7 @@ export function createGateway(identity, env, control, salus) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
   const active = new Set();
   const cameraSessions = new Map();
-  const controlSockets = new Set();
+  const controlSockets = new Map();
 
   function track(session, close) {
     const entry = { session, close };
@@ -76,6 +76,11 @@ export function createGateway(identity, env, control, salus) {
 
   return {
     sweep,
+    pingControlSockets() {
+      for (const client of controlSockets.values()) {
+        if (client.readyState === WebSocket.OPEN) client.ping();
+      }
+    },
     close() {
       for (const entry of active) entry.close();
       wss.close();
@@ -182,13 +187,22 @@ export function createGateway(identity, env, control, salus) {
         }
         wss.handleUpgrade(req, socket, head, (client) => {
           if (instanceId && salus) {
-            controlSockets.add(instanceId);
+            controlSockets.set(instanceId, client);
             const detach = salus.attach(instanceId, (message) => {
               if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
                 client.send(JSON.stringify(message));
               }
             }, () => client.terminate());
             const untrack = track(session, () => client.terminate());
+            // Browsers answer WebSocket pings even when background JavaScript timers are throttled.
+            client.on("pong", () => {
+              if (!identity.isLive(session)) return client.terminate();
+              try {
+                control.heartbeat(instanceId, session.id);
+              } catch {
+                client.terminate();
+              }
+            });
             client.once("error", () => client.terminate());
             client.once("close", () => {
               detach();
@@ -209,7 +223,7 @@ export function createGateway(identity, env, control, salus) {
             });
             return;
           }
-          if (instanceId) controlSockets.add(instanceId);
+          if (instanceId) controlSockets.set(instanceId, client);
           const backend = new WebSocket(upstream, { handshakeTimeout: 8000, maxPayload: 16 * 1024 * 1024, followRedirects: false });
           let closed = false;
           const close = () => {

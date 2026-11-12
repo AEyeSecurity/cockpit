@@ -246,7 +246,7 @@ test("authenticated tabs negotiate control with both handover options", async ()
   }
 });
 
-test("running server keeps a single SALUS socket through both handovers", { timeout: 10000 }, async () => {
+test("running server keeps a single SALUS socket through both handovers", { timeout: 18000 }, async () => {
   const db = openStore(":memory:");
   const vault = { seal: (value) => value, unseal: (value) => value };
   provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
@@ -312,6 +312,14 @@ test("running server keeps a single SALUS socket through both handovers", { time
     assert.ok(brake > 1);
     assert.equal(sockets, 1);
     assert.equal(state.control_locked, true);
+
+    // Neither tab runs the browser heartbeat while in the background.
+    await new Promise((resolve) => setTimeout(resolve, 8500));
+    const spectator = await session.call(path + "heartbeat", "POST", { instanceId: second.id });
+    assert.equal(spectator.mode, "spectator");
+    assert.equal(spectator.displaced, true);
+    assert.equal(secondWs.readyState, WebSocket.OPEN);
+    assert.equal(firstWs.readyState, WebSocket.OPEN);
   } finally {
     clients.forEach((client) => client.terminate());
     for (const peer of upstream.clients) peer.terminate();
