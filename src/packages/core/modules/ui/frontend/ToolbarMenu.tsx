@@ -4,39 +4,6 @@ import type { AppRuntime } from "../../../../../core/types/module";
 import logo from "../../../../../../icon2-backgroundless.png";
 import { ToolbarMenuItem } from "./ToolbarMenuItem";
 
-function FullscreenButton(): JSX.Element | null {
-  const [fullscreen, setFullscreen] = useState(() => Boolean(document.fullscreenElement));
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    const syncFullscreen = (): void => setFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", syncFullscreen);
-    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
-  }, []);
-
-  if (!document.fullscreenEnabled) return null;
-
-  const label = fullscreen ? "Salir de pantalla completa" : "Pantalla completa";
-  const toggleFullscreen = async (): Promise<void> => {
-    setError(false);
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
-    } catch {
-      setError(true);
-    }
-  };
-
-  return (
-    <div className="toolbar-right">
-      {error ? <span role="status">No se pudo cambiar el modo de pantalla.</span> : null}
-      <button type="button" className="toolbar-icon-btn" aria-label={label} title={fullscreen ? `${label} (Esc)` : label} onClick={() => void toggleFullscreen()}>
-        <span aria-hidden="true">{fullscreen ? "↙" : "↗"}</span>
-      </button>
-    </div>
-  );
-}
-
 interface ToolbarMenuProps {
   runtime: AppRuntime;
   menus: ToolbarContribution[];
@@ -117,7 +84,7 @@ export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
           ))}
         </nav>
       </div>
-      {runtime.env.operatorUser ? <FullscreenButton /> : null}
+
     </header>
   );
 }
