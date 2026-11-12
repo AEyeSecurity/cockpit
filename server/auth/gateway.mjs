@@ -193,8 +193,8 @@ export function createGateway(identity, env, control, salus) {
               closeCause = cause;
               client.terminate();
             };
-            const releaseControl = () => {
-              control.close(instanceId, session.id).catch(() => {});
+            const releaseControl = async () => {
+              try { await control.close(instanceId, session.id); } catch { /* The instance may already be gone. */ }
             };
             const detach = salus.attach(instanceId, (message) => {
               if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
