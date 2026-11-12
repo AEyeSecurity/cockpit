@@ -6,7 +6,7 @@ import { openVault } from "./crypto.mjs";
 import { openStore } from "./store.mjs";
 
 export function startServer({ db, vault, origin, env = {}, now = Date.now, control }) {
-  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true" });
+  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control });
   const gateway = createGateway(identity, env, control);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -35,7 +35,12 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
     try { url = new URL(req.url, origin); } catch { return socket.destroy(); }
     gateway.upgrade(req, socket, head, url);
   });
-  const timer = setInterval(() => gateway.sweep(), 1000);
+  const timer = setInterval(() => {
+    gateway.sweep();
+    control?.sweep((id) => identity.isLive({ id })).catch(() => {
+      console.error("Cockpit could not confirm Rover stop after session expiry");
+    });
+  }, 1000);
   timer.unref();
   server.on("close", () => { clearInterval(timer); gateway.close(); });
   return server;

@@ -1,3 +1,4 @@
+import { handleRoverControl } from "./roverControlApi.mjs";
 import { randomToken, digest, matchesPassword, passwordHash, newTotpSecret, acceptedTotpStep } from "./crypto.mjs";
 import { audit, byId, byUsername, identity, provision, reset, transaction } from "./store.mjs";
 
@@ -63,7 +64,7 @@ async function readJson(req) {
   return fail(400, "Solicitud inválida.");
 }
 
-export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false } = {}) {
+export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control } = {}) {
   const attempts = new Map();
   function stage(account) {
     if (account.must_change) return "password";
@@ -312,6 +313,10 @@ export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly
       const session = getSession(req);
       if (!session) fail(401, "Iniciá sesión.");
       if (write && req.headers["x-cockpit-csrf"] !== session.csrf) fail(403, "Solicitud no autorizada.");
+      if (method === "POST" && path.startsWith("/api/rover/control/")) {
+        if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
+        return handleRoverControl(control, path, session, body, HttpError);
+      }
       if (method === "GET" && path === "/api/session") return describe(session);
       if (method === "POST" && path === "/api/session/keepalive" && stage(session.account) === "ready") {
         db.prepare("UPDATE sessions SET last_seen=? WHERE id=?").run(now(), session.id);

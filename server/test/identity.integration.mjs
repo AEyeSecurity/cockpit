@@ -9,6 +9,7 @@ import { backup } from "node:sqlite";
 import { test } from "node:test";
 import { WebSocket, WebSocketServer } from "ws";
 import { openVault, totpCode } from "../auth/crypto.mjs";
+import { createRoverControl } from "../auth/roverControl.mjs";
 import { startServer } from "../auth/server.mjs";
 import { openStore, provision } from "../auth/store.mjs";
 
@@ -200,6 +201,45 @@ test("Rover password-only mode accepts eight letters and digits and skips TOTP",
     assert.equal(created.status, 200);
     assert.equal((await session.call("/api/users/" + created.account.id + "/reveal", "POST", { password: "admin234" })).password, "pilot234");
     assert.equal(db.prepare("SELECT totp FROM accounts WHERE id=?").get(admin.id).totp, null);
+  } finally {
+    await close(server);
+    db.close();
+  }
+});
+
+test("authenticated tabs negotiate control with both handover options", async () => {
+  const db = openStore(":memory:");
+  const vault = { seal: (value) => value, unseal: (value) => value };
+  provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
+  let stops = 0;
+  const control = createRoverControl({
+    stop: async () => {
+      stops++;
+      return { locked: true, stationary: true, missionQuiescent: true };
+    },
+    canKeepRoute: () => true
+  });
+  const server = startServer({ db, vault, origin, control, env: { COCKPIT_PASSWORD_ONLY: "true" } });
+  const base = await listen(server);
+  const path = "/api/rover/control/";
+  try {
+    const session = browser(base);
+    assert.equal((await session.call(path + "open", "POST")).status, 401);
+    await session.call("/api/session/login", "POST", { username: "operator", password: "admin234" });
+    assert.equal((await session.call(path + "open", "POST", {}, { "x-cockpit-csrf": "invalid" })).status, 403);
+    const first = await session.call(path + "open", "POST");
+    const second = await session.call(path + "open", "POST");
+    assert.equal(first.mode, "controller");
+    assert.equal(second.mode, "waiting");
+    const afterStop = await session.call(path + "take", "POST", { instanceId: second.id, revision: second.revision });
+    assert.equal(afterStop.mode, "controller");
+    assert.equal(stops, 1);
+    const previous = await session.call(path + "heartbeat", "POST", { instanceId: first.id });
+    assert.equal(previous.displaced, true);
+    assert.equal(previous.mode, "spectator");
+    const preserved = await session.call(path + "take", "POST", { instanceId: first.id, revision: previous.revision, keepRoute: true });
+    assert.equal(preserved.mode, "controller");
+    assert.equal(stops, 1);
   } finally {
     await close(server);
     db.close();
