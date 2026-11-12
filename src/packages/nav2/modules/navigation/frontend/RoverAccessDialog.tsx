@@ -34,7 +34,7 @@ function useRoverAccess(service: ConnectionService, csrf?: string) {
     let active = true;
     let polling = false;
     const timer = window.setInterval(async () => {
-      if (polling || actionPending.current) return;
+      if (polling) return;
       polling = true;
       try {
         const next = await api<Access>("rover/control/heartbeat", "POST", { instanceId: id }, csrf);
@@ -149,6 +149,7 @@ export function RoverAccessDialog({ control }: { control: RoverAccess }) {
     onCancel={(event) => { event.preventDefault(); }}>
     <h2 id="rover-access-title">{title}</h2>
     {recovering && <p>Cockpit debe confirmar la detención del Rover antes de habilitar el control.</p>}
+    {recovering && busy && <p role="status">Verificando la conexión y el estado de SALUS…</p>}
     {waiting && !recovering && access.canTake && <p>¿Querés tomar el control?</p>}
     {error && <p role="alert">{error}</p>}
     <div className="nav-rover-access-actions">
@@ -159,7 +160,9 @@ export function RoverAccessDialog({ control }: { control: RoverAccess }) {
         ? <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("acknowledge")}>Aceptar</button>
         : <>
             <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void choose("spectate")}>Espectar</button>
-            {access.canTake && <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("take")}>Tomar control y frenar</button>}
+            {access.canTake && <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("take")}>
+              {recovering ? "Verificar SALUS y tomar control" : "Tomar control y frenar"}
+            </button>}
             {access.canTake && access.canKeepRoute && <button type="button" className="bt sec-btn" disabled={busy}
               onClick={() => void choose("take", true)}>Tomar control y mantener la ruta</button>}
           </>}

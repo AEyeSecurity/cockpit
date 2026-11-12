@@ -4,6 +4,9 @@ import { WebSocket } from "ws";
 import { applyHandoverBrake } from "./handoverBrake.mjs";
 import { ControlConflict } from "./roverControl.mjs";
 
+const HANDSHAKE_TIMEOUT_MS = 4000;
+const INITIAL_STATE_GRACE_MS = 500;
+
 export function createSalusLink(url) {
   const clients = new Map();
   const pending = new Map();
@@ -38,7 +41,7 @@ export function createSalusLink(url) {
 
   function connect() {
     if (socket && socket.readyState <= WebSocket.OPEN) return socket;
-    const next = new WebSocket(url, { handshakeTimeout: 4000, followRedirects: false, maxPayload: 16 * 1024 * 1024 });
+    const next = new WebSocket(url, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS, followRedirects: false, maxPayload: 16 * 1024 * 1024 });
     socket = next;
     next.on("message", receive);
     next.on("error", (error) => {
@@ -127,7 +130,7 @@ export function createSalusLink(url) {
       // A new SALUS socket sends its initial state after the handshake.
       // Leave time for the lock request and its confirmation within the stop deadline.
       const link = connect();
-      const stateDeadline = Date.now() + 1800;
+      const stateDeadline = Date.now() + HANDSHAKE_TIMEOUT_MS + INITIAL_STATE_GRACE_MS;
       let before = latest();
       while (!before && link.readyState <= WebSocket.OPEN && Date.now() < stateDeadline) {
         await delay(50, undefined, { signal });
