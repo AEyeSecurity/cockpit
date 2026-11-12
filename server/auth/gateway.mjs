@@ -188,35 +188,43 @@ export function createGateway(identity, env, control, salus) {
         wss.handleUpgrade(req, socket, head, (client) => {
           if (instanceId && salus) {
             controlSockets.set(instanceId, client);
+            let closeCause = "peer_closed";
+            const terminate = (cause) => {
+              closeCause = cause;
+              client.terminate();
+            };
             const detach = salus.attach(instanceId, (message) => {
               if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
                 client.send(JSON.stringify(message));
               }
-            }, () => client.terminate());
-            const untrack = track(session, () => client.terminate());
+            }, () => terminate("salus_connection_lost"));
+            const untrack = track(session, () => terminate("session_expired_or_revoked"));
             // Browsers answer WebSocket pings even when background JavaScript timers are throttled.
             client.on("pong", () => {
-              if (!identity.isLive(session)) return client.terminate();
+              if (!identity.isLive(session)) return terminate("session_expired_or_revoked");
               try {
                 control.heartbeat(instanceId, session.id);
               } catch {
-                client.terminate();
+                terminate("control_instance_expired");
               }
             });
-            client.once("error", () => client.terminate());
-            client.once("close", () => {
+            client.once("error", () => terminate("browser_socket_error"));
+            client.once("close", (code) => {
+              if (code !== 1000 || closeCause !== "peer_closed") {
+                console.warn("Cockpit Rover browser socket closed", { code, cause: closeCause });
+              }
               detach();
               untrack();
               controlSockets.delete(instanceId);
               Promise.resolve().then(() => control.close(instanceId, session.id)).catch(() => {});
             });
             client.on("message", (data, binary) => {
-              if (!identity.isLive(session)) return client.terminate();
+              if (!identity.isLive(session)) return terminate("session_expired_or_revoked");
               let authorized;
               try {
                 authorized = authorizeNavigationFrame(control, instanceId, session.id, data, binary);
               } catch {
-                client.terminate();
+                terminate("control_instance_expired");
                 return;
               }
               if (authorized !== null) salus.forward(instanceId, authorized);
