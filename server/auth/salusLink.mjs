@@ -43,7 +43,7 @@ export function createSalusLink(url) {
     if (socket && socket.readyState <= WebSocket.OPEN) return socket;
     const next = new WebSocket(url, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS, followRedirects: false, maxPayload: 16 * 1024 * 1024 });
     socket = next;
-    next.on("message", receive);
+    next.on("message", (data, binary) => { if (socket === next) receive(data, binary); });
     next.on("error", (error) => {
       console.warn("Cockpit SALUS WebSocket error", { code: error.code ?? error.name, message: error.message });
       next.terminate();
@@ -92,6 +92,14 @@ export function createSalusLink(url) {
   }
 
   return {
+    setDestination(destination) {
+      const previous = socket;
+      socket = undefined;
+      snapshots.clear();
+      for (const id of pending.keys()) clearPending(id, { op: "ack", ok: false, error: "SALUS_DISCONNECTED" });
+      url = destination;
+      previous?.terminate();
+    },
     attach(instanceId, sendToClient, disconnect) {
       clients.set(instanceId, { send: sendToClient, disconnect });
       connect();

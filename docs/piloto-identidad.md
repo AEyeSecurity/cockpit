@@ -25,6 +25,7 @@ La clave temporal dura 24 horas y habilita un único inicio de sesión. Entregar
 | Variable | Destino configurado por el operador |
 | --- | --- |
 | `COCKPIT_NAVIGATION_URL`, `COCKPIT_SIMULATION_URL`, `COCKPIT_ROSBRIDGE_URL` | URL privada completa de cada WebSocket. Navegación es obligatoria. |
+| `COCKPIT_NAVIGATION_ALTERNATIVES` | URLs WebSocket alternativas del mismo Rover, separadas por comas. El panel Conexión permite elegir una de estas direcciones y puertos cuando el Rover está libre. La elección se guarda en SQLite. |
 | `COCKPIT_DISPATCH_URL`, `COCKPIT_VISION_URL`, `COCKPIT_PERSON_URL`, `COCKPIT_MJPEG_URL` | URLs privadas completas para despacho HTTP, datos de visión, estado de detección y stream MJPEG. |
 | `COCKPIT_CAMERA_URL` | Base privada de MediaMTX WHEP. El gateway espera las rutas `cam3`, `cam4`, `cam5` y sus variantes `_normal`. |
 | `COCKPIT_RECORDINGS_URL` | Origen privado dedicado a descargas de grabaciones. La ruta y consulta firmadas del catálogo se reenvían a ese servidor. |

@@ -88,6 +88,9 @@ export function createRoverControl({ stop, canKeepRoute = () => false, now = Dat
   }
 
   return {
+    canChangeDestination() {
+      return phase === "idle" && instances.size === 0;
+    },
     open(sessionId, role) {
       if (!sessionId || !["admin", "user"].includes(role)) throw new ControlConflict("INVALID_SESSION");
       const entry = { id: randomUUID(), sessionId, role, until: now() + leaseMs, mode: "waiting", displaced: false };

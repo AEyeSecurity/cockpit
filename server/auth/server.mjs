@@ -9,18 +9,43 @@ import { openStore } from "./store.mjs";
 
 export function startServer({ db, vault, origin, env = {}, now = Date.now, control }) {
   let salus;
+  let destination;
   if (env.COCKPIT_ROVER_CONTROL === "true") {
-    const url = new URL(env.COCKPIT_NAVIGATION_URL);
-    if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password || url.hash) {
-      throw new Error("COCKPIT_NAVIGATION_URL must be a WebSocket URL");
-    }
-    salus = createSalusLink(url);
+    const destinations = [env.COCKPIT_NAVIGATION_URL, ...(env.COCKPIT_NAVIGATION_ALTERNATIVES ?? "").split(",").map(value => value.trim()).filter(Boolean)]
+      .map(value => {
+        const url = new URL(value);
+        if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password || url.hash) {
+          throw new Error("Invalid SALUS WebSocket destination");
+        }
+        return url;
+      });
+    const describe = url => ({ host: url.hostname, port: url.port || (url.protocol === "wss:" ? "443" : "80") });
+    const saved = db.prepare("SELECT url FROM rover_destination WHERE id=1").get()?.url;
+    let current = destinations.find(url => url.href === saved) ?? destinations[0];
+    salus = createSalusLink(current);
     control = createRoverControl({
       stop: salus.stop, canKeepRoute: salus.canKeepRoute,
       stopMs: 10000
     });
+    destination = {
+      read: () => ({ ...describe(current), options: destinations.map(describe) }),
+      write(body) {
+        const next = destinations.find(url => {
+          const { host, port } = describe(url);
+          return host === body?.host && port === body?.port;
+        });
+        if (!next) throw new HttpError(400, "La dirección y el puerto no corresponden a un destino configurado para este Rover.");
+        if (next.href !== current.href) {
+          if (!control.canChangeDestination()) throw new HttpError(409, "El Rover debe estar libre para cambiar la dirección.");
+          db.prepare("INSERT INTO rover_destination (id, url) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET url=excluded.url").run(next.href);
+          salus.setDestination(next);
+          current = next;
+        }
+        return destination.read();
+      }
+    };
   }
-  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control });
+  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination });
   const gateway = createGateway(identity, env, control, salus);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");

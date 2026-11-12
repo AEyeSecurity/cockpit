@@ -1,4 +1,5 @@
 import { useRoverAccessContext } from "./RoverAccessDialog";
+import { RoverDestinationFields } from "./RoverDestinationFields";
 import { describeRouteBlock } from "../blockedRouteStatus";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
@@ -1012,7 +1013,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <option value="real">Robot real</option>
           <option value="sim">Simulación</option>
         </select>}
-        {!operatorUser && (
+        {!operatorUser && !runtime.env.roverControlCsrf && (
           <div className="input-grid">
           <input
             value={connState.host}
@@ -1068,7 +1069,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <ButtonFace icon={<NavGlyph kind="disconnect" />} label="DESCONECTAR" meta="Cerrar conexión" />
           </button>
         </div>
-        {operatorUser && (
+        {runtime.env.roverControlCsrf && <RoverDestinationFields csrf={runtime.env.roverControlCsrf}
+          connected={connState.connected || connState.connecting || Boolean(roverAccess?.access)} />}
+        {operatorUser && !runtime.env.roverControlCsrf && (
           <div className="input-grid">
           <input
             value={connState.host}
@@ -1089,7 +1092,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <span className="status-dot" aria-hidden="true" />
           <span>{spectator ? "Modo espectador" : connectionStatusText}</span>
         </div>
-        {operatorUser && <button type="button" className="bt sec-btn nav-connection-edit" aria-pressed={editingConnection}
+        {operatorUser && !runtime.env.roverControlCsrf && <button type="button" className="bt sec-btn nav-connection-edit" aria-pressed={editingConnection}
           disabled={runtime.env.managed} onClick={() => setEditingConnection(!editingConnection)}>
           {editingConnection ? "Listo" : "Editar"}
         </button>}
