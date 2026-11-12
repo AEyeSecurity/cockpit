@@ -53,7 +53,6 @@ export function createPersonWatchModule(): CockpitModule {
     const connection = ctx.getService<ConnectionService>("service.connection");
     const service = new PersonWatchService(() => {
       const current = connection.getState();
-      if (ctx.env.managed) return current.preset === "real" ? "/operation/person" : "";
       const values = ctx.getPackageConfig<Record<string, unknown>>("nav2");
       return current.preset === "real" && current.host === values.ws_real_host && typeof values.person_watch_url === "string" ? values.person_watch_url : "";
     });

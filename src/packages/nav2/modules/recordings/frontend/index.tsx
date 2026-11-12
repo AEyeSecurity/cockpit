@@ -30,7 +30,7 @@ function localDay(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
-function RecordingsWorkspace({ dispatcher, managed }: { dispatcher: RecordingsDispatcher; managed?: boolean }): JSX.Element {
+function RecordingsWorkspace({ dispatcher }: { dispatcher: RecordingsDispatcher }): JSX.Element {
   const [camera, setCamera] = useState("all");
   const [date, setDate] = useState(localDay);
   const [status, setStatus] = useState<RecordingStatus | null>(null);
@@ -86,7 +86,7 @@ function RecordingsWorkspace({ dispatcher, managed }: { dispatcher: RecordingsDi
       if (!fresh) throw new Error("El video ya no está disponible.");
       const url = new URL(fresh.url);
       if (!["http:", "https:"].includes(url.protocol)) throw new Error("Dirección de descarga inválida.");
-      const link = document.createElement("a"); link.href = managed ? "/operation/recordings" + url.pathname + url.search : url.href; link.rel = "noreferrer";
+      const link = document.createElement("a"); link.href = url.href; link.rel = "noreferrer";
       link.download = ""; link.click();
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
@@ -124,6 +124,6 @@ export function createRecordingsModule(): CockpitModule {
     ctx.dispatchers.registerDispatcher({ id: dispatcher.id, dispatcher });
     ctx.contributions.register({ id: "sidebar.recordings", slot: "sidebar", label: "Grabaciones",
       render: () => <div className="stack support-sidebar"><div className="panel-card"><h3>Grabaciones</h3><p className="muted">Captura manual y automática durante misiones, con 30 segundos posteriores.</p></div><button type="button" className="button-secondary" onClick={() => void ctx.commands.execute(ShellCommands.openWorkspace, "workspace.recordings", { focused: true })}>Abrir biblioteca y grabación</button></div> });
-    ctx.contributions.register({ id: "workspace.recordings", slot: "workspace", label: "Grabaciones", hiddenFromTabs: true, render: () => <RecordingsWorkspace dispatcher={dispatcher} managed={ctx.env.managed} /> });
+    ctx.contributions.register({ id: "workspace.recordings", slot: "workspace", label: "Grabaciones", hiddenFromTabs: true, render: () => <RecordingsWorkspace dispatcher={dispatcher} /> });
   } };
 }

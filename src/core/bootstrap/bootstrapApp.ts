@@ -3,7 +3,7 @@ import { DIALOG_SERVICE_ID, DialogService } from "../../packages/core/modules/ru
 import { SYSTEM_NOTIFICATION_SERVICE_ID, SystemNotificationService } from "../../packages/core/modules/runtime/service/impl/SystemNotificationService";
 import { TransportManager } from "../../packages/core/modules/runtime/transport/manager/TransportManager";
 import { createCommandRegistry } from "../commands/commandRegistry";
-import { loadEnvConfig, managedEnvConfig } from "../config/envConfig";
+import { loadEnvConfig } from "../config/envConfig";
 import { loadModuleConfig } from "../config/moduleConfigLoader";
 import { createContributionRegistry } from "../contributions/contributionRegistry";
 import { createContainer } from "../di/container";
@@ -17,9 +17,8 @@ import { getPackageCatalog } from "./packageCatalog";
 import { PackageManager } from "./packageManager";
 import { registerCoreSettingsUi } from "./registerCoreSettingsUi";
 
-export async function bootstrapApp({ managed = false, operatorUser = false } = {}): Promise<AppRuntime> {
-  const env = managed ? managedEnvConfig() : loadEnvConfig();
-  env.operatorUser = operatorUser;
+export async function bootstrapApp(): Promise<AppRuntime> {
+  const env = loadEnvConfig();
   const moduleConfig = await loadModuleConfig();
   const container = createContainer();
   const eventBus = createEventBus();

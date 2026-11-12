@@ -547,11 +547,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
               panels={sidebarPanels}
               activePanelId={activeSidebarId}
               onSelectPanel={(id) => {
-                const command = sidebarPanels.find((panel) => panel.id === id)?.command;
-                if (command) {
-                  void runtime.commands.execute(command);
-                  return;
-                }
                 setFocusedWorkspaceId(null);
                 if (id === activeSidebarId) {
                   setSidebarCollapsed((prev) => !prev);

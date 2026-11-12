@@ -3,10 +3,6 @@ dist/
 target/
 .DS_Store
 .env.local
-.env.pilot
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
 *.log
 *.tsbuildinfo
 vite.config.js

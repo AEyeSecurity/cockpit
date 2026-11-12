@@ -453,7 +453,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
 
     async function pollVisionData(): Promise<void> {
       try {
-        const response = await fetch(`${runtime.env.managed ? "/operation/vision" : VISION_DATA_URL}?_=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch(`${VISION_DATA_URL}?_=${Date.now()}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`vision data ${response.status}`);
         const payload = await response.json() as unknown;
         if (cancelled) return;

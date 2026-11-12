@@ -11,7 +11,7 @@ COPY .env.example .env
 RUN npm run build
 
 FROM build AS test
-CMD ["sh", "-c", "npm run test && npm run test:auth"]
+CMD ["npm", "run", "test"]
 
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev
@@ -26,28 +26,6 @@ ENV PTY_HOST=0.0.0.0 PTY_CWD=/home/node SHELL=/bin/bash
 USER node
 EXPOSE 7681
 CMD ["node", "pty-server.js"]
-
-FROM build AS build-pilot
-ARG COCKPIT_PASSWORD_ONLY=false
-ARG COCKPIT_KEEP_CONNECTIONS=false
-RUN VITE_COCKPIT_AUTH=required VITE_COCKPIT_LOCAL_PASSWORD_ONLY=$COCKPIT_PASSWORD_ONLY VITE_COCKPIT_KEEP_CONNECTIONS=$COCKPIT_KEEP_CONNECTIONS npm run build
-
-FROM nginx:stable-alpine AS web-pilot
-ARG COCKPIT_KEEP_CONNECTIONS=false
-COPY docker/nginx.pilot.conf /etc/nginx/conf.d/default.conf
-RUN if [ "$COCKPIT_KEEP_CONNECTIONS" = true ]; then sed -i '/add_header Content-Security-Policy/d' /etc/nginx/conf.d/default.conf; fi
-COPY --from=build-pilot /app/dist /usr/share/nginx/html
-EXPOSE 80
-
-FROM node:24-bookworm-slim AS auth
-WORKDIR /app
-RUN mkdir /data && chown node:node /data
-COPY --from=dependencies /app/node_modules/ws ./node_modules/ws
-COPY server/auth ./server/auth
-ENV NODE_ENV=production
-USER node
-EXPOSE 8080
-CMD ["node", "server/auth/server.mjs"]
 
 FROM nginx:stable-alpine AS web
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
