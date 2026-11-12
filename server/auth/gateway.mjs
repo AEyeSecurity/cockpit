@@ -197,7 +197,10 @@ export function createGateway(identity, env, control, salus) {
               if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024 * 1024) {
                 client.send(JSON.stringify(message));
               }
-            }, () => terminate("salus_connection_lost"));
+            }, () => {
+              closeCause = "salus_connection_lost";
+              client.close(1013, "Se perdió el enlace entre Cockpit y SALUS.");
+            });
             const untrack = track(session, () => terminate("session_expired_or_revoked"));
             // Browsers answer WebSocket pings even when background JavaScript timers are throttled.
             client.on("pong", () => {

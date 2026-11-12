@@ -41,9 +41,13 @@ export function createSalusLink(url) {
     const next = new WebSocket(url, { handshakeTimeout: 4000, followRedirects: false, maxPayload: 16 * 1024 * 1024 });
     socket = next;
     next.on("message", receive);
-    next.on("error", () => next.terminate());
-    next.on("close", () => {
+    next.on("error", (error) => {
+      console.warn("Cockpit SALUS WebSocket error", { code: error.code ?? error.name, message: error.message });
+      next.terminate();
+    });
+    next.on("close", (code, reason) => {
       if (socket !== next) return;
+      console.warn("Cockpit SALUS WebSocket closed", { code, reason: reason.toString().slice(0, 123) });
       snapshots.clear();
 
       for (const id of pending.keys()) clearPending(id, { op: "ack", ok: false, error: "SALUS_DISCONNECTED" });
@@ -120,7 +124,17 @@ export function createSalusLink(url) {
         locked = response.ok === true && response.control_locked === true;
       };
       // SALUS accepts manual commands only on the connection owning the lease.
-      const before = latest();
+      // A new SALUS socket sends its initial state after the handshake.
+      // Leave time for the lock request and its confirmation within the stop deadline.
+      const link = connect();
+      const stateDeadline = Date.now() + 1800;
+      let before = latest();
+      while (!before && link.readyState <= WebSocket.OPEN && Date.now() < stateDeadline) {
+        await delay(50, undefined, { signal });
+        before = latest();
+      }
+      signal.throwIfAborted();
+      if (socket !== link || link.readyState !== WebSocket.OPEN) throw new ControlConflict("SALUS_UNAVAILABLE");
       if (before?.control_owner === true && before.control_locked === false) {
         if (before.manual_enabled !== true) {
           const response = await command({ op: "set_manual_mode", enabled: true }, signal);

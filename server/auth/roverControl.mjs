@@ -78,10 +78,11 @@ export function createRoverControl({ stop, canKeepRoute = () => false, now = Dat
 
   async function release(id, reason) {
     instances.delete(id);
-    if (owner !== id || phase === "stopping") return;
+    if (owner !== id) return;
+    owner = null;
+    if (phase === "stopping") return;
     record("control.released", id);
     await stopAndFence(id, reason);
-    owner = null;
     phase = "idle";
     revision++;
   }
