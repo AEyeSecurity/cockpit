@@ -41,6 +41,7 @@ body{background:var(--bg);font-family:var(--font-ui)}
 
 /* ── SHELL ── */
 .shell{display:grid;grid-template-rows:48px minmax(0,1fr) 28px;gap:10px;padding:10px;height:100vh;overflow:hidden}
+.shell-operator{height:100%}
 .shell-body{display:grid;gap:10px;min-height:0}
 
 /* ── TOOLBAR ── */

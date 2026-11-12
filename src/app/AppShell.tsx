@@ -528,7 +528,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   const workspaceFocused = focusedWorkspaceId !== null;
 
   return (
-    <div className="shell">
+    <div className={runtime.env.operatorUser ? "shell shell-operator" : "shell"}>
       <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
       <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
