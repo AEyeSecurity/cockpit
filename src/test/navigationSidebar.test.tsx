@@ -129,6 +129,34 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.queryByText("VOLVER A HOME")).not.toBeInTheDocument();
   });
 
+  it("keeps route start pending until the robot reports a running mission", async () => {
+    const runtime = await bootstrapApp();
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!sidebar || sidebar.slot !== "sidebar") throw new Error("Navigation sidebar contribution not registered");
+    const navigation = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher;
+    navigation.applyLocalControlLock(false, "SIM_BACKEND");
+    navigation.queueWaypoint({ x: 10, y: 10 });
+    navigation.queueWaypoint({ x: 20, y: 20 });
+    const send = vi.spyOn(navigation, "sendRouteMission")
+      .mockRejectedValueOnce(new Error("Ruta rechazada"))
+      .mockResolvedValue({ inputCount: 2, expandedCount: 2, loopRoute: false });
+    render(<>{sidebar.render()}</>);
+
+    fireEvent.click(screen.getByRole("button", { name: /INICIAR RUTA/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ruta rechazada");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /INICIAR RUTA/ })));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: /INICIANDO RUTA/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /INICIAR RUTA/ })).not.toBeInTheDocument();
+
+    act(() => dispatcher.handleIncoming({
+      op: "state", route_mission: { active: true, status: "route active" }
+    }, dispatcher.transportId));
+    expect(screen.getByRole("button", { name: /CANCELAR MISIÓN/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /INICIANDO RUTA/ })).not.toBeInTheDocument();
+  }, 15000);
+
   it("shows the empty state and opens the map to place the first point", async () => {
     const runtime = await bootstrapApp();
     const editor = runtime.contributions.get("nav2.workspace.route-editor");
