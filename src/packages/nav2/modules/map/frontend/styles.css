@@ -670,6 +670,12 @@
   border: 1px solid rgba(74, 156, 205, 0.24);
 }
 
+/* Above Leaflet markers (600), below tooltips (650). */
+.leaflet-robot-pane {
+  z-index: 610;
+  pointer-events: none;
+}
+
 .robot-icon {
   width: 40px;
   height: 40px;

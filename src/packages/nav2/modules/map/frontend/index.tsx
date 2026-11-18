@@ -1136,6 +1136,7 @@ function LeafletMapCanvas({
       wheelPxPerZoomLevel: MAP_WHEEL_PX_PER_ZOOM_LEVEL,
       wheelDebounceTime: MAP_WHEEL_DEBOUNCE_MS
     }).setView([initialCenterLat, initialCenterLon], initialZoom);
+    map.createPane("robot");
     L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
@@ -1721,6 +1722,7 @@ function LeafletMapCanvas({
     if (!robotMarkerRef.current) {
       robotMarkerRef.current = L.marker(latLng, {
         icon: buildRobotIcon(robotPose.headingDeg),
+        pane: "robot",
         interactive: false
       }).addTo(map);
       return;
