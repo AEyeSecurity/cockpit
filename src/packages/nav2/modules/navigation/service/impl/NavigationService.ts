@@ -94,6 +94,8 @@ interface PatrolMissionProfileWireRefs {
 export type ReturnHomePhase = "idle" | "requested" | "waiting_exit" | "active" | "completed" | "unavailable";
 
 export interface RouteMissionStateData {
+  preparationId?: number;
+  preparationRejection?: string;
   active: boolean;
   paused: boolean;
   loop: boolean;
@@ -203,6 +205,7 @@ export interface NavigationState {
   navigationStartProfile: NavigationProfile;
   loopRoute: boolean;
   routeMission: RouteMissionStateData;
+  routePreparationResult?: { id: number; rejection: string };
   goalMode: boolean;
   manualMode: boolean;
   manualDisablePending: boolean;
@@ -935,6 +938,8 @@ function parseRouteMissionState(message: Record<string, unknown>): RouteMissionS
   const blockedState = String(candidate.blocked_state ?? candidate.blockedState ?? "");
 
   return {
+    preparationId: Number(candidate.preparation_id) || undefined,
+    preparationRejection: typeof candidate.preparation_rejection === "string" ? candidate.preparation_rejection : undefined,
     active: candidate.active === true,
     paused: candidate.paused === true,
     loop: candidate.loop === true,
@@ -1303,6 +1308,7 @@ export class NavigationService {
     dispatcher.subscribeNavEvent?.((message) => {
       const fromEvent = extractControlLockFromNavEvent(message);
       this.applyControlLockUpdate(fromEvent);
+      this.applyRoutePreparationEvent(message);
     });
     dispatcher.subscribeRecordingCount?.((message) => {
       this.applyRecordingCountPayload(message);
@@ -2590,7 +2596,7 @@ export class NavigationService {
     legSpacingM?: number;
     chunkSpanM?: number;
     chunkMaxWaypoints?: number;
-  }): Promise<{ inputCount: number; expandedCount: number; loopRoute: boolean }> {
+  }): Promise<{ inputCount: number; expandedCount: number; loopRoute: boolean; preparationId?: number }> {
     if (this.state.controlLocked) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
     }
@@ -2622,6 +2628,7 @@ export class NavigationService {
     if (options?.chunkSpanM !== undefined) payload.chunk_span_m = Number(options.chunkSpanM);
     if (options?.chunkMaxWaypoints !== undefined) payload.chunk_max_waypoints = Number(options.chunkMaxWaypoints);
 
+    this.state = { ...this.state, routePreparationResult: undefined };
     const response = await this.robotDispatcher.requestRouteMission(payload as never);
     if (response.ok === false) {
       throw new Error(String(response.error ?? "Route mission dispatch failed"));
@@ -2637,7 +2644,8 @@ export class NavigationService {
     return {
       inputCount,
       expandedCount,
-      loopRoute: this.state.loopRoute
+      loopRoute: this.state.loopRoute,
+      preparationId: Number(response.preparation_id) || undefined
     };
   }
 
@@ -3554,12 +3562,28 @@ export class NavigationService {
     this.emit();
   }
 
+  private applyRoutePreparationEvent(message: Record<string, unknown>): void {
+    const { code, component, details } = message;
+    if (component !== "route_executor" || !Array.isArray(details)) return;
+    if (code !== "ROUTE_PREPARATION_COMPLETED" &&
+        code !== "ROUTE_PREPARATION_REJECTED" && code !== "ROUTE_ANCHOR_REJECTED") return;
+    const values = new Map(details.map(asRecord).filter((entry) => entry !== null)
+      .map(({ key, value }) => [key, value]));
+    const id = Number(values.get("preparation_id"));
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    const rejection = code === "ROUTE_PREPARATION_COMPLETED" ? "" : String(values.get("reason") || code);
+    this.state = { ...this.state, routePreparationResult: { id, rejection } };
+    this.emit();
+  }
+
   private applyRouteMissionPayload(message: Record<string, unknown>): void {
     const routeMission = parseRouteMissionState(message);
     if (!routeMission) return;
     const goalActiveHint = extractGoalActiveHint(message);
     const nextRouteMission = shouldPreserveRouteMissionSnapshot(this.state.routeMission, routeMission, goalActiveHint)
-      ? this.state.routeMission
+      ? { ...this.state.routeMission,
+          preparationId: routeMission.preparationId,
+          preparationRejection: routeMission.preparationRejection }
       : routeMission;
     const routeStatus = nextRouteMission.status.trim();
     if (nextRouteMission === this.state.routeMission && routeStatus.length === 0) return;

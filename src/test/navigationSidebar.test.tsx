@@ -129,6 +129,92 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.queryByText("VOLVER A HOME")).not.toBeInTheDocument();
   });
 
+  it.each(["nav_event", "state"])("shows preparation and explains a matching rejection via %s", async (op) => {
+    const runtime = await bootstrapApp();
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!sidebar || sidebar.slot !== "sidebar") throw new Error("Navigation sidebar not registered");
+    const navigation = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connection = runtime.services.getService<{
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher;
+    const send = vi.spyOn(navigation, "sendRouteMission").mockResolvedValue({
+      inputCount: 2, expandedCount: 2, loopRoute: true, preparationId: 7
+    });
+    connection.applyTransportStatus({ connected: true, intentional: false, reason: "" });
+    navigation.applyLocalControlLock(false, "SIM_BACKEND");
+    navigation.queueWaypoint({ x: 10, y: 10 });
+    navigation.queueWaypoint({ x: 20, y: 20 });
+
+    render(<>{sidebar.render()}</>);
+    fireEvent.click(screen.getByRole("button", { name: /INICIAR RUTA/ }));
+    expect(screen.getByText("Preparando ruta…")).toBeInTheDocument();
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    const publishRejection = (id: number) => act(() => {
+      const message = op === "state" ? {
+        op,
+        route_mission: { preparation_id: id, preparation_rejection: "no_near_segment" }
+      } : {
+        op,
+        component: "route_executor",
+        code: "ROUTE_ANCHOR_REJECTED",
+        details: [{ key: "preparation_id", value: String(id) }, { key: "reason", value: "no_near_segment" }]
+      };
+      dispatcher.handleIncoming(message, dispatcher.transportId);
+    });
+    publishRejection(6);
+    expect(screen.getByText("Preparando ruta…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /INICIAR RUTA/ })).toBeDisabled();
+    expect(screen.queryByText(/La ruta en bucle no arrancó/)).not.toBeInTheDocument();
+
+    publishRejection(7);
+    expect(await screen.findByText(/desmarca «Repetir la ruta al terminar»/)).toHaveAttribute("role", "alert");
+    expect(screen.queryByText("Preparando ruta…")).not.toBeInTheDocument();
+    navigation.stopControlHeartbeat();
+  });
+
+  it("allows a route restart after cancellation supersedes its preparation", async () => {
+    const runtime = await bootstrapApp();
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!sidebar || sidebar.slot !== "sidebar") throw new Error("Navigation sidebar not registered");
+    const navigation = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connection = runtime.services.getService<{
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher;
+    const send = vi.spyOn(navigation, "sendRouteMission")
+      .mockResolvedValueOnce({ inputCount: 2, expandedCount: 2, loopRoute: true, preparationId: 7 })
+      .mockResolvedValueOnce({ inputCount: 2, expandedCount: 2, loopRoute: true, preparationId: 9 });
+    connection.applyTransportStatus({ connected: true, intentional: false, reason: "" });
+    navigation.applyLocalControlLock(false, "SIM_BACKEND");
+    navigation.queueWaypoint({ x: 10, y: 10 });
+    navigation.queueWaypoint({ x: 20, y: 20 });
+
+    render(<>{sidebar.render()}</>);
+    fireEvent.click(screen.getByRole("button", { name: /INICIAR RUTA/ }));
+    act(() => {
+      dispatcher.handleIncoming({
+        op: "nav_event",
+        component: "route_executor",
+        code: "ROUTE_PREPARATION_COMPLETED",
+        details: [{ key: "preparation_id", value: "7" }]
+      }, dispatcher.transportId);
+    });
+    expect(await screen.findByText("Ruta iniciada.")).toBeInTheDocument();
+    act(() => {
+      dispatcher.handleIncoming({
+        op: "state",
+        route_mission: { preparation_id: 8, status: "CANCELLED", active: false }
+      }, dispatcher.transportId);
+    });
+    const restart = screen.getByRole("button", { name: /INICIAR RUTA/ });
+    expect(restart).toBeEnabled();
+    expect(screen.queryByText("Ruta iniciada.")).not.toBeInTheDocument();
+    fireEvent.click(restart);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    navigation.stopControlHeartbeat();
+  });
+
   it("shows the empty state and opens the map to place the first point", async () => {
     const runtime = await bootstrapApp();
     const editor = runtime.contributions.get("nav2.workspace.route-editor");

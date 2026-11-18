@@ -862,12 +862,34 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const [navigationProfilePending, setNavigationProfilePending] = useState(false);
   const [routeStartPending, setRouteStartPending] = useState(false);
   const [routeStartError, setRouteStartError] = useState("");
+  const [routePreparationId, setRoutePreparationId] = useState<number>();
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
   const homeWaypointCount = navState.waypoints.filter((waypoint) => waypoint.role === "home").length;
   const lockReasonText = formatControlLockReason(navState.controlLockReason);
   const routeMission = navState.routeMission;
+  const preparationEvent = navState.routePreparationResult;
+  const preparationSnapshotMatches = routePreparationId === routeMission.preparationId;
+  const preparationSuperseded = routePreparationId !== undefined &&
+    routeMission.preparationId !== undefined && routeMission.preparationId > routePreparationId;
+  const preparationCompleted = routePreparationId !== undefined &&
+    preparationEvent?.id === routePreparationId && preparationEvent.rejection === "";
+  const awaitingRouteState = preparationCompleted && !preparationSuperseded &&
+    (!preparationSnapshotMatches || routeMission.status.toLowerCase() === "idle");
+  const rejection = !connState.connected || preparationSuperseded || routePreparationId === undefined ? "" :
+    preparationEvent?.id === routePreparationId ? preparationEvent.rejection :
+    preparationSnapshotMatches ? routeMission.preparationRejection ?? "" : "";
+  const preparingRoute = connState.connected && routePreparationId !== undefined && !rejection &&
+    preparationEvent?.id !== routePreparationId && !(preparationSnapshotMatches && routeMission.active) &&
+    !preparationSuperseded;
+  const routePreparationError = rejection === "no_near_segment"
+    ? "La ruta en bucle no arrancó porque el robot no está lo bastante cerca de un tramo válido. " +
+      "Acércalo y oriéntalo en el sentido del recorrido, o desmarca «Repetir la ruta al terminar» para recorrerla una vez."
+    : rejection ? "El robot no pudo preparar la ruta. Revisa su posición y el recorrido antes de reintentar." : "";
+  useEffect(() => {
+    if (!connState.connected || preparationSuperseded) setRoutePreparationId(undefined);
+  }, [connState.connected, preparationSuperseded]);
   const patrolMission = navState.patrolMission;
   const patrolProfile = navState.patrolMissionProfile;
   const patrolReadiness = getPatrolProfileReadiness(patrolProfile);
@@ -899,8 +921,8 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       : navState.controlLocked
         ? "Conecta y desbloquea los controles para iniciar."
         : "Patrulla lista.";
-  const routeStartDisabled = navState.controlLocked || routeStartPending || patrolProfileConfigured || wps < 2;
-  const patrolStartDisabled = navState.controlLocked || patrolStartPending || !patrolReady;
+  const routeStartDisabled = navState.controlLocked || routeStartPending || preparingRoute || awaitingRouteState || patrolProfileConfigured || wps < 2;
+  const patrolStartDisabled = navState.controlLocked || routeStartPending || preparingRoute || awaitingRouteState || patrolStartPending || !patrolReady;
   const goalModeSelected = navState.goalMode;
   const navigationProfileLocked =
     navState.controlLocked ||
@@ -958,12 +980,14 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       }
       return;
     }
-    if (routeStartPending) return;
+    if (routeStartPending || preparingRoute || awaitingRouteState) return;
     setRouteStartPending(true);
     setRouteStartError("");
+    setRoutePreparationId(undefined);
     try {
       const started = await navService.sendRouteMission();
-      emitInfo(`Ruta iniciada (${started.inputCount} puntos, ${started.expandedCount} tramos)`);
+      setRoutePreparationId(started.preparationId);
+      emitInfo(`Ruta enviada (${started.inputCount} puntos)`);
     } catch (error) {
       const errorMessage = `No se pudo iniciar la ruta: ${String(error)}`;
       setRouteStartError(errorMessage);
@@ -1151,6 +1175,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               <button type="button" className="ncb-wide cancel-btn" onClick={async () => {
                 try {
                   await navService.cancelRouteMission();
+                  setRoutePreparationId(undefined);
                   emitInfo("Misión cancelada");
                 } catch (error) {
                   emitError(`No se pudo cancelar la misión: ${String(error)}`);
@@ -1177,7 +1202,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
                 <button type="button" className="ncb-wide send-btn" disabled={routeStartDisabled} onClick={() => void startMission("route")}>
                   <ButtonFace icon={<NavGlyph kind="route" />} label="INICIAR RUTA" meta="Recorrer puntos en orden" />
                 </button>
-                <p className="nav-sidebar-execution-hint">{routeStartPending ? "Iniciando…" : routeStartReason}</p>
+                <p className="nav-sidebar-execution-hint" role="status">
+                  {routeStartPending || preparingRoute ? "Preparando ruta…" : awaitingRouteState ? "Ruta iniciada." : routeStartReason}
+                </p>
               </div>
               <div className="nav-sidebar-execution-option">
                 <button type="button" className="ncb-wide send-btn" disabled={patrolStartDisabled} onClick={() => void startMission("patrol")}>
@@ -1187,7 +1214,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
               </div>
             </>
           )}
-          {routeStartError || patrolStartError ? <p className="ps-status-error" role="alert">{routeStartError || patrolStartError}</p> : null}
+          {routeStartError || routePreparationError || patrolStartError ? (
+            <p className="ps-status-error" role="alert">{routeStartError || routePreparationError || patrolStartError}</p>
+          ) : null}
         </div>
       </NavSidebarCollapsibleSection>
 
