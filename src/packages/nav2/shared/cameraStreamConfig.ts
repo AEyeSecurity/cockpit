@@ -52,7 +52,18 @@ function parsePositiveInt(value: unknown, fallback: number, minimum: number): nu
 }
 
 function readNav2CameraConfig(runtime: ModuleContext): Nav2CameraConfig {
-  return runtime.getPackageConfig<Record<string, unknown>>("nav2") as Nav2CameraConfig;
+  const config = runtime.getPackageConfig<Record<string, unknown>>("nav2") as Nav2CameraConfig;
+  if (!runtime.env.managed) return config;
+  return {
+    ...config,
+    camera_mjpeg_url: "/operation/mjpeg",
+    camera_webrtc_url: new URL("/operation/camera/cam3/whep", window.location.origin).href,
+    camera_mobile_webrtc_url: new URL("/operation/camera/cam4/whep", window.location.origin).href,
+    camera_reverse_webrtc_url: new URL("/operation/camera/cam5/whep", window.location.origin).href,
+    camera_normal_webrtc_url: new URL("/operation/camera/cam3_normal/whep", window.location.origin).href,
+    camera_mobile_normal_webrtc_url: new URL("/operation/camera/cam4_normal/whep", window.location.origin).href,
+    camera_reverse_normal_webrtc_url: new URL("/operation/camera/cam5_normal/whep", window.location.origin).href
+  };
 }
 
 export type CameraStreamQuality = "saving" | "normal";

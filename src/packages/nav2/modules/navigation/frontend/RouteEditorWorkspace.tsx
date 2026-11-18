@@ -4,6 +4,7 @@ import { ShellCommands } from "../../../../../app/shellCommands";
 import { DIALOG_SERVICE_ID, type DialogService } from "../../../../core/modules/runtime/service/impl/DialogService";
 import { NavigationService, type GoalInput, type NavigationState, type PatrolRouteSegment } from "../service/impl/NavigationService";
 import { getPatrolProfileReadiness } from "../patrolProfileReadiness";
+import { useRoverAccessContext } from "./RoverAccessDialog";
 import "./routeEditor.css";
 
 const NAVIGATION_SERVICE_ID = "service.navigation";
@@ -35,7 +36,39 @@ function missingRequirementsText(missing: string[]): string {
   return missing.map((item) => labels[item] ?? item.toLowerCase()).join(", ");
 }
 
+export async function openSavedRoute(runtime: ModuleContext, navigation: NavigationService, name: string): Promise<string | undefined> {
+  if (!name) return;
+  if (navigation.getState().routeEditor.dirty) {
+    const dialogs = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
+    if (!(await dialogs.confirm({
+      title: "Cambios sin guardar",
+      message: `La ruta tiene cambios sin guardar. Si abrís «${name}», se perderán esos cambios.`,
+      confirmLabel: "Abrir ruta",
+      cancelLabel: "Cancelar",
+      danger: true
+    }))) return;
+  }
+  const count = await navigation.loadNamedRoute(name);
+  return `Ruta «${name}» abierta (${count} puntos).`;
+}
+
+export function SavedRoutePicker({ state, importing = false, onOpen }: {
+  state: NavigationState;
+  importing?: boolean;
+  onOpen: (name: string) => Promise<void>;
+}): JSX.Element {
+  const disabled = !state.routeLibrary.connected || state.routeLibrary.busy || importing ||
+    state.routeMission.active || state.routeMission.paused || state.patrolMission.active;
+  return <label className="route-editor-load-label">
+    <select disabled={disabled} aria-label="Abrir ruta guardada" value="" onChange={(event) => void onOpen(event.target.value)}>
+      <option value="">Abrir ruta guardada…</option>
+      {state.savedRouteNames.map((name) => <option key={name} value={name}>{name}</option>)}
+    </select>
+  </label>;
+}
+
 export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const roverAccess = useRoverAccessContext();
   const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const dialogs = runtime.services.getService<DialogService>(DIALOG_SERVICE_ID);
   const [state, setState] = useState<NavigationState>(navigation.getState());
@@ -116,11 +149,9 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     }
   };
   const loadRoute = async (name: string): Promise<void> => {
-    if (!name) return;
-    if (!(await confirmDiscard(`abrir «${name}»`))) return;
     try {
-      const count = await navigation.loadNamedRoute(name);
-      setMessage(`Ruta «${name}» abierta (${count} puntos).`);
+      const message = await openSavedRoute(runtime, navigation, name);
+      if (message) setMessage(message);
     } catch (error) {
       reportError(error);
     }
@@ -204,6 +235,9 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
     }];
   }) : [];
 
+  if (roverAccess?.access?.mode === "spectator") {
+    return <main className="route-editor" aria-label="Editor de rutas"><p>El editor está deshabilitado en modo espectador.</p></main>;
+  }
   return (
     <main className="route-editor" aria-label="Editor de rutas">
       <header className="route-editor-header">
@@ -254,12 +288,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
             <button type="button" className="route-editor-button" disabled={libraryDisabled || count === 0} onClick={() => void saveAs()}>
               Guardar como…
             </button>
-            <label className="route-editor-load-label">
-              <select disabled={libraryDisabled || missionEditingDisabled} aria-label="Abrir ruta guardada" value="" onChange={(event) => void loadRoute(event.target.value)}>
-                <option value="">Abrir ruta guardada…</option>
-                {state.savedRouteNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </label>
+            <SavedRoutePicker state={state} importing={importing} onOpen={loadRoute} />
             {count > 0 ? <button type="button" className="route-editor-button danger" disabled={editingDisabled} onClick={async () => {
               if (!(await dialogs.confirm({ title: "Borrar puntos de la ruta", message: `Se quitarán los ${count} puntos del borrador actual. ¿Continuar?`, confirmLabel: "Borrar puntos", danger: true }))) return;
               withError(() => navigation.clearWaypoints(), "Se quitaron los puntos del borrador.");

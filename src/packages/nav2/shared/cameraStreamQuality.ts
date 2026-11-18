@@ -1,3 +1,4 @@
+import { accountStorage } from "../../../core/config/accountStorage";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ModuleContext } from "../../../core/types/module";
 import { CORE_EVENTS } from "../../../core/events/topics";
@@ -5,7 +6,7 @@ import { readCameraStreamConfig, supportsNormalCameraQuality, type CameraStreamQ
 
 const STORAGE_KEY = "cockpit.camera.streamQuality";
 function readSavedQuality(): CameraStreamQuality {
-  try { return window.localStorage.getItem(STORAGE_KEY) === "normal" ? "normal" : "saving"; }
+  try { return accountStorage().getItem(STORAGE_KEY) === "normal" ? "normal" : "saving"; }
   catch { return "saving"; }
 }
 let quality = readSavedQuality();
@@ -18,7 +19,7 @@ export const cameraStreamQuality = {
   },
   set(next: CameraStreamQuality) {
     quality = next;
-    try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* Memory still works without storage. */ }
+    try { accountStorage().setItem(STORAGE_KEY, next); } catch { /* Memory still works without storage. */ }
     listeners.forEach(listener => listener());
   }
 };

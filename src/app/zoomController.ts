@@ -1,3 +1,4 @@
+import { accountStorage } from "../core/config/accountStorage";
 import { setWebviewZoom } from "../platform/host/webviewZoom";
 
 export interface ZoomStorageAdapter {
@@ -26,7 +27,7 @@ export function getZoomStorageAdapter(): ZoomStorageAdapter {
     typeof window.localStorage.getItem === "function" &&
     typeof window.localStorage.setItem === "function"
   ) {
-    return window.localStorage;
+    return accountStorage();
   }
   return {
     getItem: (key: string) => (zoomMemoryStorage.has(key) ? zoomMemoryStorage.get(key)! : null),
