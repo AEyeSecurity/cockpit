@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 import "./styles.css";
+import robotMarkerUrl from "./robot-marker.png";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -570,7 +571,7 @@ function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
   const classes = hasHeading ? "robot-icon" : "robot-icon no-heading";
   return L.divIcon({
     className: "",
-    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><div class="robot-arrow"></div></div>`,
+    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><img src="${robotMarkerUrl}" alt="" draggable="false" /></div>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
