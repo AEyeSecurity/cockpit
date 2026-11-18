@@ -60,6 +60,19 @@ describe("navigation sidebar and route editor", () => {
     expect(navigationService.getState().manualSteeringAngleDeg).toBe(24);
   });
 
+  it("keeps one current-route panel and saved-route access for signed-in users", async () => {
+    const runtime = await bootstrapApp({ operatorUser: true });
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!sidebar || sidebar.slot !== "sidebar") throw new Error("Navigation sidebar contribution not registered");
+    render(<>{sidebar.render()}</>);
+
+    expect(screen.getAllByText("RUTA ACTUAL")).toHaveLength(1);
+    expect(screen.getAllByText("EDITAR / AÑADIR PUNTOS")).toHaveLength(1);
+    expect(screen.getByRole("combobox", { name: "Abrir ruta guardada" })).toBeDisabled();
+    expect(screen.getByText("RUTA AUTOMÁTICA")).toBeInTheDocument();
+    expect(screen.getByText("Parada de emergencia")).toBeInTheDocument();
+  });
+
   it("shows the complete saved-route list above the waypoint editor", async () => {
     installLocalStorageMock();
     const runtime = await bootstrapApp();

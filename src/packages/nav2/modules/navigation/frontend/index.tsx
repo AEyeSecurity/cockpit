@@ -1,4 +1,6 @@
 import { MissionAlertSound } from "./MissionAlertSound";
+import { useRoverAccessContext } from "./RoverAccessDialog";
+import { RoverDestinationFields } from "./RoverDestinationFields";
 import { describeRouteBlock } from "../blockedRouteStatus";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
@@ -18,7 +20,7 @@ import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../ro
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
-import { RouteEditorWorkspace } from "./RouteEditorWorkspace";
+import { openSavedRoute, RouteEditorWorkspace, SavedRoutePicker } from "./RouteEditorWorkspace";
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.robot";
@@ -644,9 +646,11 @@ function ManualRangeControl({
   step,
   unit,
   digits,
-  onChange
+  onChange,
+  choices
 }: {
   label: string;
+  choices?: number[];
   value: number;
   min: number;
   max: number;
@@ -656,6 +660,8 @@ function ManualRangeControl({
   onChange: (value: number) => void;
 }): JSX.Element {
   const midpoint = (min + max) / 2;
+  const selected = choices?.reduce((nearest, choice, index) =>
+    Math.abs(choice - value) < Math.abs(choices[nearest] - value) ? index : nearest, 0);
   return (
     <label className="nav-manual-range">
       <span className="nav-manual-range-head">
@@ -664,13 +670,17 @@ function ManualRangeControl({
       </span>
       <input
         type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
+        min={choices ? 0 : min}
+        max={choices ? choices.length - 1 : max}
+        step={choices ? 1 : step}
+        value={selected ?? value}
+        aria-valuetext={choices ? value.toFixed(digits) + " " + unit : undefined}
         aria-label={label}
         style={{ "--range-fill": `${rangeFillPct(value, min, max)}%` } as CSSProperties}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) => {
+          const position = Number(event.target.value);
+          onChange(choices?.[position] ?? position);
+        }}
       />
       <span className="nav-manual-range-scale" aria-hidden="true">
         <span>{min.toFixed(1)}</span>
@@ -679,6 +689,20 @@ function ManualRangeControl({
       </span>
     </label>
   );
+}
+
+function OperatorSpeedRange({ state, onChange }: { state: NavigationState; onChange: (mps: number) => void }): JSX.Element {
+  const min = Math.max(120, Math.ceil(state.manualLinearMin * 100));
+  const max = Math.max(min, Math.floor(state.manualLinearMax * 100));
+  const speeds: number[] = [];
+  for (let speed = min; speed <= max; speed++) {
+    if (speed <= 165 || speed >= 175) speeds.push(speed);
+  }
+  if (speeds.length === 0) speeds.push(165);
+  const choices = speeds.map((speed) => speed * 0.036);
+  return <ManualRangeControl label="Velocidad" unit="km/h" value={state.manualLinearSpeed * 3.6}
+    min={choices[0]} max={choices[choices.length - 1]} step={1} digits={2} choices={choices}
+    onChange={(kmh) => onChange(Math.round(kmh / 0.036) / 100)} />;
 }
 
 function NavSidebarCollapsibleSection({
@@ -790,8 +814,8 @@ function ConnectionSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <option value="sim">Sim</option>
           </select>
           <div className="input-grid">
-            <input value={state.host} onChange={(event) => service.setHost(event.target.value)} placeholder="Host" />
-            <input value={state.port} onChange={(event) => service.setPort(event.target.value)} placeholder="Port" />
+            <input readOnly={runtime.env.managed} value={state.host} onChange={(event) => service.setHost(event.target.value)} placeholder="Host" />
+            <input readOnly={runtime.env.managed} value={state.port} onChange={(event) => service.setPort(event.target.value)} placeholder="Port" />
           </div>
           <div className="action-grid">
             <button
@@ -851,11 +875,16 @@ function ConnectionStatusFooterItem({ runtime }: { runtime: ModuleContext }): JS
 }
 
 function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const operatorUser = runtime.env.operatorUser === true;
+  const [editingConnection, setEditingConnection] = useState(false);
+  const [savedRouteMessage, setSavedRouteMessage] = useState("");
   const navService = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
   const connService = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
   const telemetryService = getTelemetryService(runtime);
   const [navState, setNavState] = useState<NavigationState>(navService.getState());
   const [connState, setConnState] = useState(connService.getState());
+  const roverAccess = useRoverAccessContext();
+  const spectator = roverAccess?.access?.mode === "spectator";
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot | null>(
     telemetryService ? telemetryService.getSnapshot() : null
   );
@@ -998,35 +1027,40 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   };
   return (
     <div className="nav-sidebar">
+
       <NavSidebarCollapsibleSection title="CONEXIÓN" className="nav-sidebar-connection-section">
-        <select
+        {!operatorUser && !runtime.env.roverControlCsrf && <select
           className="connection-preset-select"
           value={connState.preset}
           onChange={(event) => connService.setPreset(event.target.value === "sim" ? "sim" : "real")}
         >
           <option value="real">Robot real</option>
           <option value="sim">Simulación</option>
-        </select>
-        <div className="input-grid">
+        </select>}
+        {!operatorUser && !runtime.env.roverControlCsrf && (
+          <div className="input-grid">
           <input
             value={connState.host}
+            readOnly={runtime.env.managed || (operatorUser && !editingConnection)}
             onChange={(event) => connService.setHost(event.target.value)}
             placeholder="Dirección del robot"
           />
           <input
             value={connState.port}
+            readOnly={runtime.env.managed || (operatorUser && !editingConnection)}
             onChange={(event) => connService.setPort(event.target.value)}
             placeholder="Puerto"
           />
         </div>
+        )}
         <div className="action-grid">
           <button
             type="button"
             className={joinClassNames("bt prim-btn", (connState.connected || connState.connecting) && "active")}
-            disabled={connState.connecting || connState.connected}
+            disabled={roverAccess?.busy || connState.connecting || connState.connected}
             onClick={async () => {
               try {
-                await connService.connect();
+                await (roverAccess ? roverAccess.connect() : connService.connect());
               } catch {
                 // error persisted in connState.lastError
               }
@@ -1050,7 +1084,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             disabled={!connState.connected && !connState.connecting}
             onClick={async () => {
               try {
-                await connService.disconnect();
+                await (roverAccess ? roverAccess.disconnect() : connService.disconnect());
               } catch {
                 // error persisted in connState.lastError
               }
@@ -1059,12 +1093,40 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             <ButtonFace icon={<NavGlyph kind="disconnect" />} label="DESCONECTAR" meta="Cerrar conexión" />
           </button>
         </div>
+        {runtime.env.roverControlCsrf && <RoverDestinationFields csrf={runtime.env.roverControlCsrf}
+          connected={connState.connected || connState.connecting || Boolean(roverAccess?.access)} />}
+        {operatorUser && !runtime.env.roverControlCsrf && (
+          <div className="input-grid">
+          <input
+            value={connState.host}
+            readOnly={runtime.env.managed || (operatorUser && !editingConnection)}
+            onChange={(event) => connService.setHost(event.target.value)}
+            placeholder="Dirección del robot"
+          />
+          <input
+            value={connState.port}
+            readOnly={runtime.env.managed || (operatorUser && !editingConnection)}
+            onChange={(event) => connService.setPort(event.target.value)}
+            placeholder="Puerto"
+          />
+        </div>
+        )}
+        <div className={operatorUser ? "nav-connection-status-row" : undefined}>
         <div className={connectionStatusClassName}>
           <span className="status-dot" aria-hidden="true" />
-          <span>{connectionStatusText}</span>
+          <span>{spectator ? "Modo espectador" : connectionStatusText}</span>
         </div>
+        {operatorUser && !runtime.env.roverControlCsrf && <button type="button" className="bt sec-btn nav-connection-edit" aria-pressed={editingConnection}
+          disabled={runtime.env.managed} onClick={() => setEditingConnection(!editingConnection)}>
+          {editingConnection ? "Listo" : "Editar"}
+        </button>}
+        </div>
+        {roverAccess?.error && !roverAccess?.access?.displaced && roverAccess?.access?.mode !== "waiting" && <p role="alert">{roverAccess.error}</p>}
+        {spectator && roverAccess?.access?.canTake && <button type="button" className="bt sec-btn" disabled={roverAccess?.busy}
+          onClick={() => void roverAccess.choose("take")}>Tomar control y frenar</button>}
       </NavSidebarCollapsibleSection>
 
+      <fieldset className="nav-spectator-controls" disabled={spectator}>
       <NavSidebarCollapsibleSection
         title="RUTA ACTUAL"
         badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
@@ -1078,6 +1140,16 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en el robot" : "Sin guardar"}
           </span>
           {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
+          {operatorUser && <SavedRoutePicker state={navState} onOpen={async (name) => {
+            setSavedRouteMessage("");
+            try {
+              const message = await openSavedRoute(runtime, navService, name);
+              if (message) setSavedRouteMessage(message);
+            } catch (error) {
+              setSavedRouteMessage(String(error));
+            }
+          }} />}
+          {operatorUser && savedRouteMessage && <p role="status">{savedRouteMessage}</p>}
           <button
             type="button"
             className="ncb-wide prim-btn nav-sidebar-open-route-editor"
@@ -1088,15 +1160,18 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
+      </fieldset>
+
       {/* ── CONTROL MANUAL ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection title="CONTROL MANUAL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
-          className={joinClassNames("ncb-wide", "sec-btn", !navState.controlLocked && "active")}
+          className={joinClassNames("ncb-wide", "sec-btn", (operatorUser || spectator) ? navState.controlLocked && "nav-emergency-active" : !navState.controlLocked && "active")}
+          aria-pressed={operatorUser || spectator ? navState.controlLocked : undefined}
           disabled={!connState.connected}
           onClick={async () => {
             try {
-              if (navState.controlLocked) {
+              if (navState.controlLocked && !spectator) {
                 await navService.unlockControls();
                 emitInfo("Controles desbloqueados");
               } else {
@@ -1110,10 +1185,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         >
           <ButtonFace
             icon={<NavGlyph kind="manual" />}
-            label={navState.controlLocked ? "DESBLOQUEAR CONTROLES" : "BLOQUEAR CONTROLES"}
+            label={operatorUser || spectator ? "Parada de emergencia" : navState.controlLocked ? "DESBLOQUEAR CONTROLES" : "BLOQUEAR CONTROLES"}
             meta={navState.controlLocked ? lockReasonText : "Control habilitado"}
           />
         </button>
+        <fieldset className="nav-spectator-controls" disabled={spectator}>
         <button
           type="button"
           className={joinClassNames("ncb-wide", "nav-manual-mode-btn", "send-btn", manualModeSelected && "active")}
@@ -1132,7 +1208,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
           <ButtonFace icon={<NavGlyph kind="manual" />} label="MANUAL" meta={manualModeSelected ? "Activado" : "Desactivado"} />
         </button>
         <div className="nav-manual-range-stack">
-          <ManualRangeControl
+          {operatorUser ? <OperatorSpeedRange state={navState} onChange={(value) => navService.setManualLinearSpeed(value)} /> : <ManualRangeControl
             label="Velocidad lineal"
             unit="m/s"
             value={navState.manualLinearSpeed}
@@ -1141,9 +1217,9 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             step={0.01}
             digits={2}
             onChange={(value) => navService.setManualLinearSpeed(value)}
-          />
+          />}
           <ManualRangeControl
-            label="Ángulo de giro / radio de giro"
+            label={operatorUser ? "Ángulo de giro" : "Ángulo de giro / radio de giro"}
             unit="°"
             value={navState.manualSteeringAngleDeg}
             min={navState.manualSteeringAngleMinDeg}
@@ -1153,8 +1229,10 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             onChange={(value) => navService.setManualSteeringAngleDeg(value)}
           />
         </div>
+        </fieldset>
       </NavSidebarCollapsibleSection>
 
+      <fieldset className="nav-spectator-controls" disabled={spectator}>
       <NavSidebarCollapsibleSection
         title="RUTA AUTOMÁTICA"
         className="nav-sidebar-automatic-section nav-sidebar-execution-section"
@@ -1265,6 +1343,7 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       </NavSidebarCollapsibleSection>
 
       <DatumSidebarSection runtime={runtime} />
+      </fieldset>
     </div>
   );
 }
@@ -2215,7 +2294,7 @@ function registerServices(
       limits.steeringAngleMaxDeg
     ),
     loopIntervalMs: parseLoopIntervalMs(config.manual_loop_interval_ms, 50)
-  });
+  }, ctx.env.operatorUser);
   ctx.services.registerService({
     id: NAVIGATION_SERVICE_ID,
     service: navigationService

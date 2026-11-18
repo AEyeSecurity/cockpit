@@ -80,7 +80,9 @@ export class WebSocketTransport implements Transport {
         const reason = intentional ? "" : this.buildCloseReason(event);
         this.emitStatus({ connected: false, intentional, reason });
 
-        if (!intentional) {
+        // Managed control instances are released when their socket closes.
+        // The next connection must negotiate a new instance through the UI.
+        if (!intentional && !this.ctx?.env.roverControlCsrf) {
           this.scheduleReconnect();
         }
       };
