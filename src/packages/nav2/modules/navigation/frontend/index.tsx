@@ -660,7 +660,7 @@ function ManualRangeControl({
     <label className="nav-manual-range">
       <span className="nav-manual-range-head">
         <span>{label}</span>
-        <strong>{value.toFixed(digits)}</strong>
+        <strong>{value.toFixed(digits)} <small>{unit}</small></strong>
       </span>
       <input
         type="range"
@@ -677,7 +677,6 @@ function ManualRangeControl({
         <span>{midpoint.toFixed(1)}</span>
         <span>{max.toFixed(1)}</span>
       </span>
-      <span className="nav-manual-range-unit">{unit}</span>
     </label>
   );
 }
@@ -1042,7 +1041,30 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
         </div>
       </NavSidebarCollapsibleSection>
 
-      {/* ── 2. CONTROL MANUAL ─────────────────────────────────────────── */}
+      <NavSidebarCollapsibleSection
+        title="RUTA ACTUAL"
+        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
+        className="nav-sidebar-route-summary-section"
+        defaultCollapsed={false}
+      >
+        <div className="nav-sidebar-route-summary">
+          <strong>{navState.routeEditor.activeRouteName ?? "Borrador nuevo"}</strong>
+          <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
+          <span className={navState.routeEditor.dirty ? "pending" : "saved"}>
+            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en el robot" : "Sin guardar"}
+          </span>
+          {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
+          <button
+            type="button"
+            className="ncb-wide prim-btn nav-sidebar-open-route-editor"
+            onClick={() => runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor")}
+          >
+            <ButtonFace icon={<NavGlyph kind="route" />} label="EDITAR / AÑADIR PUNTOS" meta="Abrir editor y colocar puntos en el mapa" />
+          </button>
+        </div>
+      </NavSidebarCollapsibleSection>
+
+      {/* ── CONTROL MANUAL ─────────────────────────────────────────── */}
       <NavSidebarCollapsibleSection title="CONTROL MANUAL" className="nav-sidebar-control-section nav-sidebar-manual-section">
         <button
           type="button"
@@ -1106,29 +1128,6 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
             digits={1}
             onChange={(value) => navService.setManualSteeringAngleDeg(value)}
           />
-        </div>
-      </NavSidebarCollapsibleSection>
-
-      <NavSidebarCollapsibleSection
-        title="RUTA ACTUAL"
-        badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
-        className="nav-sidebar-route-summary-section"
-        defaultCollapsed={false}
-      >
-        <div className="nav-sidebar-route-summary">
-          <strong>{navState.routeEditor.activeRouteName ?? "Borrador nuevo"}</strong>
-          <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
-          <span className={navState.routeEditor.dirty ? "pending" : "saved"}>
-            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en el robot" : "Sin guardar"}
-          </span>
-          {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
-          <button
-            type="button"
-            className="ncb-wide prim-btn nav-sidebar-open-route-editor"
-            onClick={() => runtime.commands.execute(ShellCommands.openWorkspace, "workspace.route-editor")}
-          >
-            <ButtonFace icon={<NavGlyph kind="route" />} label="EDITAR / AÑADIR PUNTOS" meta="Abrir editor y colocar puntos en el mapa" />
-          </button>
         </div>
       </NavSidebarCollapsibleSection>
 
