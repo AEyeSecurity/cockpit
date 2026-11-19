@@ -801,7 +801,7 @@ function CameraVisionWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX
           </div>
           <div className="cv-secondary-grid">
             <SecondaryCameraTile startRequest={mobileStartRequest} title="Móvil" description="Secundaria · movimiento" config={cameraConfig} url={cameraConfig.mobileWebrtcUrl ?? ""} />
-            <SecondaryCameraTile autoStart title="Reversa" description="Secundaria · vista trasera" config={cameraConfig} url={cameraConfig.reverseWebrtcUrl ?? ""} />
+            <SecondaryCameraTile title="Reversa" description="Secundaria · vista trasera" config={cameraConfig} url={cameraConfig.reverseWebrtcUrl ?? ""} />
           </div>
         </section>
 

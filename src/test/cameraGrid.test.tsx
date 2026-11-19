@@ -6,7 +6,7 @@ afterEach(cleanup);
 const config = { transport: "webrtc" as const, mjpegUrl: "", webrtcUrl: "primary", ptzRotationDeg: 0 as const, probeTimeoutMs: 3000, loadTimeoutMs: 7000 };
 describe("secondary camera feeds", () => {
   it("does not open a missing reverse camera", () => {
-    render(<SecondaryCameraTile autoStart title="Reversa" description="Trasera" config={config} url="" />);
+    render(<SecondaryCameraTile title="Reversa" description="Trasera" config={config} url="" />);
     expect(screen.queryByTestId("feed")).toBeNull();
     expect(screen.getByText("Cámara pendiente de conectar")).toBeTruthy();
   });
@@ -18,9 +18,13 @@ describe("secondary camera feeds", () => {
     fireEvent.click(screen.getByText("Detener"));
     expect(screen.queryByTestId("feed")).toBeNull();
   });
-  it("opens a configured reverse feed automatically", () => {
-    render(<SecondaryCameraTile autoStart title="Reversa" description="Trasera" config={config} url="rear" />);
+  it("keeps reverse paused until requested and releases it on stop", () => {
+    render(<SecondaryCameraTile title="Reversa" description="Trasera" config={config} url="rear" />);
+    expect(screen.queryByTestId("feed")).toBeNull();
+    fireEvent.click(screen.getByText("Ver video"));
     expect(screen.getByTestId("feed").textContent).toBe("rear");
+    fireEvent.click(screen.getByText("Detener"));
+    expect(screen.queryByTestId("feed")).toBeNull();
   });
   it("keeps paused feeds paused across quality changes and updates an active feed", () => {
     const view = render(<SecondaryCameraTile title="Móvil" description="Secundaria" config={config} url="mobile-saving" />);

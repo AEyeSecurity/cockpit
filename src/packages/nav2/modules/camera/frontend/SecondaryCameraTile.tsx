@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { CameraStreamSurface, type CameraStreamStatus } from "../../../shared/CameraStreamSurface";
 import type { CameraStreamRuntimeConfig } from "../../../shared/cameraStreamConfig";
 
-export function SecondaryCameraTile({ title, description, config, url, autoStart = false, startRequest = 0 }: {
-  title: string; description: string; config: CameraStreamRuntimeConfig; url: string; autoStart?: boolean; startRequest?: number;
+export function SecondaryCameraTile({ title, description, config, url, startRequest = 0 }: {
+  title: string; description: string; config: CameraStreamRuntimeConfig; url: string; startRequest?: number;
 }): JSX.Element {
-  const [requested, setRequested] = useState(autoStart);
+  const [requested, setRequested] = useState(false);
   useEffect(() => { if (startRequest > 0) setRequested(true); }, [startRequest]);
   const [status, setStatus] = useState<CameraStreamStatus | null>(null);
   const stream = useMemo(() => ({ ...config, transport: "webrtc" as const, webrtcUrl: url, webrtcReceiveAudio: true }), [config, url]);

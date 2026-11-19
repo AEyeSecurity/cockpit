@@ -37,6 +37,7 @@ interface CameraStreamSurfaceProps {
 }
 
 const MEDIAMTX_READER_SCRIPT = "/vendor/mediamtx/reader.js";
+const WEBRTC_STATUS_INTERVAL_MS = 500;
 const MJPEG_RETRY_DELAY_MS = 1000;
 const MJPEG_STALE_RECONNECT_MS = 3000;
 
@@ -225,6 +226,7 @@ export function CameraStreamSurface({
     let active = true;
     let clearFrameMonitor = (): void => undefined;
     let reader: MediaMTXWebRTCReaderInstance | null = null;
+    let lastStatusAt = -Infinity;
     const loadTimer = window.setTimeout(() => {
       if (!active) return;
       setStatus((previous) => previous.connected ? previous : {
@@ -260,6 +262,8 @@ export function CameraStreamSurface({
           receiveAudio: config.webrtcReceiveAudio,
           onError: (error) => {
             if (!active) return;
+            clearFrameMonitor();
+            lastStatusAt = -Infinity;
             setStatus((previous) => ({
               ...previous,
               connected: false,
@@ -283,7 +287,9 @@ export function CameraStreamSurface({
             void video.play().catch(() => undefined);
             clearFrameMonitor();
             clearFrameMonitor = startVideoFrameMonitor(video, () => {
-              if (!active) return;
+              const now = performance.now();
+              if (!active || now - lastStatusAt < WEBRTC_STATUS_INTERVAL_MS) return;
+              lastStatusAt = now;
               setStatus({
                 connected: true,
                 connecting: false,
