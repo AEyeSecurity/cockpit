@@ -5,9 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM dependencies AS build
+FROM dependencies AS source
 COPY . .
 COPY .env.example .env
+
+FROM source AS build
 RUN npm run build
 
 FROM build AS test
@@ -27,7 +29,7 @@ USER node
 EXPOSE 7681
 CMD ["node", "pty-server.js"]
 
-FROM build AS build-pilot
+FROM source AS build-pilot
 ARG COCKPIT_PASSWORD_ONLY=false
 ARG COCKPIT_KEEP_CONNECTIONS=false
 ARG COCKPIT_ROVER_CONTROL=false
