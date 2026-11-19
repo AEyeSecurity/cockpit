@@ -2028,7 +2028,7 @@ function InfoModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
               <span>Robot mode</span>
               <span>{telemetry?.robotStatus.mode ?? "unknown"}</span>
               <span>Battery</span>
-              <span>{telemetry ? `${Number(telemetry.robotStatus.batteryPct).toFixed(1)}%` : "n/a"}</span>
+              <span>{telemetry?.robotStatus.batteryPct != null ? `${telemetry.robotStatus.batteryPct.toFixed(1)}%` : "n/a"}</span>
               <span>GPS fix</span>
               <span>{String((activeSnapshot.gps_meta as Record<string, unknown> | undefined)?.fix_type_name ?? "UNKNOWN")}</span>
               <span>Precision</span>

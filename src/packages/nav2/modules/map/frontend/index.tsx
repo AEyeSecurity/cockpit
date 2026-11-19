@@ -2824,9 +2824,9 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
   const batteryVoltageRaw = telemetrySnapshot?.robotStatus.batteryVoltageV;
   const batteryVoltageV =
     typeof batteryVoltageRaw === "number" && Number.isFinite(batteryVoltageRaw) ? batteryVoltageRaw : null;
-  const batteryPctRaw = Number(telemetrySnapshot?.robotStatus.batteryPct);
+  const batteryPctRaw = telemetrySnapshot?.robotStatus.batteryPct;
   const batteryPct =
-    batteryVoltageV !== null && Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
+    typeof batteryPctRaw === "number" && Number.isFinite(batteryPctRaw) ? Math.max(0, Math.min(100, batteryPctRaw)) : null;
   const batteryState = String(telemetrySnapshot?.robotStatus.batteryState ?? "");
   const batteryMissionState = String(telemetrySnapshot?.robotStatus.batteryMissionState ?? "");
   const batteryReturnHomeRecommended = telemetrySnapshot?.robotStatus.batteryReturnHomeRecommended ?? null;
@@ -3397,7 +3397,7 @@ function MapWorkspaceView({ runtime }: { runtime: ModuleContext }): JSX.Element 
                   </div>
                   <div className="map-battery-main">
                     <span className="map-battery-value">{formatBatteryVoltage(batteryVoltageV)}</span>
-                    <span className="map-battery-subvalue">{formatBatteryPct(batteryPct)} approx.</span>
+                    <span className="map-battery-subvalue">{formatBatteryPct(batteryPct)}</span>
                   </div>
                   <div className="map-battery-detail">
                     <span className="map-battery-detail-primary">{batteryPresentation.detail}</span>

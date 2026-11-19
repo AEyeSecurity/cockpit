@@ -2,7 +2,7 @@ import { Nav2DispatcherBase } from "../../../../protocol/Nav2DispatcherBase";
 import type { Nav2IncomingMessage } from "../../../../protocol/messages";
 
 export interface RobotStatus {
-  batteryPct: number;
+  batteryPct: number | null;
   batteryVoltageV: number | null;
   batteryState: string;
   batteryMissionState: string;
@@ -214,7 +214,7 @@ export class RobotDispatcher extends Nav2DispatcherBase {
       callback({
         connected,
         mode: String(message.mode ?? (connected ? "connected" : "disconnected")),
-        batteryPct: Number(message.battery_pct ?? 0),
+        batteryPct: optionalFiniteNumber(message.battery_pct ?? message.batteryPct),
         batteryVoltageV,
         batteryState: String(message.battery_state ?? ""),
         batteryMissionState: String(message.battery_mission_state ?? ""),

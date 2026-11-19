@@ -235,7 +235,7 @@ export class TelemetryService {
   private readonly listeners = new Set<(snapshot: TelemetrySnapshot) => void>();
   private snapshot: TelemetrySnapshot = {
     robotStatus: {
-      batteryPct: 0,
+      batteryPct: null,
       batteryVoltageV: null,
       batteryState: "",
       batteryMissionState: "",
@@ -470,7 +470,10 @@ export class TelemetryService {
     const payload = resolveNavTelemetryPayload(raw);
     const allowLegacyAlias = isLegacyLockAliasMessage(raw);
     const mode = String(payload.mode ?? this.snapshot.robotStatus.mode);
-    const battery = Number(payload.battery_pct ?? payload.batteryPct ?? this.snapshot.robotStatus.batteryPct);
+    const hasBatteryPct = payload.battery_pct !== undefined || payload.batteryPct !== undefined;
+    const batteryPct = hasBatteryPct
+      ? optionalFiniteNumber(payload.battery_pct ?? payload.batteryPct)
+      : this.snapshot.robotStatus.batteryPct;
     const hasBatteryVoltage = payload.battery_voltage_v !== undefined || payload.batteryVoltageV !== undefined;
     const batteryVoltageV = hasBatteryVoltage
       ? optionalFiniteNumber(payload.battery_voltage_v ?? payload.batteryVoltageV)
@@ -495,7 +498,7 @@ export class TelemetryService {
       ...this.snapshot,
       robotStatus: {
         mode,
-        batteryPct: Number.isFinite(battery) ? battery : this.snapshot.robotStatus.batteryPct,
+        batteryPct,
         batteryVoltageV,
         batteryState: String(payload.battery_state ?? payload.batteryState ?? this.snapshot.robotStatus.batteryState),
         batteryMissionState: String(

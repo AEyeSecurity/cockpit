@@ -54,6 +54,24 @@ describe("map workspace HUD", () => {
     ).toBeTruthy();
   });
 
+  it("colors the battery badge by the reported charge even when SALUS reports OK", async () => {
+    const runtime = await bootstrapApp();
+    const workspace = runtime.contributions.get("nav2.workspace.map");
+    if (!workspace || workspace.slot !== "workspace") throw new Error("Map workspace contribution not registered");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher;
+
+    render(<>{workspace.render()}</>);
+    for (const [battery_pct, label, tone] of [[31, "Normal", "ok"], [30, "Low", "warn"], [5, "Critical", "critical"]] as const) {
+      act(() => {
+        dispatcher.handleIncoming({
+          op: "nav_telemetry", connected: true, battery_present: true,
+          battery_pct, battery_voltage_v: 47.05, battery_state: "OK"
+        }, dispatcher.transportId);
+      });
+      expect(screen.getByText(label, { selector: ".map-battery-pill" })).toHaveClass(`tone-${tone}`);
+    }
+  });
+
   it("clears waypoint selection and exits area selection mode with Escape", async () => {
     const runtime = await bootstrapApp();
     const workspace = runtime.contributions.get("nav2.workspace.map");

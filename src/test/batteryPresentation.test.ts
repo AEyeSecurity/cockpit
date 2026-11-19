@@ -78,6 +78,31 @@ describe("batteryPresentation", () => {
     expect(belowMinimum.badgeLabel).toBe("Below Minimum");
   });
 
+  it.each([
+    [5, "critical"],
+    [10, "critical"],
+    [11, "warn"],
+    [30, "warn"],
+    [31, "ok"]
+  ] as const)("uses reported charge %s%% even when voltage and backend state are normal", (batteryPct, tone) => {
+    expect(getBatteryPresentation({ ...normalInput, batteryPct }).tone).toBe(tone);
+  });
+
+  it("marks the recorded 5% BMS reading critical at 47.05 V with SALUS reporting OK", () => {
+    const presentation = getBatteryPresentation({ ...normalInput, batteryPct: 5, batteryVoltageV: 47.05 });
+    expect(presentation).toMatchObject({ tone: "critical", badgeLabel: "Critical" });
+  });
+
+  it("shows critical charge without voltage, while keeping suspect readings unavailable", () => {
+    const input = { ...normalInput, batteryPct: 5, batteryVoltageV: null };
+    expect(getBatteryPresentation(input).tone).toBe("critical");
+    expect(getBatteryPresentation({ ...input, batteryState: "SUSPECT" }).tone).toBe("off");
+  });
+
+  it("does not interpret a missing percentage as an empty battery", () => {
+    expect(getBatteryPresentation({ ...normalInput, batteryPct: null }).badgeLabel).toBe("Charge unavailable");
+  });
+
   it("surfaces suspect telemetry as sensor check", () => {
     const presentation = getBatteryPresentation({
       ...normalInput,

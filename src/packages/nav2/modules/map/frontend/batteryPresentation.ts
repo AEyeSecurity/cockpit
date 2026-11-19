@@ -1,3 +1,6 @@
+const LOW_BATTERY_PCT = 30;
+const CRITICAL_BATTERY_PCT = 10;
+
 export type BatteryTone = "ok" | "warn" | "critical" | "off";
 
 export interface BatteryPresentationInput {
@@ -62,7 +65,8 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: null
     };
   }
-  if (batteryVoltageV === null) {
+  const validPct = batteryPct !== null && Number.isFinite(batteryPct);
+  if (voltageText === null && !validPct) {
     return {
       tone: "off",
       badgeLabel: "Telemetry Lost",
@@ -86,23 +90,31 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: voltageText ? `Return-home trigger active · ${voltageText}` : "Return-home trigger active"
     };
   }
-  if (normalizedBatteryState === "BELOW_MINIMUM" || (batteryVoltageV !== null && batteryVoltageV < 44.5)) {
+  if (normalizedBatteryState === "BELOW_MINIMUM") {
     return {
       tone: "critical",
       badgeLabel: "Below Minimum",
-      detail: "Battery is below the specified 44.5 V minimum",
+      detail: "SALUS reports voltage below its minimum",
       contextualVoltageText: voltageText
     };
   }
-  if (normalizedBatteryState === "CRITICAL" || (batteryVoltageV !== null && batteryVoltageV <= 45)) {
+  if (normalizedBatteryState === "CRITICAL") {
     return {
       tone: "critical",
       badgeLabel: "Critical",
-      detail: "Battery is at the 45 V controller protection zone",
+      detail: "SALUS reports critical battery voltage",
       contextualVoltageText: voltageText
     };
   }
-  if (normalizedBatteryState === "LOW" || (batteryVoltageV !== null && batteryVoltageV <= 47)) {
+  if (validPct && batteryPct <= CRITICAL_BATTERY_PCT) {
+    return {
+      tone: "critical",
+      badgeLabel: "Critical",
+      detail: "Battery charge is critically low",
+      contextualVoltageText: voltageText
+    };
+  }
+  if (normalizedBatteryState === "LOW") {
     return {
       tone: "warn",
       badgeLabel: "Low",
@@ -110,11 +122,19 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: voltageText
     };
   }
-  if (batteryPct === null || !Number.isFinite(batteryPct)) {
+  if (validPct && batteryPct <= LOW_BATTERY_PCT) {
+    return {
+      tone: "warn",
+      badgeLabel: "Low",
+      detail: "Battery charge is low",
+      contextualVoltageText: voltageText
+    };
+  }
+  if (!validPct) {
     return {
       tone: "off",
-      badgeLabel: "Telemetry Lost",
-      detail: "Battery telemetry unavailable",
+      badgeLabel: "Charge unavailable",
+      detail: "Battery percentage unavailable",
       contextualVoltageText: null
     };
   }

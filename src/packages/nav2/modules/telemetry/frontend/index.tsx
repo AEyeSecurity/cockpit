@@ -451,7 +451,7 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
       ? telemetryService.getSnapshot()
       : {
           robotStatus: {
-            batteryPct: 0,
+            batteryPct: null,
             batteryVoltageV: null,
             batteryState: "",
             batteryMissionState: "",
