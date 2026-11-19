@@ -11,8 +11,8 @@ async function mapWorkspace() {
   if (!workspace || workspace.slot !== "workspace") throw new Error("Map workspace not registered");
   const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher;
   const setView = vi.spyOn(L.Map.prototype, "setView");
-  const pose = (lat: number, lon: number) => act(() => {
-    dispatcher.handleIncoming({ op: "robot_pose", robot_pose: { lat, lon, heading_deg: 0 } }, dispatcher.transportId);
+  const pose = (lat: number, lon: number, headingDeg = 0) => act(() => {
+    dispatcher.handleIncoming({ op: "robot_pose", robot_pose: { lat, lon, heading_deg: headingDeg } }, dispatcher.transportId);
   });
   const miniMap = () => {
     const maps = setView.mock.contexts as L.Map[];
@@ -37,8 +37,12 @@ describe("camera minimap robot tracking", () => {
 
     fireEvent.click(screen.getByTitle("Abrir cámara"));
     expectCenter(miniMap(), -31.48, -64.24);
-    pose(-31.4805, -64.2408);
+    const icon = miniMap().getContainer().querySelector<HTMLElement>(".robot-icon");
+    expect(icon).toHaveStyle({ transform: "rotate(90deg)" });
+    pose(-31.4805, -64.2408, 45);
     expectCenter(miniMap(), -31.4805, -64.2408);
+    expect(miniMap().getContainer().querySelector(".robot-icon")).toBe(icon);
+    expect(icon).toHaveStyle({ transform: "rotate(45deg)" });
 
     fireEvent.click(screen.getByRole("button", { name: "Volver al mapa" }));
     expect(screen.getByRole("button", { name: "Seguir al robot" })).toHaveAttribute("aria-pressed", "false");

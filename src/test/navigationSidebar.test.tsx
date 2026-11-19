@@ -89,9 +89,9 @@ describe("navigation sidebar and route editor", () => {
       for (const name of routeNames) await navigationService.saveNamedRoute(name);
     });
 
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
 
-    const savedRoutes = screen.getByText(`Rutas guardadas en el robot (${routeNames.length})`).closest("details");
+    const savedRoutes = (await screen.findByText(`Rutas guardadas en el robot (${routeNames.length})`)).closest("details");
     expect(savedRoutes).not.toHaveAttribute("open");
     fireEvent.click(screen.getByText(`Rutas guardadas en el robot (${routeNames.length})`));
     for (const name of routeNames) expect(savedRoutes).toHaveTextContent(name);
@@ -236,7 +236,7 @@ describe("navigation sidebar and route editor", () => {
     act(() => navigationService.applyLocalControlLock(false, "SIM_BACKEND"));
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
 
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
     expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument();
     expect(screen.getByText("Para crear una ruta")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Añadir primer punto en el mapa" }));
@@ -259,7 +259,7 @@ describe("navigation sidebar and route editor", () => {
       navigationService.queueWaypoint({ x: 10, y: 20 });
       await navigationService.saveNamedRoute("Ruta original");
     });
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
 
     fireEvent.click(screen.getByRole("button", { name: "Nueva ruta" }));
     await waitFor(() => expect(screen.getByText("Todavía no hay puntos")).toBeInTheDocument());
@@ -282,7 +282,7 @@ describe("navigation sidebar and route editor", () => {
     const originalIds = navigationService.getState().waypoints.map((waypoint) => waypoint.localId);
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
 
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
     expect(screen.queryByText("Opciones del punto 1")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".route-editor-insertion-slot")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: /Punto 1.*10\.000000/ }));
@@ -318,7 +318,7 @@ describe("navigation sidebar and route editor", () => {
       navigationService.queueWaypoint({ x: 12, y: 22 });
     });
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
 
     fireEvent.click(screen.getByRole("button", { name: "Seleccionar área en el mapa" }));
     await waitFor(() => expect(navigationService.getState().waypointSelectionMode).toBe(true));
@@ -350,7 +350,7 @@ describe("navigation sidebar and route editor", () => {
     const originalIds = navigationService.getState().waypoints.map((waypoint) => waypoint.localId);
     const execute = vi.spyOn(runtime.commands, "execute").mockResolvedValue(undefined);
 
-    render(<>{editor.render()}</>);
+    await act(async () => { render(<>{editor.render()}</>); });
     fireEvent.click(screen.getByRole("list", { name: "Puntos de la ruta" }).querySelectorAll("button")[2]);
     fireEvent.click(screen.getByRole("button", { name: "Insertar entre 3 y 2 en Recorrido principal" }));
 
@@ -430,7 +430,7 @@ describe("navigation sidebar and route editor", () => {
       service.clearWaypointSelection();
       service.useQueuedWaypointsAsPatrolLoop();
     });
-    render(<>{sidebar.render()}{editor.render()}</>);
+    await act(async () => { render(<>{sidebar.render()}{editor.render()}</>); });
     const patrolOverview = screen.getByText("Patrulla", { selector: "strong" }).closest("details");
     expect(patrolOverview?.closest("section.route-editor-card")).toBe(screen.getByText("Puntos de la ruta").closest("section.route-editor-card"));
     expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();

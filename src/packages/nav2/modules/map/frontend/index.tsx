@@ -564,14 +564,10 @@ function buildWaypointIcon(
   });
 }
 
-function buildRobotIcon(headingDeg: number | null | undefined): L.DivIcon {
-  const hasHeading = headingDeg !== null && headingDeg !== undefined && Number.isFinite(Number(headingDeg));
-  const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0;
-  const cssRotationDeg = normalizeYawDeg(90 - yaw);
-  const classes = hasHeading ? "robot-icon" : "robot-icon no-heading";
+function buildRobotIcon(): L.DivIcon {
   return L.divIcon({
     className: "",
-    html: `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);"><img src="${robotMarkerUrl}" alt="" draggable="false" /></div>`,
+    html: `<div class="robot-icon"><img src="${robotMarkerUrl}" alt="" draggable="false" /></div>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20]
   });
@@ -1721,14 +1717,20 @@ function LeafletMapCanvas({
     const latLng = L.latLng(robotPose.lat, robotPose.lon);
     if (!robotMarkerRef.current) {
       robotMarkerRef.current = L.marker(latLng, {
-        icon: buildRobotIcon(robotPose.headingDeg),
+        icon: buildRobotIcon(),
         pane: "robot",
         interactive: false
       }).addTo(map);
-      return;
+    } else {
+      robotMarkerRef.current.setLatLng(latLng);
     }
-    robotMarkerRef.current.setLatLng(latLng);
-    robotMarkerRef.current.setIcon(buildRobotIcon(robotPose.headingDeg));
+    const marker = robotMarkerRef.current.getElement()?.firstElementChild;
+    if (marker instanceof HTMLElement) {
+      const heading = robotPose.headingDeg;
+      const hasHeading = heading != null && Number.isFinite(heading);
+      marker.classList.toggle("no-heading", !hasHeading);
+      marker.style.transform = `rotate(${normalizeYawDeg(90 - (hasHeading ? heading : 0))}deg)`;
+    }
   }, [robotPose]);
 
   useEffect(() => {

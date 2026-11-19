@@ -6,7 +6,7 @@ import {
   explainMissionRecord,
   missionStatusFromRecords,
   missionRecordSeverity
-} from "../packages/nav2/modules/debug/frontend/index";
+} from "../packages/nav2/modules/debug/frontend/DebugViews";
 import type { MissionJsonRecord } from "../packages/nav2/modules/debug/service/impl/MissionService";
 
 const MISSION_DIR = "/home/franco/Descargas/mision";

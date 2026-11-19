@@ -2,7 +2,7 @@ import { MissionAlertSound } from "./MissionAlertSound";
 import { useRoverAccessContext } from "./RoverAccessDialog";
 import { RoverDestinationFields } from "./RoverDestinationFields";
 import { describeRouteBlock } from "../blockedRouteStatus";
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
+import { lazy, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import "./styles.css";
 import { PanelCollapsibleSection, PanelSection } from "../../../../core";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
@@ -20,7 +20,11 @@ import { getRouteMissionActivityState, normalizeRouteMissionStatus } from "../ro
 import { WebSocketTransport } from "../transport/impl/WebSocketTransport";
 import { NavigationCommands } from "../commands";
 import { ShellCommands } from "../../../../../app/shellCommands";
-import { openSavedRoute, RouteEditorWorkspace, SavedRoutePicker } from "./RouteEditorWorkspace";
+import { openSavedRoute, SavedRoutePicker } from "./SavedRoutePicker";
+import { DeferredView } from "../../../shared/DeferredView";
+
+const RouteEditorWorkspace = lazy(() => import("./RouteEditorWorkspace")
+  .then(({ RouteEditorWorkspace }) => ({ default: RouteEditorWorkspace })));
 
 const TRANSPORT_ID = "transport.ws.core";
 const DISPATCHER_ID = "dispatcher.robot";
@@ -2414,7 +2418,7 @@ function registerSidebarPanels(ctx: ModuleContext): void {
     slot: "workspace",
     label: "Editor de rutas",
     order: 25,
-    render: () => <RouteEditorWorkspace runtime={ctx} />
+    render: () => <DeferredView key="route-editor"><RouteEditorWorkspace runtime={ctx} /></DeferredView>
   });
 }
 
