@@ -45,4 +45,9 @@ Las claves se verifican con Argon2id. El rol Usuario tiene una copia AES-256-GCM
 
 Pruebas de aplicación con Node 24. Ejecutar `npm run build`, `npm run test` y `npm run test:auth`. La prueba de identidad usa un robot simulado, dos roles, TOTP, revocación de WebSocket y una copia SQLite restaurada. El corte requiere comprobar el origen HTTPS y la red del cliente.
 
-Para reproducir el modo actual de Rover, configurar `COCKPIT_PASSWORD_ONLY=true` y `COCKPIT_KEEP_CONNECTIONS=true`. El primero habilita claves de al menos ocho caracteres con letras y números, y consulta con la clave de administrador. El segundo conserva los destinos del navegador y sus controles de red. En el modo con pasarela, configurar `COCKPIT_NAVIGATION_URL` antes de publicar.
+## Control por cuenta en el sitio oficial
+
+- Compilar `web-pilot` con `COCKPIT_KEEP_CONNECTIONS=false` y `COCKPIT_ROVER_CONTROL=true`. Ejecutar `auth` con `COCKPIT_ROVER_CONTROL=true` y `COCKPIT_NAVIGATION_URL` apuntando al WebSocket privado de SALUS. Mantener el modo de contraseña del despliegue y el volumen de identidad con su keyring.
+- Desde la red de un operador, comprobar que el navegador usa `/operation/navigation` y que el WebSocket privado de SALUS sólo se alcanza desde la pasarela. Verificar la conexión y los servicios operativos mediante una cuenta de prueba antes de publicar.
+- En SERVER-CIT, preparar las dos imágenes etiquetadas con el mismo SHA y desplegarlas juntas en el proyecto `rover-identity`. Conservar su configuración anterior y una copia coherente de SQLite. El actualizador histórico de la imagen `web` no actualiza este par.
+- El modo de conexión directa se selecciona con `COCKPIT_KEEP_CONNECTIONS=true`. Reservarlo para entornos donde el operador administra su propia conexión al robot.

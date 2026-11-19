@@ -250,6 +250,7 @@ test("running server keeps a single SALUS socket through both handovers", { time
   const db = openStore(":memory:");
   const vault = { seal: (value) => value, unseal: (value) => value };
   provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
+  provision(db, vault, { username: "driver", name: "Driver", role: "user", initialPassword: "driver234" });
   const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(upstream, "listening");
   let sockets = 0;
@@ -296,9 +297,12 @@ test("running server keeps a single SALUS socket through both handovers", { time
     assert.equal((await session.call(destination)).port, "1");
     assert.equal((await session.call(destination, "PUT", { ...selected, host: "unconfigured.example" })).status, 400);
     assert.equal((await session.call(destination, "PUT", selected)).port, selected.port);
-    const first = await session.call(path + "open", "POST");
+    const driver = browser(base);
+    assert.equal((await driver.call("/api/session/login", "POST", { username: "driver", password: "driver234" })).stage, "ready");
+    const first = await driver.call(path + "open", "POST");
+    assert.equal(first.mode, "controller");
     assert.equal((await session.call(destination, "PUT", { ...selected, port: "1" })).status, 409);
-    const firstWs = session.connect("/operation/navigation?instance=" + first.id);
+    const firstWs = driver.connect("/operation/navigation?instance=" + first.id);
     clients.push(firstWs);
     await once(firstWs, "message");
     const second = await session.call(path + "open", "POST");
@@ -311,16 +315,25 @@ test("running server keeps a single SALUS socket through both handovers", { time
     const secondWs = session.connect("/operation/navigation?instance=" + second.id);
     clients.push(secondWs);
     await once(secondWs, "message");
-    const previous = await session.call(path + "heartbeat", "POST", { instanceId: first.id });
+    const previous = await driver.call(path + "heartbeat", "POST", { instanceId: first.id });
+    assert.equal(previous.mode, "spectator");
     assert.equal(previous.displaced, true);
+    assert.equal(previous.canTake, false);
+    assert.equal((await driver.call(path + "take", "POST", { instanceId: first.id, revision: previous.revision })).status, 409);
     firstWs.send(JSON.stringify({ op: "set_manual_cmd", brake_pct: 0, linear_x: 2 }));
-    const transferred = await session.call(path + "take", "POST", { instanceId: first.id, revision: previous.revision });
+
+    const third = await session.call(path + "open", "POST");
+    const transferred = await session.call(path + "take", "POST", { instanceId: third.id, revision: third.revision });
     assert.equal(transferred.mode, "controller");
     assert.ok(brake > 1);
     assert.equal(sockets, 1);
     assert.equal(state.control_locked, true);
 
-    // Neither tab runs the browser heartbeat while in the background.
+    const thirdWs = session.connect("/operation/navigation?instance=" + third.id);
+    clients.push(thirdWs);
+    await once(thirdWs, "message");
+
+    // None of the tabs runs the browser heartbeat while in the background.
     await new Promise((resolve) => setTimeout(resolve, 8500));
     const spectator = await session.call(path + "heartbeat", "POST", { instanceId: second.id });
     assert.equal(spectator.mode, "spectator");
