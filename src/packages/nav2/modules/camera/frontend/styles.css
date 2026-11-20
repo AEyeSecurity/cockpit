@@ -10107,3 +10107,19 @@
 
   .cv-rover-map { grid-column: 1 / -1; }
 }
+
+/* Keep the connection notice centered when the stream element mounts. */
+.cv-camera-primary .cv-html-viewport {
+  position: relative;
+}
+
+.cv-camera-primary .cv-frame,
+.cv-camera-primary .cv-no-signal {
+  position: absolute;
+  inset: 0;
+}
+
+.cv-camera-primary .cv-no-signal {
+  box-sizing: border-box;
+  z-index: 2;
+}

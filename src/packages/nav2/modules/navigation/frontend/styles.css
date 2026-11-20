@@ -7538,7 +7538,7 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-width: 300px;
+  min-width: 0;
 }
 
 .rtk-modal-status {
@@ -7580,18 +7580,41 @@ pre {
   font-size: 12px;
 }
 
-.rtk-modal-status-copy code {
-  width: fit-content;
-  margin-top: 4px;
-  padding: 2px 6px;
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 700;
+.rtk-modal-sources {
+  padding: 12px 14px;
+  border: 1px solid #d1deed;
+  border-radius: 12px;
+  background: #fff;
+  color: #172b46;
 }
+.rtk-modal-sources h4 { margin: 0 0 8px; color: inherit; font-size: 13px; }
+.rtk-modal-sources p, .rtk-error p {
+  margin: 0;
+  color: #435c76;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.rtk-modal-source-list { margin: 0; padding: 0; list-style: none; }
+.rtk-modal-source-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #e5edf6;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.rtk-modal-source-tag {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #eaf3ff;
+  color: #255998;
+  font-size: 11px;
+}
+.rtk-error { margin-top: 5px; color: #704617; font-size: 12px; }
+.rtk-error summary { cursor: pointer; }
 
 .rtk-source-list {
   list-style: none;

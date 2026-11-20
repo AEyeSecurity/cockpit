@@ -2406,7 +2406,8 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const fresh = snapshot?.robotStatus.connected === true && now - sequenceSeenAt.current < 5000;
+  const connected = snapshot?.robotStatus.connected === true;
+  const fresh = connected && rtkState?.status_sequence != null && now - sequenceSeenAt.current < 5000;
   const { receiving, text: statusText } = rtkSourceStatus(rtkState, fresh);
 
   return (
@@ -2414,21 +2415,26 @@ function RtkSourceModal({ runtime }: { runtime: ModuleContext }): JSX.Element {
       <div className="rtk-modal-status">
         <span className={joinClassNames("rtk-status-dot", receiving && "connected")} aria-hidden="true" />
         <div className="rtk-modal-status-copy">
-          <strong>Fuente activa: {activeLabel || "—"}</strong>
-          <span>{statusText}</span>
-          {rtkState?.last_error ? <span>{String(rtkState.last_error)}</span> : null}
-          {activeId ? <code>{activeId}</code> : null}
+          <strong>{fresh && activeLabel ? activeLabel : "Correcciones GPS"}</strong>
+          <span>{connected ? statusText : "Rover desconectado"}</span>
+          {fresh && Boolean(rtkState?.last_error) && <details className="rtk-error">
+            <summary>Ver detalle del error</summary>
+            <p>{String(rtkState?.last_error)}</p>
+          </details>}
         </div>
       </div>
-      <div className="panel-card">
+      <section className="rtk-modal-sources" aria-label="Fuentes de correcciones">
         <h4>Fuentes de correcciones</h4>
-        {sources.length ? sources.map((source) => (
-          <div className="row" key={source.id}>
-            <span>{source.label}</span>
-            {source.id === activeId ? <span className="status-pill">Activa</span> : null}
-          </div>
-        )) : <p className="muted">Sin fuentes disponibles. Conectá el robot para consultar su configuración.</p>}
-      </div>
+        {sources.length ? <ul className="rtk-modal-source-list">
+          {sources.map((source) => (
+            <li key={source.id}>
+              <span>{source.label}</span>
+              {fresh && source.id === activeId && <span className="rtk-modal-source-tag">Seleccionada</span>}
+            </li>
+          ))}
+        </ul> : <p>{connected ? "El rover todavía no informó las fuentes disponibles."
+          : "Conectá el rover para consultar las fuentes disponibles."}</p>}
+      </section>
     </div>
   );
 }
@@ -2468,7 +2474,7 @@ function registerModals(ctx: ModuleContext): void {
   ctx.contributions.register({
     id: "modal.rtk",
     slot: "modal",
-    title: "RTK · Antena",
+    title: "GPS y precisión RTK",
     render: () => <RtkSourceModal runtime={ctx} />
   });
 }
