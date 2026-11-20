@@ -15,7 +15,7 @@ export function SecondaryCameraTile({ title, description, config, url, startRequ
     </header>
     <div className="cv-secondary-video">
       {url && requested && <CameraStreamSurface isActive config={stream} className="cv-secondary-frame" alt={`Cámara ${title}`} onStatusChange={setStatus} />}
-      {!url ? <p>Cámara pendiente de conectar</p> : !requested ? <p>Video pausado para ahorrar datos</p> : !status?.connected ? <p>{status?.error ? "Sin señal · reintentando" : "Conectando…"}</p> : null}
+      {!url ? <p>Cámara pendiente de conectar</p> : !requested ? <p>Video pausado</p> : !status?.connected ? <p>{status?.error ? "Sin señal · reintentando" : "Conectando…"}</p> : null}
     </div>
   </section>;
 }

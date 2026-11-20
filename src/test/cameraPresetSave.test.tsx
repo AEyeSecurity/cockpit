@@ -197,11 +197,14 @@ describe("camera preset save", () => {
       throw new Error("camera workspace contribution not registered");
     }
 
-    render(<>{contribution.render()}</>);
+    const sidebar = contributions.get("sidebar.camera");
+    if (sidebar?.slot !== "sidebar") throw new Error("camera sidebar contribution not registered");
+    render(<>{sidebar.render()}{contribution.render()}</>);
 
     await waitFor(() => expect(readCameraPtzState).toHaveBeenCalled());
     expect(screen.getByText("Camera unavailable")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByText("Guardar posiciones"));
     fireEvent.click(screen.getByRole("button", { name: "Set Home" }));
     expect(saveCameraPreset).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Confirm Home" })).toBeInTheDocument();

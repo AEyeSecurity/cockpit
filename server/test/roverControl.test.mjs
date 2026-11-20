@@ -176,3 +176,13 @@ test("handover braking attempts the lock even when the brake command is rejected
   }), /no aceptó/);
   assert.equal(locked, true);
 });
+
+test("spectators may ask for a camera evidence window without issuing recording commands", () => {
+  const control = { permits: () => false, status: () => ({ mode: "spectator" }) };
+  const send = (message) => authorizeNavigationFrame(control, "instance", "session", Buffer.from(JSON.stringify(message)), false);
+  const request = { op: "recordings_list", camera: "main", start: "2026-11-20T12:00:00Z", end: "2026-11-20T12:00:10Z" };
+  assert.deepEqual(JSON.parse(send({ ...request, unexpected: true })), request);
+  assert.equal(send({ ...request, camera: "all" }), null);
+  assert.equal(send({ ...request, end: "2026-11-20T12:01:00Z" }), null);
+  assert.equal(send({ op: "recordings_start" }), null);
+});

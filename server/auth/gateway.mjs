@@ -55,14 +55,17 @@ export function createGateway(identity, env, control, salus) {
     const base = upstreams.get(name);
     if (!base || routes[name][0] !== protocol) throw new HttpError(404, "Servicio no configurado.");
     const suffix = match[2] ?? "";
-    if (suffix && !["camera", "recordings"].includes(name)) throw new HttpError(404, "Ruta inexistente.");
+    const personImage = name === "person" &&
+      /^\/alerts\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/.test(suffix);
+    if (suffix && !personImage && !["camera", "recordings"].includes(name)) throw new HttpError(404, "Ruta inexistente.");
     if (suffix && (suffix.startsWith("//") || /%2f|%5c|%2e/i.test(suffix))) {
       throw new HttpError(400, "Ruta inválida.");
     }
     const upstream = new URL(base);
-    if (suffix) upstream.pathname = base.pathname.replace(/\/$/, "") + suffix;
+    if (personImage) upstream.pathname = new URL(`.${suffix}`, base).pathname;
+    else if (suffix) upstream.pathname = base.pathname.replace(/\/$/, "") + suffix;
     for (const [key, value] of url.searchParams) {
-      if (key !== "instance") upstream.searchParams.set(key, value);
+      if (key !== "instance" && !(name === "recordings" && key === "view")) upstream.searchParams.set(key, value);
     }
     return { upstream, base, name };
   }
@@ -149,7 +152,8 @@ export function createGateway(identity, env, control, salus) {
           if (reply.headers[key] && (key !== "link" || name === "camera")) res.setHeader(key, reply.headers[key]);
         }
         res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
-        if (name === "recordings") res.setHeader("Content-Disposition", "attachment");
+        if (name === "recordings") res.setHeader("Content-Disposition",
+          url.searchParams.get("view") === "inline" ? "inline" : "attachment");
         res.writeHead(reply.statusCode);
         pipeline(reply, res, () => {});
       });
