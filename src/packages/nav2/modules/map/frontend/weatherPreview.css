@@ -1,0 +1,115 @@
+.weather-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: #203956;
+}
+
+.weather-metric,
+.weather-location,
+.weather-advice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 7px;
+}
+
+.weather-metric,
+.weather-location {
+  border: 1px solid #cfdeed;
+  background: #f8fbff;
+  color: inherit;
+}
+
+.weather-location {
+  cursor: pointer;
+}
+
+.weather-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.weather-advice {
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 700;
+  justify-content: flex-start;
+}
+
+.top-toolbar > .toolbar-right {
+  width: auto;
+  justify-content: flex-end;
+}
+
+.weather-tooltip {
+  position: fixed;
+  z-index: 1200;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: white;
+  background: #172b46;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.weather-details {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.weather-advice--stop {
+  border-color: #efaaaa;
+  background: #feeaea;
+  color: #982626;
+}
+
+.weather-advice--caution {
+  border-color: #edcc8f;
+  background: #fff5df;
+  color: #784509;
+}
+
+.weather-advice--clear {
+  border-color: #9cd1ad;
+  background: #e9f7ee;
+  color: #205c36;
+}
+
+.weather-light {
+  flex: 0 0 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.weather-location-error {
+  max-width: 185px;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+@media (max-width: 720px) {
+  #root header.top-toolbar.toolbar .toolbar-right:has(.weather-toolbar) {
+    flex: 0 1 auto !important;
+    min-width: 0;
+  }
+
+  .weather-toolbar {
+    flex-wrap: wrap;
+    gap: 2px 5px;
+    line-height: 1.1;
+  }
+
+  .weather-toolbar :is(.weather-advice, .weather-location, .weather-metric) {
+    min-height: 21px;
+  }
+}

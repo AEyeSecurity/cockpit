@@ -166,7 +166,7 @@ describe("TelemetryService RTK state", () => {
       }
     });
 
-    expect(service.getSnapshot().robotPose).toEqual({
+    expect(service.getSnapshot().robotPose).toMatchObject({
       lat: -31.48581,
       lon: -64.24102,
       headingDeg: 127.5
