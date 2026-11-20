@@ -9,7 +9,7 @@ const state = {
 describe("RTK source status", () => {
   it("does not equate a successful handshake with corrections", () => {
     expect(rtkSourceStatus({ ...state, receiving_rtcm: false }).receiving).toBe(false);
-    expect(rtkSourceStatus({ ...state, receiving_rtcm: false }).text).toContain("esperando RTCM válido");
+    expect(rtkSourceStatus({ ...state, receiving_rtcm: false }).text).toContain("esperando correcciones");
   });
   it("requires an identified source and explicit fresh validated RTCM", () => {
     expect(rtkSourceStatus(state).receiving).toBe(true);
@@ -21,7 +21,7 @@ describe("RTK source status", () => {
     }
   });
   it("does not report a cached or disconnected stream as live", () => {
-    expect(rtkSourceStatus(state, false)).toEqual({ receiving: false, text: "Sin telemetría RTK reciente" });
+    expect(rtkSourceStatus(state, false)).toEqual({ receiving: false, text: "Sin datos recientes de RTK" });
     expect(rtkSourceStatus(null)).toEqual({ receiving: false, text: "Sin fuente activa" });
   });
 });

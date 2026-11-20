@@ -1,10 +1,10 @@
+import { batteryChargeWarning } from "../../../shared/batteryCharge";
 import { NavigationCommands } from "../../navigation/commands";
 import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import type { RobotDispatcher } from "../../navigation/dispatcher/impl/RobotDispatcher";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
-import type { NavigationService } from "../../navigation/service/impl/NavigationService";
 import type { SensorInfoService, SensorInfoState } from "../../navigation/service/impl/SensorInfoService";
 import { TelemetryService, type TelemetrySnapshot } from "../service/impl/TelemetryService";
 import { LidarPreviewService, type LidarPreviewState } from "../service/impl/LidarPreviewService";
@@ -12,12 +12,10 @@ import { LidarPreviewService, type LidarPreviewState } from "../service/impl/Lid
 const SERVICE_ID = "service.telemetry";
 const LIDAR_PREVIEW_SERVICE_ID = "service.lidar-preview";
 const DISPATCHER_ID = "dispatcher.robot";
-const NAVIGATION_SERVICE_ID = "service.navigation";
 const CONNECTION_SERVICE_ID = "service.connection";
 const SENSOR_INFO_SERVICE_ID = "service.sensor-info";
 
 function resolveOptionalServices(runtime: ModuleContext): {
-  navigation: NavigationService | null;
   connection: ConnectionService | null;
   sensorInfo: SensorInfoService | null;
 } {
@@ -27,16 +25,14 @@ function resolveOptionalServices(runtime: ModuleContext): {
     typeof (service as { getState?: unknown }).getState === "function" &&
     typeof (service as { subscribe?: unknown }).subscribe === "function";
   try {
-    const navigation = runtime.services.getService<NavigationService>(NAVIGATION_SERVICE_ID);
     const connection = runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID);
     const sensorInfo = runtime.services.getService<SensorInfoService>(SENSOR_INFO_SERVICE_ID);
     return {
-      navigation: hasStateApi(navigation) ? navigation : null,
       connection: hasStateApi(connection) ? connection : null,
       sensorInfo: hasStateApi(sensorInfo) ? sensorInfo : null
     };
   } catch {
-    return { navigation: null, connection: null, sensorInfo: null };
+    return { connection: null, sensorInfo: null };
   }
 }
 
@@ -56,11 +52,6 @@ function formatInfoTimestamp(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return "n/a";
   return new Date(numeric).toLocaleString();
-}
-
-function parseNumericValue(value: unknown): number | null {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function padTelemetryNumber(value: number): string {
@@ -125,7 +116,7 @@ function TelemetryIcon({
   kind,
   className = ""
 }: {
-  kind: "pulse" | "warning" | "critical" | "clock" | "list" | "bell" | "camera" | "check" | "info";
+  kind: "pulse" | "warning" | "critical" | "clock" | "list" | "bell" | "camera" | "check" | "info" | "battery" | "position";
   className?: string;
 }): JSX.Element {
   const props = {
@@ -137,6 +128,14 @@ function TelemetryIcon({
     strokeLinejoin: "round" as const,
     className
   };
+
+  if (kind === "battery") {
+    return <svg {...props}><rect x="3" y="7" width="16" height="10" rx="2" /><path d="M22 10v4M7 10v4m4-4v4" /></svg>;
+  }
+
+  if (kind === "position") {
+    return <svg {...props}><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3" /></svg>;
+  }
 
   if (kind === "warning") {
     return (
@@ -235,26 +234,6 @@ function StatusChip({
   return <span className={`telemetry-chip telemetry-chip-${tone}`}>{label}</span>;
 }
 
-function SummaryCard({
-  title,
-  value,
-  detail,
-  tone = "neutral"
-}: {
-  title: string;
-  value: string;
-  detail: string;
-  tone?: "neutral" | "ok" | "warn" | "off";
-}): JSX.Element {
-  return (
-    <div className={`telemetry-summary-card telemetry-summary-card-${tone}`}>
-      <span className="telemetry-summary-title">{title}</span>
-      <strong className="telemetry-summary-value">{value}</strong>
-      <span className="telemetry-summary-detail">{detail}</span>
-    </div>
-  );
-}
-
 function LidarPreviewCard({ service }: { service: LidarPreviewService | null }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<LidarPreviewState>(() => service?.getState() ?? {
@@ -325,23 +304,22 @@ function LidarPreviewCard({ service }: { service: LidarPreviewService | null }):
   }, [state, visualStatus]);
 
   return (
-    <div className="panel-card telemetry-panel-card telemetry-lidar-card">
-      <div className="telemetry-card-header">
-        <h4>LiDAR Preview</h4>
-        <StatusChip
-          label={visualStatus}
-          tone={visualStatus === "live" ? "ok" : visualStatus === "stale" ? "warn" : "neutral"}
-        />
-      </div>
-      <div className="telemetry-lidar-preview">
-        <canvas ref={canvasRef} className="telemetry-lidar-canvas" aria-label="LiDAR preview relative to robot" />
-        <div className="telemetry-lidar-legend">
-          <span>Front ↑</span>
-          <span>{state.validCount} returns</span>
-          <span>{state.rangeMax > 0 ? `${Math.min(state.rangeMax, 12).toFixed(0)} m` : "12 m"}</span>
-        </div>
-      </div>
-    </div>
+    <section className="telemetry-status-section">
+      <h3 className="telemetry-status-heading">
+        <TelemetryIcon kind="pulse" /> Vista LiDAR
+        <StatusChip label={visualStatus === "live" ? "En vivo" : visualStatus === "stale" ? "Sin actualizar" : "Sin datos"}
+          tone={visualStatus === "live" ? "ok" : visualStatus === "stale" ? "warn" : "neutral"} />
+      </h3>
+      {visualStatus === "waiting" ? <div className="telemetry-status-details"><p>Esperando lecturas del LiDAR.</p></div> :
+        <div className="telemetry-lidar-preview">
+          <canvas ref={canvasRef} className="telemetry-lidar-canvas" aria-label="Vista del LiDAR desde el rover" />
+          <div className="telemetry-lidar-legend">
+            <span>Frente ↑</span>
+            <span>{state.validCount} {state.validCount === 1 ? "punto" : "puntos"}</span>
+            <span>{state.rangeMax > 0 ? `${Math.min(state.rangeMax, 12).toFixed(0)} m` : "12 m"}</span>
+          </div>
+        </div>}
+    </section>
   );
 }
 
@@ -443,9 +421,6 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
   const [connectionState, setConnectionState] = useState(
     services.connection ? services.connection.getState() : null
   );
-  const [navigationState, setNavigationState] = useState(
-    services.navigation ? services.navigation.getState() : null
-  );
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot>(
     telemetryService
       ? telemetryService.getSnapshot()
@@ -496,11 +471,6 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
   }, [services.connection]);
 
   useEffect(() => {
-    if (!services.navigation) return;
-    return services.navigation.subscribe((next) => setNavigationState(next));
-  }, [services.navigation]);
-
-  useEffect(() => {
     if (!telemetryService) return undefined;
     return telemetryService.subscribeTelemetry((next) => setTelemetrySnapshot(next));
   }, [telemetryService]);
@@ -524,133 +494,87 @@ export function TelemetrySidebarPanel({ runtime }: { runtime: ModuleContext }): 
     (pixhawkSnapshot.diagnostics as Record<string, unknown> | undefined) ??
     (generalSnapshot.diagnostics as Record<string, unknown> | undefined) ??
     {};
-  const yawDelta = parseNumericValue(yawDiagnostics.yaw_delta_deg);
-  const yawTone =
-    yawDelta === null ? "neutral" :
-    Math.abs(yawDelta) <= 10 ? "ok" :
-    Math.abs(yawDelta) <= 25 ? "warn" :
-    "off";
-  const alertsCount = telemetrySnapshot.alerts.length;
-  const eventsCount = telemetrySnapshot.recentEvents.length;
-  const connectionTone = connectionState?.connected ? "ok" : "off";
-  const cameraTone = navigationState?.cameraStreamConnected ? "ok" : "warn";
-  const datumTone = datumState.already_set === true ? "ok" : "warn";
-  const alertsTone = alertsCount > 0 ? "warn" : "ok";
-  const gpsLevel = String(gpsStatus.level ?? "");
-  const gpsTone: "ok" | "warn" | "off" | "neutral" =
-    gpsLevel === "ok" ? "ok" : gpsLevel === "warn" ? "warn" : gpsLevel === "error" ? "off" : "neutral";
-  const rtkNtripAvailable = rtkState.active_source_label !== undefined;
+  const connected = connectionState?.connected === true;
+  const { batteryPct, batteryPresent, batteryState } = telemetrySnapshot.robotStatus;
+  const charge = connected && batteryPresent !== false &&
+    !["UNAVAILABLE", "STALE", "LINK_STALE", "SUSPECT"].includes(batteryState.trim().toUpperCase()) &&
+    typeof batteryPct === "number" && Number.isFinite(batteryPct) && batteryPct >= 0 && batteryPct <= 100
+    ? batteryPct : null;
+  const chargeLevel = batteryChargeWarning(charge);
+  const fixQuality = String(gpsStatus.fix_quality ?? "");
+  const fixLabels: Record<string, string> = {
+    no_fix: "Sin posición", autonomous: "GPS autónomo", dgps: "GPS diferencial",
+    rtk_float: "RTK flotante", rtk_fixed: "RTK fijo"
+  };
+  const gpsLabel = !connected || gpsStatus.available !== true ? "Sin datos"
+    : fixLabels[fixQuality] ?? "Precisión sin confirmar";
+  const gpsTone = !connected ? "neutral" : fixQuality === "no_fix" ? "warn"
+    : fixQuality === "rtk_fixed" ? "ok" : "neutral";
+  const datumSet = datumState.already_set === true;
+  const hasRtk = connected && typeof rtkState.connected === "boolean";
 
   return (
-    <div className="stack telemetry-sidebar">
-      <div className="telemetry-summary-grid">
-        <SummaryCard
-          title="Backend"
-          value={connectionState?.connected ? "Linked" : "Offline"}
-          detail={connectionState?.connected ? "ROS bridge healthy" : String(connectionState?.lastError ?? "No active session")}
-          tone={connectionTone}
-        />
-        <SummaryCard
-          title="Camera Stream"
-          value={navigationState?.cameraStreamConnected ? "Live" : "Idle"}
-          detail={navigationState?.cameraStreamConnected ? "Frames available to UI" : "Awaiting feed"}
-          tone={cameraTone}
-        />
-        <SummaryCard
-          title="Datum"
-          value={datumState.already_set === true ? "Set" : "Unset"}
-          detail={`Source ${String(datumState.last_set_source ?? "n/a")}`}
-          tone={datumTone}
-        />
-        <SummaryCard
-          title="Alerts"
-          value={String(alertsCount)}
-          detail={`${eventsCount} recent events`}
-          tone={alertsTone}
-        />
-      </div>
+    <div className="telemetry-status-sidebar">
+      <section className="telemetry-status-section" aria-label="Resumen del rover">
+        <div className="telemetry-status-row">
+          <TelemetryIcon kind="pulse" />
+          <strong>Conexión</strong>
+          <StatusChip label={connected ? "Conectado" : "Desconectado"} tone={connected ? "ok" : "off"} />
+        </div>
+        <div className="telemetry-status-row">
+          <TelemetryIcon kind="battery" />
+          <strong>Batería</strong>
+          <StatusChip label={charge === null ? "Sin datos" : `${Math.round(charge)} %`}
+            tone={charge === null ? "neutral" : chargeLevel === "critical" ? "off" : chargeLevel === "warn" ? "warn" : "ok"} />
+        </div>
+        <div className="telemetry-status-row">
+          <TelemetryIcon kind="position" />
+          <strong>GPS</strong>
+          <StatusChip label={gpsLabel}
+            tone={gpsTone} />
+        </div>
+        {hasRtk && <div className="telemetry-status-row">
+          <TelemetryIcon kind="check" />
+          <strong>Correcciones RTK</strong>
+          <StatusChip label={rtkState.receiving_rtcm === true ? "Activas" : rtkState.connected === true ? "En espera" : "Sin enlace"}
+            tone={rtkState.receiving_rtcm === true ? "ok" : "warn"} />
+        </div>}
+        <button type="button" className="telemetry-status-link"
+          onClick={() => void runtime.commands.execute(NavigationCommands.openRtkModal)}>
+          <TelemetryIcon kind="position" /> GPS y precisión
+        </button>
+      </section>
 
-      <div className="panel-card telemetry-panel-card">
-        <div className="telemetry-card-header">
-          <h4>Datum</h4>
-          <StatusChip label={datumState.already_set === true ? "Set" : "Unset"} tone={datumTone} />
+      <section className="telemetry-status-section">
+        <h3 className="telemetry-status-heading"><TelemetryIcon kind="position" /> Referencia del mapa
+          <StatusChip label={datumSet ? "Configurada" : "Pendiente"} tone={datumSet ? "ok" : "neutral"} />
+        </h3>
+        <div className="telemetry-status-details key-value-grid">
+          {datumSet ? <>
+            <span>Latitud</span><span>{formatInfoCoordinate(datumState.datum_lat)}</span>
+            <span>Longitud</span><span>{formatInfoCoordinate(datumState.datum_lon)}</span>
+            <span>Origen</span><span>{String(datumState.last_set_source ?? "Sin datos")}</span>
+            <span>Último cambio</span><span>{formatInfoTimestamp(datumState.last_set_epoch_ms)}</span>
+          </> : <p>El rover aún no informó la referencia.</p>}
         </div>
-        <div className="key-value-grid telemetry-kv-grid">
-          <span>Status</span>
-          <span>{datumState.already_set === true ? "set" : "unset"}</span>
-          <span>Latitude</span>
-          <span>{formatInfoCoordinate(datumState.datum_lat)}</span>
-          <span>Longitude</span>
-          <span>{formatInfoCoordinate(datumState.datum_lon)}</span>
-          <span>Source</span>
-          <span>{String(datumState.last_set_source ?? "n/a")}</span>
-          <span>Last set</span>
-          <span>{formatInfoTimestamp(datumState.last_set_epoch_ms)}</span>
-        </div>
-      </div>
+      </section>
 
-      <div className="panel-card telemetry-panel-card">
-        <div className="telemetry-card-header">
-          <h4>GPS Fix</h4>
-          <StatusChip
-            label={gpsStatus.available === true ? String(gpsStatus.label ?? "unknown") : "no signal"}
-            tone={gpsTone}
-          />
+      <section className="telemetry-status-section">
+        <h3 className="telemetry-status-heading"><TelemetryIcon kind="info" /> Diagnóstico GPS</h3>
+        <div className="telemetry-status-details key-value-grid">
+          {gpsStatus.source != null && <><span>Origen GPS</span><span>{String(gpsStatus.source)}</span></>}
+          {gpsStatus.raw != null && <><span>Estado GPS</span><span>{String(gpsStatus.raw)}</span></>}
+          {rtkState.active_source_label != null && <><span>Fuente RTK</span><span>{String(rtkState.active_source_label)}</span></>}
+          {rtkState.rtcm_age_s != null && <><span>Última corrección</span><span>{formatInfoNumber(rtkState.rtcm_age_s, 1)} s</span></>}
+          {gpsStatus.received_count != null && <><span>Correcciones recibidas</span><span>{formatInfoNumber(gpsStatus.received_count, 0)}</span></>}
+          {Boolean(rtkState.last_error) && <><span>Error RTK</span><span>{String(rtkState.last_error)}</span></>}
+          {yawDiagnostics.yaw_delta_deg != null && <><span>Diferencia de rumbo</span><span>{formatInfoNumber(yawDiagnostics.yaw_delta_deg)}°</span></>}
+          {!Object.keys(gpsStatus).length && !Object.keys(rtkState).length && yawDiagnostics.yaw_delta_deg == null &&
+            <p>Sin datos de diagnóstico.</p>}
         </div>
-        <div className="key-value-grid telemetry-kv-grid">
-          <span>Fix type</span>
-          <span>{String(gpsStatus.label ?? "n/a")}</span>
-          <span>Source</span>
-          <span>{String(gpsStatus.source ?? "n/a")}</span>
-          <span>Raw status</span>
-          <span>{String(gpsStatus.raw ?? "n/a")}</span>
-        </div>
-        {rtkNtripAvailable && (
-          <>
-            <div className="telemetry-card-header" style={{ marginTop: "0.5rem" }}>
-              <h4>RTK Corrections</h4>
-              <StatusChip label={rtkState.connected === true ? "connected" : "offline"} tone={rtkState.connected === true ? "ok" : "off"} />
-            </div>
-            <div className="key-value-grid telemetry-kv-grid">
-              <span>Connected</span>
-              <span>{rtkState.connected === true ? "yes" : "no"}</span>
-              <span>Source</span>
-              <span>{String(rtkState.active_source_label ?? "n/a")}</span>
-              <span>RTCM age</span>
-              <span>{formatInfoNumber(rtkState.rtcm_age_s, 1)} s</span>
-              <span>Corrections rx</span>
-              <span>{formatInfoNumber(rtkState.received_count, 0)}</span>
-              <span>Last error</span>
-              <span>{String(rtkState.last_error ?? "none")}</span>
-            </div>
-          </>
-        )}
-      </div>
+      </section>
 
-      <div className="panel-card telemetry-panel-card">
-        <div className="telemetry-card-header">
-          <h4>Yaw Diagnostics</h4>
-          <StatusChip
-            label={
-              yawTone === "ok" ? "stable" :
-              yawTone === "warn" ? "review" :
-              yawTone === "off" ? "high delta" :
-              "n/a"
-            }
-            tone={yawTone}
-          />
-        </div>
-        <div className="key-value-grid telemetry-kv-grid">
-          <span>Delta yaw</span>
-          <span>{formatInfoNumber(yawDiagnostics.yaw_delta_deg, 2)} deg</span>
-          <span>Diferencias</span>
-          <span>{formatInfoNumber(yawDiagnostics.diferencias, 3)}</span>
-          <span>ENU convention</span>
-          <span>0°=E, 90°=N</span>
-        </div>
-      </div>
-
-      <LidarPreviewCard service={lidarPreviewService} />
+      {lidarPreviewService && <LidarPreviewCard service={lidarPreviewService} />}
     </div>
   );
 }
@@ -818,10 +742,7 @@ export function createTelemetryModule(): CockpitModule {
         slot: "sidebar",
         label: "Estado del robot",
         icon: "📡",
-        render: () => <div className="stack">
-          <button type="button" className="button-secondary" onClick={() => void ctx.commands.execute(NavigationCommands.openRtkModal)}>GPS y precisión · Consultar RTK</button>
-          <TelemetrySidebarPanel runtime={ctx} />
-        </div>
+        render: () => <TelemetrySidebarPanel runtime={ctx} />
       });
 
       ctx.contributions.register({

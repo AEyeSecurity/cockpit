@@ -28,16 +28,16 @@ describe("RTK source modal", () => {
     if (!modal || modal.slot !== "modal") throw new Error("Missing RTK modal");
     vi.useFakeTimers();
     const view = render(<>{modal.render({ close: () => undefined })}</>);
-    expect(screen.getByText("NTRIP conectado · esperando RTCM válido")).toBeInTheDocument();
+    expect(screen.getByText("Fuente conectada, esperando correcciones")).toBeInTheDocument();
     expect(view.container.querySelector(".rtk-status-dot.connected")).toBeNull();
     snapshot = { ...snapshot, rtkSourceState: {
       ...snapshot.rtkSourceState, receiving_rtcm: true, rtcm_age_s: 0.2, status_sequence: 2
     } };
     act(() => next?.(snapshot));
-    expect(screen.getByText("Recibiendo correcciones RTCM")).toBeInTheDocument();
+    expect(screen.getByText("Recibiendo correcciones")).toBeInTheDocument();
     expect(view.container.querySelector(".rtk-status-dot.connected")).not.toBeNull();
     act(() => vi.advanceTimersByTime(6000));
-    expect(screen.getByText("Sin telemetría RTK reciente")).toBeInTheDocument();
+    expect(screen.getByText("Sin datos recientes de RTK")).toBeInTheDocument();
     expect(view.container.querySelector(".rtk-status-dot.connected")).toBeNull();
     view.unmount();
   });

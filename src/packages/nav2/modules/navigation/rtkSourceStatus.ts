@@ -10,8 +10,8 @@ export function rtkSourceStatus(state: Record<string, unknown> | null, telemetry
     typeof limit === "number" && Number.isFinite(limit) && limit > 0 && age <= limit;
   return {
     receiving,
-    text: !telemetryFresh ? "Sin telemetría RTK reciente" : receiving ? "Recibiendo correcciones RTCM" :
-      state?.connected === true ? "NTRIP conectado · esperando RTCM válido" :
-        active ? "Base seleccionada · reconectando" : "Sin fuente activa"
+    text: !telemetryFresh ? "Sin datos recientes de RTK" : receiving ? "Recibiendo correcciones" :
+      state?.connected === true ? "Fuente conectada, esperando correcciones" :
+        active ? "Reconectando a la fuente" : "Sin fuente activa"
   };
 }
