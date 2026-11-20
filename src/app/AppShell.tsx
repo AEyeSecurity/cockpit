@@ -1,3 +1,4 @@
+import { WeatherToolbar } from "../packages/nav2/modules/map/frontend/WeatherPreview";
 import { OperatorAlerts } from "../packages/nav2/modules/navigation/frontend/OperatorAlerts";
 import { useEffect, useMemo, useState } from "react";
 import { ToolbarMenu, Panel, WorkspacePanel, Footer } from "../packages/core";
@@ -489,7 +490,8 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
     <div className="shell">
       <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
-      <ToolbarMenu runtime={runtime} menus={toolbarMenus} />
+      <ToolbarMenu runtime={runtime} menus={toolbarMenus}
+        trailing={import.meta.env.DEV && <WeatherToolbar runtime={runtime} />} />
       <div
         className="shell-body"
         style={{

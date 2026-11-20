@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ToolbarContribution } from "../../../../../core/contributions/types";
 import type { AppRuntime } from "../../../../../core/types/module";
 import logo from "../../../../../../icon2-backgroundless.png";
@@ -7,9 +7,10 @@ import { ToolbarMenuItem } from "./ToolbarMenuItem";
 interface ToolbarMenuProps {
   runtime: AppRuntime;
   menus: ToolbarContribution[];
+  trailing?: ReactNode;
 }
 
-export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
+export function ToolbarMenu({ runtime, menus, trailing }: ToolbarMenuProps): JSX.Element {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
 
@@ -84,7 +85,7 @@ export function ToolbarMenu({ runtime, menus }: ToolbarMenuProps): JSX.Element {
           ))}
         </nav>
       </div>
-
+      {trailing && <div className="toolbar-right">{trailing}</div>}
     </header>
   );
 }

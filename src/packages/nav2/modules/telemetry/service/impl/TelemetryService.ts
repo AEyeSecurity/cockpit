@@ -15,6 +15,7 @@ export interface TelemetrySnapshot {
     lat: number;
     lon: number;
     headingDeg: number;
+    receivedAtMs?: number;
   } | null;
   cmdVelSafe: string;
   goalActive: boolean;
@@ -461,7 +462,8 @@ export class TelemetryService {
       robotPose: {
         lat,
         lon,
-        headingDeg: Number(raw.heading_deg ?? raw.headingDeg ?? 0)
+        headingDeg: Number(raw.heading_deg ?? raw.headingDeg ?? 0),
+        receivedAtMs: Date.now()
       }
     };
   }
