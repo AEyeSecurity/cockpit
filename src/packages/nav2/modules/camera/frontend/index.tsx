@@ -1,3 +1,4 @@
+import { CameraRoverMap } from "./CameraRoverMap";
 import { CameraQualityButton } from "./CameraQualityButton";
 import { useCameraStreamConfig } from "../../../shared/cameraStreamQuality";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -624,72 +625,75 @@ function CameraVisionWorkspaceView({ runtime, sweepEvents }: { runtime: ModuleCo
     <div className="cv-root cv-html-root">
       <div className="cv-body cv-html-body">
         <section className="cv-main cv-html-main cv-camera-grid">
-          <header className="cv-grid-heading"><strong>Panorámica</strong><span>Principal · fija</span></header>
-          <div className="cv-viewport-shell cv-html-stage">
-            <div className={`cv-viewport cv-html-viewport cv-alert-${alertState.risk}${!feedOnline ? " cv-viewport--no-signal" : ""}`}>
-              {showVideo ? (
-                <CameraStreamSurface
-                  isActive={showVideo}
-                  config={cameraConfig}
-                  className="cv-frame"
-                  alt="Camera stream"
-                  onStatusChange={setStreamStatus}
-                />
-              ) : null}
-              {!feedOnline ? (
-                <div className="cv-no-signal">
-                  <div className="cv-no-signal-shell">
-                    <div className="cv-no-signal-text">
-                      {!videoEnabled
-                        ? "Camera unavailable"
-                        : !videoRequested
-                          ? "Video paused to save mobile data"
-                          : videoEnabled
-                        ? streamStatus.connecting
-                          ? "Connecting camera stream"
-                          : streamStatus.error
-                            ? `Camera ${streamStatus.error}`
-                            : "Awaiting camera stream"
-                        : "Camera unavailable"}
-                    </div>
-                    {videoEnabled ? (
-                      <button
-                        type="button"
-                        className="cv-camera-request-btn"
-                        onClick={() => setVideoRequested((current) => !current)}
-                      >
-                        {videoRequested ? "Stop video" : "Start video"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-              {feedOnline && liveAlertState.detections.some(d => d.confidence >= OVERLAY_MIN_CONFIDENCE) ? (
-                <div className="cv-overlay" aria-hidden="true">
-                  {liveAlertState.detections.filter(d => d.confidence >= OVERLAY_MIN_CONFIDENCE).map((det, index) => {
-                    const left = `${Math.max(0, Math.min(1, det.bbox.x)) * 100}%`;
-                    const top = `${Math.max(0, Math.min(1, det.bbox.y)) * 100}%`;
-                    const width = `${Math.max(0, Math.min(1, det.bbox.w)) * 100}%`;
-                    const height = `${Math.max(0, Math.min(1, det.bbox.h)) * 100}%`;
-                    const label = `${detectionDisplayLabel(det.class)} ${(det.confidence * 100).toFixed(0)}%`;
-                    return (
-                      <div
-                        className="cv-detection-box"
-                        key={`${det.class}-${det.confidence}-${index}`}
-                        style={{ left, top, width, height }}
-                      >
-                        <span className="cv-detection-label">{label}</span>
+          <div className="cv-camera-primary">
+            <header className="cv-grid-heading"><strong>Panorámica</strong><span>Principal · fija</span></header>
+            <div className="cv-viewport-shell cv-html-stage">
+              <div className={`cv-viewport cv-html-viewport cv-alert-${alertState.risk}${!feedOnline ? " cv-viewport--no-signal" : ""}`}>
+                {showVideo ? (
+                  <CameraStreamSurface
+                    isActive={showVideo}
+                    config={cameraConfig}
+                    className="cv-frame"
+                    alt="Camera stream"
+                    onStatusChange={setStreamStatus}
+                  />
+                ) : null}
+                {!feedOnline ? (
+                  <div className="cv-no-signal">
+                    <div className="cv-no-signal-shell">
+                      <div className="cv-no-signal-text">
+                        {!videoEnabled
+                          ? "Camera unavailable"
+                          : !videoRequested
+                            ? "Video pausado"
+                            : videoEnabled
+                          ? streamStatus.connecting
+                            ? "Connecting camera stream"
+                            : streamStatus.error
+                              ? `Camera ${streamStatus.error}`
+                              : "Awaiting camera stream"
+                          : "Camera unavailable"}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {feedOnline ? <div className="cv-html-rec">● {fpsLabel}</div> : null}
+                      {videoEnabled ? (
+                        <button
+                          type="button"
+                          className="cv-camera-request-btn"
+                          onClick={() => setVideoRequested((current) => !current)}
+                        >
+                          {videoRequested ? "Detener" : "Ver video"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                {feedOnline && liveAlertState.detections.some(d => d.confidence >= OVERLAY_MIN_CONFIDENCE) ? (
+                  <div className="cv-overlay" aria-hidden="true">
+                    {liveAlertState.detections.filter(d => d.confidence >= OVERLAY_MIN_CONFIDENCE).map((det, index) => {
+                      const left = `${Math.max(0, Math.min(1, det.bbox.x)) * 100}%`;
+                      const top = `${Math.max(0, Math.min(1, det.bbox.y)) * 100}%`;
+                      const width = `${Math.max(0, Math.min(1, det.bbox.w)) * 100}%`;
+                      const height = `${Math.max(0, Math.min(1, det.bbox.h)) * 100}%`;
+                      const label = `${detectionDisplayLabel(det.class)} ${(det.confidence * 100).toFixed(0)}%`;
+                      return (
+                        <div
+                          className="cv-detection-box"
+                          key={`${det.class}-${det.confidence}-${index}`}
+                          style={{ left, top, width, height }}
+                        >
+                          <span className="cv-detection-label">{label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {feedOnline ? <div className="cv-html-rec">● {fpsLabel}</div> : null}
+              </div>
             </div>
           </div>
           <div className="cv-secondary-grid">
             <SecondaryCameraTile startRequest={mobileStartRequest} title="Móvil" description="Secundaria · movimiento" config={cameraConfig} url={cameraConfig.mobileWebrtcUrl ?? ""} />
             <SecondaryCameraTile title="Reversa" description="Secundaria · vista trasera" config={cameraConfig} url={cameraConfig.reverseWebrtcUrl ?? ""} />
+            <CameraRoverMap runtime={runtime} connected={connectionState?.connected === true} />
           </div>
         </section>
       </div>
