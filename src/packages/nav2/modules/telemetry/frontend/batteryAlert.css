@@ -1,0 +1,21 @@
+.nav-rover-access-dialog.nav-battery-alert {
+  inset: 64px 16px auto auto;
+  margin: 0;
+  max-width: min(340px, calc(100vw - 32px));
+  border-inline-start: 5px solid #d97706;
+  z-index: 1100;
+  pointer-events: none;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .20);
+}
+
+.nav-rover-access-dialog.nav-battery-alert.tone-critical {
+  border-inline-start-color: #dc2626;
+}
+
+.nav-battery-alert p {
+  margin: 6px 0 0;
+}
+
+.nav-battery-alert button:enabled {
+  pointer-events: auto;
+}

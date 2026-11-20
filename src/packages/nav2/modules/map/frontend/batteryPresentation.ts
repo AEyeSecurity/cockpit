@@ -1,5 +1,4 @@
-const LOW_BATTERY_PCT = 30;
-const CRITICAL_BATTERY_PCT = 10;
+import { batteryChargeWarning } from "../../../shared/batteryCharge";
 
 export type BatteryTone = "ok" | "warn" | "critical" | "off";
 
@@ -106,7 +105,8 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: voltageText
     };
   }
-  if (validPct && batteryPct <= CRITICAL_BATTERY_PCT) {
+  const chargeWarning = batteryChargeWarning(batteryPct);
+  if (chargeWarning === "critical") {
     return {
       tone: "critical",
       badgeLabel: "Critical",
@@ -122,7 +122,7 @@ export function getBatteryPresentation(input: BatteryPresentationInput): Battery
       contextualVoltageText: voltageText
     };
   }
-  if (validPct && batteryPct <= LOW_BATTERY_PCT) {
+  if (chargeWarning === "warn") {
     return {
       tone: "warn",
       badgeLabel: "Low",
