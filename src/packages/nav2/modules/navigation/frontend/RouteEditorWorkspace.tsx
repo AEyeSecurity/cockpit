@@ -219,7 +219,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
           <span className="route-editor-state-dot" />
           {state.routeEditor.activeRouteName
             ? state.routeEditor.dirty ? "Cambios sin guardar" : "Guardada en el robot"
-            : state.routeEditor.dirty ? "Borrador con cambios" : "Borrador nuevo"}
+            : state.routeEditor.dirty ? "Borrador con cambios" : "Sin ruta seleccionada"}
         </div>
       </header>
 
@@ -240,7 +240,7 @@ export function RouteEditorWorkspace({ runtime }: { runtime: ModuleContext }): J
         <div className="route-editor-card-heading">
           <div>
             <h2 id="route-document-title">Ruta actual</h2>
-            <p>{state.routeEditor.activeRouteName ? `Editando «${state.routeEditor.activeRouteName}»` : "Este borrador todavía no tiene nombre."}</p>
+            <p>{state.routeEditor.activeRouteName ? `Editando «${state.routeEditor.activeRouteName}»` : state.routeEditor.dirty ? "Este borrador todavía no tiene nombre." : "Abrí una ruta guardada o añadí el primer punto."}</p>
           </div>
           <div className="route-editor-document-actions">
             <button type="button" className="route-editor-button route-editor-new-route" disabled={missionEditingDisabled}

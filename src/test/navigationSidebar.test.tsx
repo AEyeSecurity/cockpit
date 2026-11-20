@@ -38,7 +38,7 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.getByRole("button", { name: "PERFIL DE NAVEGACIÓN" })).toBeInTheDocument();
     expect(screen.getByText("RUTA ACTUAL")).toBeInTheDocument();
     expect(screen.getByText("RUTA AUTOMÁTICA")).toBeInTheDocument();
-    expect(screen.getByText("Borrador nuevo")).toBeInTheDocument();
+    expect(screen.getByText("Sin ruta seleccionada")).toBeInTheDocument();
     expect(screen.getByText("EDITAR / AÑADIR PUNTOS")).toBeInTheDocument();
     expect(screen.getByText("Añade al menos 2 puntos desde el editor.")).toBeInTheDocument();
     expect(screen.getByText("INICIAR RUTA").closest("button")).toBeDisabled();
@@ -267,6 +267,16 @@ describe("navigation sidebar and route editor", () => {
     expect(navigationService.getState().savedRouteNames).toContain("Ruta original");
     expect(navigationService.getState().routeEditor.dirty).toBe(false);
     expect(screen.getByRole("combobox", { name: "Abrir ruta guardada" })).toHaveTextContent("Ruta original");
+    await act(async () => {
+      navigationService.setRouteLibraryConnection(false, "robot");
+      navigationService.setRouteLibraryConnection(true, "robot");
+      await navigationService.refreshSavedRoutes();
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Abrir ruta guardada" }), {
+      target: { value: "Ruta original" }
+    });
+    await waitFor(() => expect(navigationService.getState().routeEditor.activeRouteName).toBe("Ruta original"));
+    expect(navigationService.getState().waypoints).toHaveLength(1);
   });
 
   it("keeps point actions beside a compact list and inserts after the selection", async () => {

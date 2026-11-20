@@ -2175,6 +2175,7 @@ export class NavigationService {
 
   setRouteLibraryConnection(connected: boolean, key: string): void {
     if (connected === this.state.routeLibrary.connected && key === this.routeConnectionKey) return;
+    const hasCleanEmptyRoute = this.state.waypoints.length === 0 && !this.state.routeEditor.dirty;
     this.routeEpoch += 1;
     this.routeConnectionKey = key;
     this.routeRequests = 0;
@@ -2184,7 +2185,7 @@ export class NavigationService {
       routeEditor: { ...this.state.routeEditor, activeRouteName: null },
       routeLibrary: { connected, busy: false, error: "", conflict: false } };
     // A detached draft must be explicitly saved to the newly connected robot.
-    this.savedRouteSnapshotKey = null;
+    this.savedRouteSnapshotKey = hasCleanEmptyRoute ? this.currentRouteSnapshotKey() : null;
     this.updateRouteEditorState();
     this.emit();
     if (connected) void this.refreshSavedRoutes().catch(() => undefined);
