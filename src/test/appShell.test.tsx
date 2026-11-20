@@ -200,7 +200,7 @@ describe("AppShell", () => {
     expect(await screen.findByText("Test Modal")).toBeInTheDocument();
   });
 
-  it("shows lost connection dialog on unexpected disconnect", async () => {
+  it("shows a passive lost connection notice on unexpected disconnect", async () => {
     const runtime = createRuntime();
     const connection = new FakeConnectionService();
     runtime.services.registerService({
@@ -217,9 +217,10 @@ describe("AppShell", () => {
 
     expect(await screen.findByText("Conexión perdida")).toBeInTheDocument();
     expect(screen.getByText(/backend dropped/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("does not show dialog on intentional disconnect", async () => {
+  it("does not warn on intentional disconnect", async () => {
     const runtime = createRuntime();
     const connection = new FakeConnectionService();
     runtime.services.registerService({

@@ -1,3 +1,4 @@
+import { RoverDisplacedNotice } from "../packages/nav2/modules/navigation/frontend/OperatorAlerts";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoverAccessDialog, type RoverAccess } from "../packages/nav2/modules/navigation/frontend/RoverAccessDialog";
@@ -37,14 +38,15 @@ describe("Rover control dialogs", () => {
     expect(control.disconnect).toHaveBeenCalledOnce();
   });
 
-  it("lets the displaced controller continue watching or disconnect", () => {
+  it("shows a passive notice explaining spectator mode to the displaced operator", () => {
     const control = fixture({ mode: "spectator", displaced: true });
-    render(<RoverAccessDialog control={control} />);
-    expect(screen.getByText("Otro usuario tomó el control del Rover")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Aceptar" }));
+    const { rerender } = render(<RoverDisplacedNotice control={control} manualControl />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Pasaste a modo espectador");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "OK" })).toBeDisabled();
+    rerender(<RoverDisplacedNotice control={control} manualControl={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
     expect(control.choose).toHaveBeenCalledWith("acknowledge");
-    fireEvent.click(screen.getByRole("button", { name: "Desconectar" }));
-    expect(control.disconnect).toHaveBeenCalledOnce();
   });
 
   it("shows a pending safety confirmation after a SALUS outage", () => {

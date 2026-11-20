@@ -1,3 +1,4 @@
+import { OperatorAlerts } from "../packages/nav2/modules/navigation/frontend/OperatorAlerts";
 import { useEffect, useMemo, useState } from "react";
 import { ToolbarMenu, Panel, WorkspacePanel, Footer } from "../packages/core";
 import type { KeybindingContext } from "../core/keybindings/types";
@@ -397,49 +398,6 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
   }, [runtime]);
 
   useEffect(() => {
-    let connectionService: ConnectionServiceLike | null = null;
-    let dialogService: DialogService | null = null;
-    try {
-      connectionService = runtime.getService<ConnectionServiceLike>(CONNECTION_SERVICE_ID);
-      dialogService = runtime.getService<DialogService>(DIALOG_SERVICE_ID);
-    } catch {
-      connectionService = null;
-      dialogService = null;
-    }
-    if (!connectionService || !dialogService) return;
-
-    let connected = connectionService.getState().connected;
-    let notifiedLoss = false;
-
-    const notifyLostConnection = (reason: string): void => {
-      if (notifiedLoss) return;
-      notifiedLoss = true;
-      const detail = reason.trim() ? `\n\nDetalle: ${reason.trim()}` : "";
-      void dialogService.alert({
-        title: "Conexión perdida",
-        message: `Se perdió la conexión con el backend remoto.${detail}`,
-        confirmLabel: "Entendido",
-        danger: true
-      });
-    };
-
-    const unsubscribeConnection = connectionService.subscribe((next) => {
-      const reason = String(next.lastError ?? "").trim();
-      const lostByTransition = connected && !next.connected && reason.length > 0;
-      connected = next.connected;
-      if (next.connected) {
-        notifiedLoss = false;
-      } else if (lostByTransition) {
-        notifyLostConnection(reason);
-      }
-    });
-
-    return () => {
-      unsubscribeConnection();
-    };
-  }, [runtime]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isEditingTarget(event.target)) return;
 
@@ -579,6 +537,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       </div>
       <ModalHost dialogs={modalDialogs} modalId={activeModalId} closeModal={() => setActiveModalId(null)} />
       <GlobalDialogHost runtime={runtime} />
+      <OperatorAlerts runtime={runtime} />
       <Footer
         items={footerItems}
         consoleCollapsed={true}

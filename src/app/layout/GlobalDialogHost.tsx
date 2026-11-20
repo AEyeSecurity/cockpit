@@ -51,12 +51,10 @@ export function GlobalDialogHost({ runtime }: GlobalDialogHostProps): JSX.Elemen
     }
     dialogService.accept();
   };
-  const isConnectionLostDialog = activeDialog.kind === "alert" && activeDialog.title === "Conexión perdida";
   const isDangerConfirm = activeDialog.kind === "confirm" && activeDialog.danger;
   const isPromptDialog = activeDialog.kind === "prompt";
   const cardClassName = [
     "global-dialog-card",
-    isConnectionLostDialog ? "global-dialog-card-connection-lost" : "",
     isDangerConfirm ? "global-dialog-card-danger" : "",
     isPromptDialog ? "global-dialog-card-prompt" : ""
   ].filter(Boolean).join(" ");

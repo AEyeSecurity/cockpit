@@ -133,39 +133,30 @@ export function RoverAccessProvider({ service, csrf, children }: {
 export function RoverAccessDialog({ control }: { control: RoverAccess }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { access, busy, error, disconnect, choose } = control;
-  const waiting = access?.mode === "waiting";
-  const displaced = access?.displaced === true;
-  const visible = waiting || displaced;
+  const visible = access?.mode === "waiting";
   useEffect(() => {
     const element = dialog.current;
     if (visible && element && !element.open) element.showModal();
   }, [visible]);
   if (!visible) return null;
-  const recovering = waiting && (access.phase === "fault" || access.phase === "stopping");
-  const title = displaced ? "Otro usuario tomó el control del Rover"
-    : recovering ? "Control del Rover en pausa" : "Ya hay un usuario conectado al Rover";
+  const recovering = access.phase === "fault" || access.phase === "stopping";
+  const title = recovering ? "Control del Rover en pausa" : "Ya hay un usuario conectado al Rover";
 
   return <dialog ref={dialog} className="nav-rover-access-dialog" aria-labelledby="rover-access-title"
     onCancel={(event) => { event.preventDefault(); }}>
     <h2 id="rover-access-title">{title}</h2>
     {recovering && <p>Cockpit debe confirmar la detención del Rover antes de habilitar el control.</p>}
     {recovering && busy && <p role="status">Verificando la conexión y el estado de SALUS…</p>}
-    {waiting && !recovering && access.canTake && <p>¿Querés tomar el control?</p>}
+    {!recovering && access.canTake && <p>¿Querés tomar el control?</p>}
     {error && <p role="alert">{error}</p>}
     <div className="nav-rover-access-actions">
-      <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void disconnect()}>
-        {displaced ? "Desconectar" : "Cancelar"}
-      </button>
-      {displaced
-        ? <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("acknowledge")}>Aceptar</button>
-        : <>
-            <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void choose("spectate")}>Espectar</button>
-            {access.canTake && <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("take")}>
-              {recovering ? "Verificar SALUS y tomar control" : "Tomar control y frenar"}
-            </button>}
-            {access.canTake && access.canKeepRoute && <button type="button" className="bt sec-btn" disabled={busy}
-              onClick={() => void choose("take", true)}>Tomar control y mantener la ruta</button>}
-          </>}
+      <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void disconnect()}>Cancelar</button>
+      <button type="button" className="bt sec-btn" disabled={busy} onClick={() => void choose("spectate")}>Espectar</button>
+      {access.canTake && <button type="button" className="bt prim-btn" disabled={busy} onClick={() => void choose("take")}>
+        {recovering ? "Verificar SALUS y tomar control" : "Tomar control y frenar"}
+      </button>}
+      {access.canTake && access.canKeepRoute && <button type="button" className="bt sec-btn" disabled={busy}
+        onClick={() => void choose("take", true)}>Tomar control y mantener la ruta</button>}
     </div>
   </dialog>;
 }

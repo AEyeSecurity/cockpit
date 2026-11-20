@@ -1,0 +1,30 @@
+.nav-operator-notices {
+  position: fixed;
+  inset: 64px 16px auto auto;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.nav-rover-access-dialog.nav-operator-notice {
+  position: static;
+  margin: 0;
+  max-width: 100%;
+  border-inline-start: 5px solid #d97706;
+  pointer-events: none;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .20);
+}
+
+.nav-rover-access-dialog.nav-operator-notice.tone-critical {
+  border-inline-start-color: #dc2626;
+}
+
+.nav-operator-notice p {
+  margin: 6px 0 0;
+}
+
+.nav-operator-notice button:enabled {
+  pointer-events: auto;
+}

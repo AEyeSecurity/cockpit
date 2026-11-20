@@ -8,7 +8,7 @@ import { NavLiveWindow } from "./packages/nav2/modules/navigation/frontend/NavLi
 import { activateSession, loadSession, SessionGate } from "./packages/identity/SessionGate";
 import { registerIdentity } from "./packages/identity/register";
 import type { Session } from "./packages/identity/api";
-import { BatteryAlert } from "./packages/nav2/modules/telemetry/frontend/BatteryAlert";
+import { OperatorAlerts } from "./packages/nav2/modules/navigation/frontend/OperatorAlerts";
 import { RoverAccessProvider } from "./packages/nav2/modules/navigation/frontend/RoverAccessDialog";
 import type { ConnectionService } from "./packages/nav2/modules/navigation/service/impl/ConnectionService";
 import "./app/base.css";
@@ -56,7 +56,10 @@ async function start(): Promise<void> {
       ) : slot === "full" ? (
         <AppShell runtime={runtime} layoutMode={useVscodeFullLayout ? "vscode" : "default"} />
       ) : (
-        <VscodeWebviewShell runtime={runtime} slot={slot} />
+        <>
+          <VscodeWebviewShell runtime={runtime} slot={slot} />
+          <OperatorAlerts runtime={runtime} />
+        </>
       );
   const csrf = runtime.env.roverControlCsrf;
   root.render(
@@ -64,7 +67,6 @@ async function start(): Promise<void> {
       {csrf ? <RoverAccessProvider csrf={csrf} service={runtime.getService<ConnectionService>("service.connection")}>
         {content}
       </RoverAccessProvider> : content}
-      {!isNavLiveWindow && <BatteryAlert runtime={runtime} />}
     </React.StrictMode>
   );
 }

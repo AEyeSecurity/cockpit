@@ -207,6 +207,7 @@ export interface NavigationState {
   loopRoute: boolean;
   routeMission: RouteMissionStateData;
   routePreparationResult?: { id: number; rejection: string };
+  submittedRoutePreparation?: { id: number };
   goalMode: boolean;
   manualMode: boolean;
   manualDisablePending: boolean;
@@ -2634,7 +2635,7 @@ export class NavigationService {
     if (options?.chunkSpanM !== undefined) payload.chunk_span_m = Number(options.chunkSpanM);
     if (options?.chunkMaxWaypoints !== undefined) payload.chunk_max_waypoints = Number(options.chunkMaxWaypoints);
 
-    this.state = { ...this.state, routePreparationResult: undefined };
+    this.state = { ...this.state, routePreparationResult: undefined, submittedRoutePreparation: undefined };
     const response = await this.robotDispatcher.requestRouteMission(payload as never);
     if (response.ok === false) {
       throw new Error(String(response.error ?? "Route mission dispatch failed"));
@@ -2642,8 +2643,10 @@ export class NavigationService {
 
     const inputCount = Number(response.input_waypoint_count ?? queued.length) || queued.length;
     const expandedCount = Number(response.expanded_waypoint_count ?? queued.length) || queued.length;
+    const preparationId = Number(response.preparation_id) || undefined;
     this.state = {
       ...this.state,
+      submittedRoutePreparation: preparationId === undefined ? undefined : { id: preparationId },
       lastStatus: `Route mission sent (${inputCount} -> ${expandedCount})`
     };
     this.emit();
@@ -2651,7 +2654,7 @@ export class NavigationService {
       inputCount,
       expandedCount,
       loopRoute: this.state.loopRoute,
-      preparationId: Number(response.preparation_id) || undefined
+      preparationId
     };
   }
 
@@ -3058,6 +3061,7 @@ export class NavigationService {
     this.state = {
       ...this.state,
       lastStatus: "Route mission cancelled",
+      submittedRoutePreparation: undefined,
       routeMission: {
         ...this.state.routeMission,
         active: false,
