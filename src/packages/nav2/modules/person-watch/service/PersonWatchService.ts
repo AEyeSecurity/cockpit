@@ -1,4 +1,8 @@
+export interface DetectionPosition { lat: number; lon: number; timestamp_ms: number }
 export interface PersonAlert {
+  frame_ms?: number;
+  event_ms?: number;
+  position?: DetectionPosition;
   id: string; camera_id: string; label: string; timestamp_ms: number; count: number; confidence: number; image_available?: boolean; image_url?: string;
 }
 export interface PersonCamera {
@@ -9,6 +13,13 @@ export interface WatchState {
 }
 const empty: WatchState = { available: false, cameras: [], alerts: [], error: "Conectando detector…" };
 const cameraIds = new Set(["cam3", "cam4", "cam5"]);
+function parsePosition(value: DetectionPosition | undefined, frame: number | undefined): DetectionPosition | undefined {
+  if (frame === undefined || !value || !Number.isFinite(value.lat) || !Number.isFinite(value.lon)
+    || Math.abs(value.lat) > 90 || Math.abs(value.lon) > 180
+    || !Number.isSafeInteger(value.timestamp_ms) || value.timestamp_ms > frame || frame - value.timestamp_ms > 5000) return;
+  return { lat: value.lat, lon: value.lon, timestamp_ms: value.timestamp_ms };
+}
+
 export function parseWatchState(value: unknown, now = Date.now(), endpoint = ""): WatchState {
   const v = value as Record<string, unknown> | null;
   if (!v || v.schema !== 1 || !Array.isArray(v.cameras) || !Array.isArray(v.alerts)
@@ -24,9 +35,17 @@ export function parseWatchState(value: unknown, now = Date.now(), endpoint = "")
   const alerts = v.alerts.filter((a: PersonAlert) => a && typeof a.id === "string" && cameraIds.has(a.camera_id)
     && typeof a.label === "string" && typeof a.timestamp_ms === "number" && Number.isFinite(a.timestamp_ms)
     && Number.isInteger(a.count) && a.count > 0 && Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1)
-    .slice(-50).map((a: PersonAlert) => ({ ...a, timestamp_ms: now - (serverNow-a.timestamp_ms),
-      image_url: a.image_available === true && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(a.id) && endpoint
-        ? new URL(`./alerts/${a.id}.jpg`, endpoint).href : undefined }));
+    .slice(-50).map((a: PersonAlert) => {
+      const frame = Number.isSafeInteger(a.frame_ms) && a.frame_ms! > 5000 && a.frame_ms! <= a.timestamp_ms
+        ? a.frame_ms : undefined;
+      const hasImage = a.image_available === true &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(a.id);
+      return { ...a, timestamp_ms: now - (serverNow - a.timestamp_ms), frame_ms: frame, event_ms: frame ?? a.timestamp_ms,
+        position: parsePosition(a.position, frame),
+        image_url: hasImage && endpoint
+          ? endpoint === "/operation/person" ? `${endpoint}/alerts/${a.id}.jpg` : new URL(`./alerts/${a.id}.jpg`, endpoint).href
+          : undefined };
+    });
   return { available: true, cameras, alerts, error: "" };
 }
 
@@ -56,7 +75,7 @@ export class PersonWatchService {
     try {
       endpoint = this.endpoint();
       if (!endpoint) throw new Error("Detector no configurado para esta conexión");
-      const response = await this.fetchFn(endpoint, { signal: controller.signal, cache: "no-store", credentials: "omit" });
+      const response = await this.fetchFn(endpoint, { signal: controller.signal, cache: "no-store", credentials: "same-origin" });
       if (!response.ok) throw new Error("Detector no disponible");
       const next = parseWatchState(await response.json(), Date.now(), endpoint);
       if (generation === this.generation) this.emit(next);

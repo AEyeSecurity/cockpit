@@ -18,6 +18,12 @@ export function authorizeNavigationFrame(control, instanceId, sessionId, frame, 
   for (const field of ["requestId", "client_req_id"]) {
     if (typeof message[field] === "string") ids[field] = message[field];
   }
+  if (message.op === "recordings_list") {
+    const { camera, start, end } = message;
+    if (!["main", "mobile", "rear"].includes(camera) || typeof start !== "string" ||
+        typeof end !== "string" || Date.parse(end) - Date.parse(start) !== 10000) return null;
+    return JSON.stringify({ ...ids, op: message.op, camera: message.camera, start: message.start, end: message.end });
+  }
   if (readOperations.has(message.op)) return JSON.stringify({ ...ids, op: message.op });
   if (message.op === "set_control_lock" && message.locked === true &&
       control.permits(instanceId, sessionId, "stop")) {
