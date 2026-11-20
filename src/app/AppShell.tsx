@@ -481,7 +481,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
 
   const shellBodyColumns = sidebarCollapsed
     ? `var(--sidebar-rail-width, ${SIDEBAR_RAIL_WIDTH}px) minmax(0, 1fr)`
-    : `var(--sidebar-rail-width, ${SIDEBAR_RAIL_WIDTH}px) ${sidebarWidth}px ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
+    : `var(--sidebar-rail-width, ${SIDEBAR_RAIL_WIDTH}px) max(250px, calc(${sidebarWidth}px - var(--sidebar-compact-offset, 0px))) ${SPLITTER_THICKNESS}px minmax(0, 1fr)`;
   const shellColumns = usingVscodeLayout ? "minmax(0, 1fr)" : shellBodyColumns;
   const presentedWorkspaceId = focusedWorkspaceId ?? activeWorkspaceId;
   const workspaceFocused = focusedWorkspaceId !== null;

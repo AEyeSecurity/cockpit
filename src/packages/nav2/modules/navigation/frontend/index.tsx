@@ -714,15 +714,30 @@ function NavSidebarCollapsibleSection({
   badge,
   className,
   defaultCollapsed = true,
+  compactSummary,
+  compactSummaryLabel,
   children
 }: {
   title: string;
   badge?: ReactNode;
   className?: string;
   defaultCollapsed?: boolean;
+  compactSummary?: ReactNode;
+  compactSummaryLabel?: string;
   children: ReactNode;
 }): JSX.Element {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [chosenCollapsed, setCollapsed] = useState<boolean>();
+  const [compact, setCompact] = useState(false);
+  const hasCompactSummary = compactSummary != null;
+  useEffect(() => {
+    if (!hasCompactSummary || typeof window.matchMedia !== "function") return;
+    const viewport = window.matchMedia("(max-width: 1366px) and (max-height: 780px)");
+    const update = () => setCompact(viewport.matches);
+    update();
+    viewport.addEventListener("change", update);
+    return () => viewport.removeEventListener("change", update);
+  }, [hasCompactSummary]);
+  const collapsed = chosenCollapsed ?? (compact || defaultCollapsed);
   const [contentHeight, setContentHeight] = useState(500);
   const bodyId = useId();
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -777,15 +792,16 @@ function NavSidebarCollapsibleSection({
         type="button"
         className="nav-sidebar-section-header"
         aria-expanded={!collapsed}
+        aria-label={compact ? `${title}: ${compactSummaryLabel ?? ""}` : undefined}
         aria-controls={bodyId}
-        onClick={() => setCollapsed((current) => !current)}
+        onClick={() => setCollapsed(!collapsed)}
         onWheel={handleHeaderWheel}
       >
         <span className="nav-sidebar-section-title-row">
           <span className="nav-sidebar-section-icon" aria-hidden="true">
             <NavSidebarSectionIcon title={title} />
           </span>
-          <span className="ps-title">{title}</span>
+          {compact ? compactSummary : <span className="ps-title">{title}</span>}
           {badge ? <span className="nav-sidebar-section-badge">{badge}</span> : null}
         </span>
         <span className="nav-sidebar-section-chevron" aria-hidden="true" />
@@ -899,6 +915,11 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
   const [patrolStartPending, setPatrolStartPending] = useState(false);
   const [patrolStartError, setPatrolStartError] = useState("");
   const wps = navState.waypoints.length;
+  const routeDirty = navState.routeEditor.dirty;
+  const routeEmpty = !navState.routeEditor.activeRouteName && !routeDirty && wps === 0;
+  const routeName = navState.routeEditor.activeRouteName ?? (routeEmpty ? "Sin ruta seleccionada" : "Borrador");
+  const routeSaved = !routeDirty && Boolean(navState.routeEditor.activeRouteName);
+  const routeSaveStatus = routeDirty ? "Cambios sin guardar" : routeSaved ? "Guardada en el robot" : "Sin guardar";
   const homeWaypointCount = navState.waypoints.filter((waypoint) => waypoint.role === "home").length;
   const lockReasonText = formatControlLockReason(navState.controlLockReason);
   const routeMission = navState.routeMission;
@@ -1134,15 +1155,22 @@ function NavigationSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.El
       <NavSidebarCollapsibleSection
         title="RUTA ACTUAL"
         badge={<span className={joinClassNames("waypoint-badge", wps === 0 && "empty")}>{wps}</span>}
+        compactSummaryLabel={routeEmpty ? routeName : `${routeName}, ${wps} ${wps === 1 ? "punto" : "puntos"}, ${routeSaveStatus}`}
+        compactSummary={
+          <span className="nav-sidebar-compact-route" title={routeEmpty ? routeName : `Ruta actual · ${routeName} · ${routeSaveStatus}`}>
+            <strong className="nav-sidebar-compact-route-name">{routeName}</strong>
+            {!routeEmpty && <span className={routeSaved ? "saved" : "pending"}>{routeSaved ? "Guardada" : "Sin guardar"}</span>}
+          </span>
+        }
         className="nav-sidebar-route-summary-section"
         defaultCollapsed={false}
       >
         <div className="nav-sidebar-route-summary">
-          <strong>{navState.routeEditor.activeRouteName ?? "Borrador nuevo"}</strong>
-          <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
-          <span className={navState.routeEditor.dirty ? "pending" : "saved"}>
-            {navState.routeEditor.dirty ? "Cambios sin guardar" : navState.routeEditor.activeRouteName ? "Guardada en el robot" : "Sin guardar"}
-          </span>
+          <strong>{routeName}</strong>
+          {!routeEmpty && <>
+            <span>{wps} {wps === 1 ? "punto" : "puntos"} · {homeWaypointCount} HOME</span>
+            <span className={routeDirty ? "pending" : "saved"}>{routeSaveStatus}</span>
+          </>}
           {navState.controlLocked ? <p role="status">{lockReasonText}</p> : null}
           {operatorUser && <SavedRoutePicker state={navState} onOpen={async (name) => {
             setSavedRouteMessage("");
