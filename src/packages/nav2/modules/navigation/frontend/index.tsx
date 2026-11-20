@@ -142,7 +142,7 @@ function formatControlLockReason(reason: string): string {
     STARTUP_LOCKED: "Robot bloqueado al iniciar",
     UI_LOCK_REQUEST: "Robot bloqueado desde UI",
     UI_HEARTBEAT_TIMEOUT: "Robot bloqueado por heartbeat ausente",
-    DISCONNECTED: "Robot bloqueado hasta confirmar backend",
+    DISCONNECTED: "Conectá el rover para habilitar los controles.",
     LOCKED: "Robot bloqueado"
   };
   return labels[normalized] ?? `Robot bloqueado: ${normalized}`;
