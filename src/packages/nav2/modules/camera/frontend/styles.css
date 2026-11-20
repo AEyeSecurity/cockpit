@@ -9847,21 +9847,49 @@
   gap: 7px !important;
 }
 .cv-ptz-preset-btn, .cv-ptz-save-btn { min-width: 0 !important; font-size: 11px !important; }
-/* Camera actions share the PTZ rail styling and never reserve a fixed height. */
+/* Independent sidebar sections for sweep and lights. */
 .cv-camera-aux { display: grid; gap: 8px; min-width: 0; }
-.cv-camera-aux .cv-camera-sweep-row { margin: 0; }
-.cv-camera-light-details { border: 1px solid #c5d5e4; border-radius: 8px; background: #f6f9fc; color: #20374a; }
-.cv-camera-light-details summary { cursor: pointer; padding: 8px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.cv-camera-light-details summary > span { float: right; color: #697e90; font-size: 10px; }
-.cv-camera-light-body { display: grid; gap: 8px; padding: 0 8px 8px; }
-.cv-camera-light-row { display: grid; grid-template-columns: minmax(0, 1fr) 75px 65px; gap: 6px; align-items: center; }
+.cv-camera-action-section {
+  min-width: 0;
+  border: 1px solid #a7bede;
+  border-radius: 14px;
+  background: #fff;
+  color: #172b46;
+  box-shadow: 0 7px 16px rgb(15 23 42 / 5.5%);
+}
+.cv-camera-action-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+.cv-camera-action-section > summary::-webkit-details-marker { display: none; }
+.cv-camera-action-section > summary::after {
+  content: "";
+  flex: 0 0 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-top: 1px solid #2769ff;
+  border-right: 1px solid #2769ff;
+  transform: rotate(45deg);
+}
+.cv-camera-action-section[open] > summary { border-bottom: 1px solid #d1deed; }
+.cv-camera-action-section[open] > summary::after { transform: rotate(135deg); }
+.cv-camera-action-section > summary:focus-visible { outline: 2px solid #2769ff; outline-offset: -3px; border-radius: 12px; }
+.cv-camera-action-section > summary > span { color: #577087; font-size: 9px; }
+.cv-camera-action-body { display: grid; gap: 8px; padding: 10px; }
+.cv-camera-light-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: center; }
 .cv-camera-light-row > div { display: grid; gap: 2px; font-size: 11px; }
 .cv-camera-light-row > div > span { color: #697e90; font-size: 10px; }
-.cv-camera-light-body > p { margin: 0; font-size: 10px; line-height: 1.4; color: #697e90; }
-.cv-camera-light-row .cv-ptz-preset-btn { padding-inline: 4px; }
+.cv-camera-action-body > p { margin: 0; font-size: 10px; line-height: 1.4; color: #697e90; }
 
-.cv-camera-aux { position: relative; z-index: 1; background: #f4f8ff; }
-.cv-camera-aux .cv-ptz-preset-btn:disabled { opacity: .65 !important; color: #53677b !important; background: #e7edf5 !important; }
 
 /* Two explicit positions keep both stream modes visible in the sidebar. */
 .cv-quality-control {
@@ -9930,4 +9958,79 @@
 
 @media (prefers-reduced-motion: reduce) {
   .cv-quality-switch-thumb { transition: none; }
+}
+
+/* The camera workspace is dedicated to video; operation lives in the sidebar. */
+.cv-body.cv-html-body {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+
+.cv-camera-sidebar {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.cv-camera-sidebar .cv-camera-preset-settings > summary {
+  padding: 8px 0;
+  color: #334e68;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+
+.cv-camera-sidebar .cv-ptz-inline-note {
+  background: #fff8e9 !important;
+  color: #704617 !important;
+  border: 1px solid #dec398 !important;
+}
+
+
+.cv-camera-direction-grid,
+.cv-camera-zoom-row,
+.cv-camera-preset-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.cv-camera-direction-grid { width: min(100%, 216px); margin-inline: auto; }
+.cv-camera-preset-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.cv-camera-sidebar .cv-camera-action-button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 36px;
+  padding: 5px;
+  border: 1px solid #c7d8ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #203751;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.cv-camera-action-button span { display: flex; }
+.cv-camera-sidebar .cv-camera-action-button:disabled {
+  border-color: #d9e3ee;
+  background: #f2f6fa;
+  color: #536a80;
+  cursor: default;
+}
+.cv-camera-sidebar .cv-camera-action-button:hover:not(:disabled),
+.cv-camera-sidebar .cv-camera-action-button:is(.is-active, .is-armed) {
+  border-color: #7daaf0;
+  background: #ebf3ff;
+  color: #174a9a;
+}
+.cv-camera-sidebar .cv-camera-action-button:focus-visible {
+  outline: 2px solid #2769ff;
+  outline-offset: 1px;
 }
