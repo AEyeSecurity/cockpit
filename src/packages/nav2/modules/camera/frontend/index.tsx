@@ -245,7 +245,8 @@ function CameraSidebar({ runtime, onSweepStart }: { runtime: ModuleContext; onSw
 
   const navBackendConnected = connectionState?.connected === true;
   const ptzDisabled = !navigationService || !navBackendConnected;
-  const ptzCommandDisabled = ptzDisabled || ptzBusy;
+  const controlLocked = navigationState?.controlLocked !== false;
+  const ptzCommandDisabled = ptzDisabled || ptzBusy || controlLocked;
   const clearPresetSaveArm = (): void => {
     if (presetSaveTimerRef.current) {
       clearTimeout(presetSaveTimerRef.current);
@@ -415,6 +416,21 @@ function CameraSidebar({ runtime, onSweepStart }: { runtime: ModuleContext; onSw
 
   return <div className="cv-camera-sidebar">
     <button type="button" className="button-primary" onClick={() => void runtime.commands.execute(ShellCommands.openWorkspace, "workspace.camera")}>Ver cámaras</button>
+    {cameraConfig.ptzEnabled !== false && <div className="cv-camera-control-status" role="status"
+      data-tone={navBackendConnected && navigationService && controlLocked ? "locked"
+        : !navBackendConnected || !navigationService || ptzError ? "warn" : "info"}>
+      <strong>{!navBackendConnected ? "Rover desconectado"
+        : !navigationService ? "Controles no disponibles"
+        : controlLocked ? "Controles de cámara bloqueados"
+        : ptzError ? "Orientación sin confirmar" : "Controles de cámara"}</strong>
+      <p>{!navBackendConnected ? "Conectá el rover desde Operación para usar los controles."
+        : !navigationService ? "Cockpit no tiene acceso a los controles del rover."
+        : controlLocked ? "Habilitá los controles del rover para mover la cámara PTZ, iniciar el paneo o encender las luces."
+        : ptzError ? "El rover no confirmó el estado de orientación."
+        : !ptzState ? "Consultando la posición de la cámara móvil…"
+        : "Podés orientar la cámara. Paneo y Luces indican su disponibilidad."}</p>
+      {navBackendConnected && ptzError && <details><summary>Detalle de orientación</summary><p>{ptzError}</p></details>}
+    </div>}
     <details className="cv-camera-action-section" open>
       <summary>Calidad de video</summary>
       <div className="cv-camera-action-body"><CameraQualityButton runtime={runtime} /></div>
@@ -422,11 +438,6 @@ function CameraSidebar({ runtime, onSweepStart }: { runtime: ModuleContext; onSw
     {cameraConfig.ptzEnabled !== false && <details className="cv-camera-action-section" open>
       <summary>PTZ · Cámara móvil</summary>
       <div className="cv-camera-action-body">
-        {ptzError ? (
-          <div className="cv-ptz-inline-note" role="status">
-            {ptzError}
-          </div>
-        ) : null}
         <div className="cv-camera-direction-grid" role="group" aria-label="Orientación de la cámara">
           {PTZ_DIRECTIONS.map((direction) => direction ? (
             <button key={direction.rotation} type="button" className="cv-camera-action-button"
@@ -519,7 +530,7 @@ function CameraSidebar({ runtime, onSweepStart }: { runtime: ModuleContext; onSw
       </div>
     </details>}
     {cameraConfig.ptzEnabled !== false && <CameraAuxControls service={navigationService} connected={navBackendConnected}
-      controlLocked={navigationState?.controlLocked !== false}
+      controlLocked={controlLocked}
       onSweepStart={onSweepStart} />}
   </div>;
 }

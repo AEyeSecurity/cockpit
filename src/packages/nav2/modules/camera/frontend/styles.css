@@ -10123,3 +10123,30 @@
   box-sizing: border-box;
   z-index: 2;
 }
+
+.cv-camera-action-body > .cv-camera-action-hint { margin: 0; color: #465d75; font-size: 12px; line-height: 1.4; }
+
+.cv-camera-control-status {
+  padding: 10px 12px;
+  border: 1px solid #bfd4f1;
+  border-radius: 12px;
+  background: #f3f8ff;
+  color: #203751;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.cv-camera-control-status[data-tone="warn"] {
+  border-color: #dec398;
+  background: #fff8e9;
+  color: #704617;
+}
+.cv-camera-control-status p { margin: 4px 0 0; }
+.cv-camera-control-status details { margin-top: 6px; }
+.cv-camera-control-status summary { cursor: pointer; }
+
+.cv-camera-control-status[data-tone="locked"] {
+  background: #fee2e2;
+  border-color: #dc2626;
+  color: #991b1b;
+}

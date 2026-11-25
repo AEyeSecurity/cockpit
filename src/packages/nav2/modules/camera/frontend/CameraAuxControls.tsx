@@ -12,6 +12,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     setState(null);
+    setError("");
     if (!service || !connected) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -35,6 +36,10 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
     catch (failure) { setError(String(failure)); }
     finally { setBusy(false); }
   };
+  const sweepUnavailableReason = !connected || !service ? ""
+    : !state ? error ? "No se pudo consultar el estado del paneo." : "Consultando el estado del paneo…"
+    : !state.supported ? "El rover no informó soporte para el paneo."
+    : "";
   const unavailable = !connected || !service || !state?.supported;
   const cannotStart = unavailable || busy || controlLocked;
   const label = (value: number | undefined): string => value === 1 ? "Encendida" : value === 0 ? "Apagada" : "Sin confirmar";
@@ -50,6 +55,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
           <button className="cv-camera-action-button" type="button" disabled={!connected || !service || busy}
             onClick={() => void run(() => service!.sweepCamera(false))}>Detener paneo</button>
         </div>
+        {sweepUnavailableReason && <p className="cv-camera-action-hint" role="status">{sweepUnavailableReason}</p>}
         {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "recovering" ? "Reintentando paneo en unos segundos…" : state.sweepPhase === "centering" ? "Centrando al frente…" : state.sweepPhase === "moving_left" ? "Buscando límite izquierdo…" : state.sweepPhase === "sweeping_left" ? "Paneando hacia la izquierda…" : "Paneando hacia la derecha…"}</p>}
       </div>
     </details>
@@ -71,7 +77,6 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
         <p>La móvil activa modo nocturno. Al apagar recupera su configuración anterior.</p>
       </div>
     </details>
-    {connected && controlLocked && <p className="cv-ptz-inline-note">Tomá el control para encender o iniciar.</p>}
     {error && <p className="cv-ptz-inline-note" role="alert">{error}</p>}
   </div>;
 }

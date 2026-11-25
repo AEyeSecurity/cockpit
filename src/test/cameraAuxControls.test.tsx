@@ -39,7 +39,8 @@ describe("camera sweep and light controls", () => {
     const service = fixture();
     render(<CameraAuxControls service={service as never} connected controlLocked />);
     fireEvent.click(screen.getByText("Luces"));
-    await waitFor(() => expect(service.readCameraFeatures).toHaveBeenCalled());
+    expect(screen.getByText("Consultando el estado del paneo…")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Consultando el estado del paneo…")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Iniciar paneo" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Encender luz fija" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Detener paneo" })).toBeEnabled();
