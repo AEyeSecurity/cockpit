@@ -1,5 +1,7 @@
 import { createSalusLink } from "./salusLink.mjs";
 import { createRoverControl } from "./roverControl.mjs";
+import { readFileSync } from "node:fs";
+import { createWeatherPreview } from "../weather/preview.ts";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { createGateway } from "./gateway.mjs";
@@ -7,7 +9,16 @@ import { createIdentity, HttpError } from "./identity.mjs";
 import { openVault } from "./crypto.mjs";
 import { openStore } from "./store.mjs";
 
-export function startServer({ db, vault, origin, env = {}, now = Date.now, control }) {
+function weatherKey(path) {
+  try {
+    return readFileSync(path, "utf8").trim();
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return "";
+  }
+}
+
+export function startServer({ db, vault, origin, env = {}, now = Date.now, control, weatherRequest }) {
   let salus;
   let destination;
   if (env.COCKPIT_ROVER_CONTROL === "true") {
@@ -47,6 +58,10 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
   }
   const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination });
   const gateway = createGateway(identity, env, control, salus);
+  const key = weatherKey(env.COCKPIT_WEATHER_KEY_FILE ?? "/data/weatherapi.key");
+  const forecast = createWeatherPreview(key, weatherRequest);
+  let weatherWindow = 0;
+  let weatherRequests = 0;
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -55,6 +70,26 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
       if (url.pathname === "/health" && req.method === "GET") {
         db.prepare("SELECT 1").get();
         return res.writeHead(204).end();
+      }
+      if (url.pathname === "/api/weather") {
+        if (!identity.operational(req)) throw new HttpError(401, "Iniciá sesión.");
+        if (req.headers["sec-fetch-site"] === "cross-site") throw new HttpError(403, "Origen no permitido.");
+        if (req.method !== "GET") throw new HttpError(405, "Método no permitido.");
+        if (!key) throw new HttpError(503, "Clima no disponible.");
+        const minute = Math.floor(now() / 60000);
+        if (minute !== weatherWindow) {
+          weatherWindow = minute;
+          weatherRequests = 0;
+        }
+        if (++weatherRequests > 30) throw new HttpError(429, "Demasiadas consultas de clima.");
+        let report;
+        try {
+          report = await forecast(url.searchParams.get("lat"), url.searchParams.get("lon"));
+        } catch (error) {
+          if (error instanceof RangeError) throw new HttpError(400, "Ubicación inválida.");
+          throw new HttpError(503, "Clima no disponible.");
+        }
+        return res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(report));
       }
       if (url.pathname.startsWith("/operation/")) return gateway.http(req, res, url);
       if (!url.pathname.startsWith("/api/")) throw new HttpError(404, "Ruta inexistente.");

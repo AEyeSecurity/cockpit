@@ -491,7 +491,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       <ZoomHost controller={zoomController} />
       <KeybindingHost runtime={runtime} context={keybindingContext} />
       <ToolbarMenu runtime={runtime} menus={toolbarMenus}
-        trailing={import.meta.env.DEV && <WeatherToolbar runtime={runtime} />} />
+        trailing={(import.meta.env.DEV || import.meta.env.VITE_COCKPIT_AUTH === "required") && <WeatherToolbar runtime={runtime} />} />
       <div
         className="shell-body"
         style={{

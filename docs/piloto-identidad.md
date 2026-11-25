@@ -51,3 +51,11 @@ Pruebas de aplicación con Node 24. Ejecutar `npm run build`, `npm run test` y `
 - Desde la red de un operador, comprobar que el navegador usa `/operation/navigation` y que el WebSocket privado de SALUS sólo se alcanza desde la pasarela. Verificar la conexión y los servicios operativos mediante una cuenta de prueba antes de publicar.
 - En SERVER-CIT, preparar las dos imágenes etiquetadas con el mismo SHA y desplegarlas juntas en el proyecto `rover-identity`. Conservar su configuración anterior y una copia coherente de SQLite. El actualizador histórico de la imagen `web` no actualiza este par.
 - El modo de conexión directa se selecciona con `COCKPIT_KEEP_CONNECTIONS=true`. Reservarlo para entornos donde el operador administra su propia conexión al robot.
+
+### Clima en la barra superior
+
+Guardá la clave de WeatherAPI en el archivo `weatherapi.key` del volumen
+de datos del servicio de autenticación. El contenedor la lee de
+`/data/weatherapi.key` al iniciar. Si se usa otro montaje, indicá la ruta
+con `COCKPIT_WEATHER_KEY_FILE`. La API exige una sesión de Cockpit y
+consulta WeatherAPI con coordenadas redondeadas a dos decimales.
