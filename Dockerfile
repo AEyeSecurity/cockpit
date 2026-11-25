@@ -47,6 +47,7 @@ WORKDIR /app
 RUN mkdir /data && chown node:node /data
 COPY --from=dependencies /app/node_modules/ws ./node_modules/ws
 COPY server/auth ./server/auth
+COPY server/weather/preview.ts ./server/weather/preview.ts
 ENV NODE_ENV=production
 USER node
 EXPOSE 8080

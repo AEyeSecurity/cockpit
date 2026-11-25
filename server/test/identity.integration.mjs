@@ -82,7 +82,23 @@ test("pilot identity, account lifecycle, operational revocation and backup", { t
   const peerWs = new WebSocketServer({ server: peer });
   peerWs.on("connection", (ws) => ws.on("message", (data) => ws.send(data.toString())));
   const peerBase = await listen(peer);
-  const server = startServer({ db, vault, origin, now: () => now, env: {
+  const weatherKeyFile = join(folder, "weatherapi.key");
+  writeFileSync(weatherKeyFile, "test-weather-key");
+  const weatherRequest = async (url) => {
+    assert.equal(url.origin, "https://api.weatherapi.com");
+    assert.equal(url.searchParams.get("q"), "-31.40,-64.18");
+    assert.equal(url.searchParams.get("key"), "test-weather-key");
+    return Response.json({
+      location: { localtime_epoch: 1 },
+      current: { last_updated_epoch: 1, condition: { text: "Soleado" }, wind_kph: 10, gust_kph: 15 },
+      forecast: { forecastday: [{ hour: [
+        { time_epoch: 2, time: "10:00", chance_of_rain: 0 },
+        { time_epoch: 3, time: "11:00", chance_of_rain: 0 }
+      ] }] }
+    });
+  };
+  const server = startServer({ db, vault, origin, now: () => now, weatherRequest, env: {
+    COCKPIT_WEATHER_KEY_FILE: weatherKeyFile,
     COCKPIT_NAVIGATION_URL: peerBase.replace("http:", "ws:") + "/fixed",
     COCKPIT_VISION_URL: peerBase + "/vision",
     COCKPIT_CAMERA_URL: peerBase
@@ -93,6 +109,7 @@ test("pilot identity, account lifecycle, operational revocation and backup", { t
     const user = browser(base);
     const anonymous = browser(base);
     assert.equal((await anonymous.call("/api/users")).status, 401);
+    assert.equal((await anonymous.call("/api/weather?lat=-31.4&lon=-64.18")).status, 401);
     assert.equal((await anonymous.call("/operation/vision")).status, 401);
     await assert.rejects(once(anonymous.connect(), "open"), /401/);
     const login = await admin.call("/api/session/login", "POST", { username: "operator", password: first.password });
@@ -118,6 +135,11 @@ test("pilot identity, account lifecycle, operational revocation and backup", { t
     assert.equal((await user.call("/api/session/password", "POST", { currentPassword: created.password, password: userPassword })).stage, "ready");
     assert.equal((await user.call("/api/users")).status, 403);
     assert.equal((await user.call(userPath, "POST")).status, 403);
+    const weather = await user.call("/api/weather?lat=-31.401&lon=-64.179");
+    assert.equal(weather.status, 200);
+    assert.equal(weather.condition, "Soleado");
+    assert.equal(JSON.stringify(weather).includes("test-weather-key"), false);
+    assert.equal((await user.call("/api/weather?lat=100&lon=0")).status, 400);
     const vision = await user.call("/operation/vision?time=1");
     assert.equal(vision.path, "/vision?time=1");
     assert.equal(vision.cookie, null);
