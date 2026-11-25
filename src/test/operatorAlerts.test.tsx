@@ -49,11 +49,15 @@ it("warns once for a matching loop rejection and once per blocked incident", asy
   block("NEEDS_OPERATOR");
   const card = screen.getByRole("alert").closest("aside")!;
   expect(card).toHaveTextContent("La ruta no pudo continuar");
+  const notices = card.closest(".nav-operator-notices");
+  expect(notices?.parentElement).toBe(document.body);
+  expect(notices).toHaveAttribute("data-manual-control", "true");
   expect(within(card).getByRole("button", { name: "OK" })).toBeDisabled();
 
   act(() => {
     dispatcher.handleIncoming({ op: "nav_telemetry", manual_control: { enabled: false } }, dispatcher.transportId);
   });
+  expect(notices).toHaveAttribute("data-manual-control", "false");
   fireEvent.click(within(card).getByRole("button", { name: "OK" }));
   block("NEEDS_OPERATOR");
   expect(screen.queryByRole("alert")).toBeNull();

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ModuleContext } from "../../../../../core/types/module";
 import { OperatorNotice, useManualControl } from "../../../shared/OperatorNotice";
 import { BatteryAlert } from "../../telemetry/frontend/BatteryAlert";
@@ -68,8 +69,8 @@ export function OperatorAlerts({ runtime }: { runtime: ModuleContext }): JSX.Ele
     };
   }, [runtime]);
 
-  return (
-    <div className="nav-operator-notices">
+  return createPortal(
+    <div className="nav-operator-notices" data-manual-control={manualControl}>
       {lostConnection && <OperatorNotice title="Conexión perdida" tone="critical" manualControl={manualControl}
         onConfirm={() => setLostConnection("")}>
         <p>Cockpit perdió la conexión y no puede confirmar el estado del Rover. Comprobá que esté encendido y pulsá <strong>Conectar</strong>.</p>
@@ -86,6 +87,7 @@ export function OperatorAlerts({ runtime }: { runtime: ModuleContext }): JSX.Ele
         <p>El Rover está demasiado lejos de un tramo válido. Acercalo al recorrido cuando sea seguro o desmarcá <strong>Repetir la ruta al terminar</strong> para recorrerla una vez.</p>
       </OperatorNotice>}
       <BatteryAlert runtime={runtime} />
-    </div>
+    </div>,
+    document.body
   );
 }
