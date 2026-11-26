@@ -71,7 +71,27 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
       }
     };
   }
-  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination, reboot });
+  const nvrUrl = env.COCKPIT_NVR_CONTROL_URL;
+  const nvrToken = env.COCKPIT_NVR_CONTROL_TOKEN;
+  const nvrTransmission = nvrUrl && nvrToken ? async enabled => {
+    try {
+      const response = await fetch(nvrUrl, {
+        method: enabled === undefined ? "GET" : "PUT",
+        headers: { Authorization: "Bearer " + nvrToken, "Content-Type": "application/json" },
+        body: enabled === undefined ? undefined : JSON.stringify({ enabled }),
+        redirect: "error",
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) throw new Error("Relay request failed");
+      const state = await response.json();
+      if (typeof state?.enabled !== "boolean" || !Number.isInteger(state.online) || state.online < 0 || state.online > 3 ||
+          (enabled !== undefined && state.enabled !== enabled)) throw new Error("Invalid relay state");
+      return { enabled: state.enabled, online: state.online };
+    } catch {
+      throw new HttpError(503, "No se pudo confirmar el estado de la transmisión al NVR.");
+    }
+  } : undefined;
+  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination, reboot, nvrTransmission });
   const gateway = createGateway(identity, env, control, salus);
   const key = weatherKey(env.COCKPIT_WEATHER_KEY_FILE ?? "/data/weatherapi.key");
   const forecast = createWeatherPreview(key, weatherRequest);

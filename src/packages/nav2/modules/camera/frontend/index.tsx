@@ -5,6 +5,7 @@ import { ShellCommands } from "../../../../../app/shellCommands";
 import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import { SecondaryCameraTile } from "./SecondaryCameraTile";
+import { NvrTransmission } from "./NvrTransmission";
 import { CameraAuxControls } from "./CameraAuxControls";
 import type { CockpitModule, ModuleContext } from "../../../../../core/types/module";
 import { CameraDispatcher } from "../dispatcher/impl/CameraDispatcher";
@@ -435,6 +436,7 @@ function CameraSidebar({ runtime, onSweepStart }: { runtime: ModuleContext; onSw
       <summary>Calidad de video</summary>
       <div className="cv-camera-action-body"><CameraQualityButton runtime={runtime} /></div>
     </details>
+    {import.meta.env.VITE_COCKPIT_AUTH === "required" && <NvrTransmission />}
     {cameraConfig.ptzEnabled !== false && <details className="cv-camera-action-section" open>
       <summary>PTZ · Cámara móvil</summary>
       <div className="cv-camera-action-body">
