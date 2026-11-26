@@ -64,7 +64,7 @@ async function readJson(req) {
   return fail(400, "Solicitud inválida.");
 }
 
-export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control, destination, reboot } = {}) {
+export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control, destination, reboot, nvrTransmission } = {}) {
   const attempts = new Map();
   function stage(account) {
     if (account.must_change) return "password";
@@ -319,6 +319,14 @@ export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly
         if (body?.visuallyConfirmed !== true) fail(400, "Falta confirmar la verificación visual del rover.");
         audit(db, session.account.id, null, "rover.reboot", "requested", now());
         return reboot();
+      }
+      if (path === "/api/rover/nvr-transmission" && (method === "GET" || method === "PUT")) {
+        if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
+        if (!nvrTransmission) fail(404, "La transmisión al NVR no está configurada.");
+        if (write && typeof body?.enabled !== "boolean") fail(400, "Estado de transmisión inválido.");
+        const result = await nvrTransmission(write ? body.enabled : undefined);
+        if (write) audit(db, session.account.id, null, "nvr.transmission", result.enabled ? "live" : "paused", now());
+        return result;
       }
       if (path === "/api/rover/destination" && (method === "GET" || method === "PUT")) {
         if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");

@@ -1,0 +1,10 @@
+services:
+  auth:
+    networks:
+      - default
+      - nvr-control
+
+networks:
+  nvr-control:
+    name: salus-nvr-control
+    external: true

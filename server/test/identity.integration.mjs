@@ -442,3 +442,46 @@ test("running server keeps a single SALUS socket through both handovers", { time
     db.close();
   }
 });
+
+test("signed-in operators can control NVR transmission with CSRF protection", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "cockpit-nvr-"));
+  const file = join(folder, "keys.json");
+  writeFileSync(file, JSON.stringify({ active: "v1", keys: { v1: randomBytes(32).toString("base64") } }));
+  const vault = openVault(file);
+  const db = openStore(join(folder, "identity.sqlite"));
+  provision(db, vault, { username: "driver", name: "Driver", role: "user", initialPassword: "driver234" });
+  db.prepare("UPDATE accounts SET must_change=0").run();
+  let enabled = false;
+  const relay = createServer(async (req, res) => {
+    assert.equal(req.headers.authorization, "Bearer test-token");
+    if (req.method === "PUT") {
+      let body = "";
+      for await (const part of req) body += part;
+      enabled = JSON.parse(body).enabled;
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ enabled, online: enabled ? 3 : 0 }));
+  });
+  const relayUrl = await listen(relay);
+  const server = startServer({ db, vault, origin, env: {
+    COCKPIT_PASSWORD_ONLY: "true",
+    COCKPIT_NVR_CONTROL_URL: relayUrl + "/transmission",
+    COCKPIT_NVR_CONTROL_TOKEN: "test-token"
+  } });
+  try {
+    const operator = browser(await listen(server));
+    const path = "/api/rover/nvr-transmission";
+    assert.equal((await operator.call(path)).status, 401);
+    assert.equal((await operator.call("/api/session/login", "POST", { username: "driver", password: "driver234" })).stage, "ready");
+    assert.deepEqual((await operator.call(path)).payload, { enabled: false, online: 0 });
+    assert.equal((await operator.call(path, "PUT", { enabled: true }, { "x-cockpit-csrf": "invalid" })).status, 403);
+    assert.equal((await operator.call(path, "PUT", { enabled: "true" })).status, 400);
+    assert.deepEqual((await operator.call(path, "PUT", { enabled: true })).payload, { enabled: true, online: 3 });
+    assert.deepEqual((await operator.call(path, "PUT", { enabled: false })).payload, { enabled: false, online: 0 });
+  } finally {
+    await close(server);
+    await close(relay);
+    db.close();
+    rmSync(folder, { force: true, recursive: true });
+  }
+});

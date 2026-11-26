@@ -133,3 +133,17 @@ reportó 153 pruebas correctas y 1 omitida. Incluye pruebas del estado RTK y del
 modal ante handshake, correcciones válidas y latido congelado. Con Node 26 se
 observó un fallo ajeno a RTK en `localStorage` de la prueba del AppShell. No se
 compiló Tauri.
+
+### Transmisión al NVR
+
+En un despliegue con identidad, **Cámara → Transmisión al NVR** permite que
+operadores y administradores habiliten o pausen las tres cámaras del grabador.
+El estado proviene del relay. El control no requiere tomar el mando del rover.
+
+Iniciá primero [salus-video-relay](https://github.com/LeoSole423/salus-video-relay)
+en el mismo motor Docker. Agregá `-f compose.nvr.yaml` después del manifiesto
+de identidad para conectar `auth` a la red privada `salus-nvr-control`.
+Configurá en `auth` la URL `COCKPIT_NVR_CONTROL_URL=http://nvr-control:8090/transmission`
+y `COCKPIT_NVR_CONTROL_TOKEN` con el valor privado de `NVR_CONTROL_TOKEN`
+del relay. El menú se oculta cuando el servicio no tiene la integración
+configurada. La vista de cámaras de Cockpit funciona por separado.
