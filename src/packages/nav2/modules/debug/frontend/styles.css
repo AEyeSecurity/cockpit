@@ -1452,3 +1452,47 @@
     width: 96px;
   }
 }
+#root .support-sidebar > button.debug-reset-button,
+#root .debug-reset-dialog .debug-reset-button {
+  background: #b91c1c !important;
+  color: #fff !important;
+  border: 1px solid #991b1b !important;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 700;
+}
+
+#root .support-sidebar > button.debug-reset-button:hover,
+#root .debug-reset-dialog .debug-reset-button:hover {
+  background: #991b1b !important;
+}
+
+.debug-reset-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  box-sizing: border-box;
+  width: min(440px, calc(100% - 32px));
+  padding: 24px;
+  border: 1px solid #cbd9e8;
+  border-radius: 14px;
+  background: #fff;
+  color: #172b46;
+}
+
+.debug-reset-dialog::backdrop {
+  background: rgb(15 23 42 / 55%);
+}
+
+.debug-reset-dialog h2 {
+  margin-top: 0;
+}
+
+.debug-reset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}

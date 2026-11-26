@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import "./styles.css";
 import type { ModuleContext } from "../../../../../core/types/module";
 import { ShellCommands } from "../../../../../app/shellCommands";
@@ -7,6 +7,7 @@ import type { MissionJsonRecord, MissionSessionFileInfo } from "../service/impl/
 import type { RosbagStatus } from "../dispatcher/impl/MissionDispatcher";
 import { NavigationCommands } from "../../navigation/commands";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
+import type { TelemetryService } from "../../telemetry/service/impl/TelemetryService";
 
 const SERVICE_ID = "service.mission";
 const CONNECTION_SERVICE_ID = "service.connection";
@@ -788,6 +789,38 @@ export function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Elemen
 }
 
 export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
+  const resetDialog = useRef<HTMLDialogElement>(null);
+  const cancelResetButton = useRef<HTMLButtonElement>(null);
+  const resetTitleId = useId();
+  const resetDescriptionId = useId();
+  const [resetStatus, setResetStatus] = useState("");
+  const [resetWarning, setResetWarning] = useState("");
+
+  useEffect(() => {
+    if (resetWarning) cancelResetButton.current?.focus();
+  }, [resetWarning]);
+
+  function confirmReset() {
+    if (resetWarning) {
+      resetDialog.current?.close();
+      setResetStatus("El reinicio de la computadora del robot aún no está habilitado.");
+      return;
+    }
+
+    const connected = runtime.services.has(CONNECTION_SERVICE_ID)
+      && runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID).getState().connected;
+    const telemetry = connected && runtime.services.has("service.telemetry")
+      ? runtime.services.getService<TelemetryService>("service.telemetry").getSnapshot()
+      : null;
+    if (telemetry?.goalActive) {
+      setResetWarning("La telemetría indica que hay una navegación activa.");
+      return;
+    }
+    setResetWarning(connected
+      ? "La telemetría disponible no permite confirmar que el rover esté detenido."
+      : "Cockpit está desconectado y no puede consultar la telemetría del rover.");
+  }
+
   return (
     <div className="stack support-sidebar">
       <div className="panel-card">
@@ -800,6 +833,34 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
       <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute(NavigationCommands.openInfoModal)}>
         Información de navegación
       </button>
+      <button type="button" className="debug-reset-button" onClick={() => {
+        setResetStatus("");
+        setResetWarning("");
+        resetDialog.current?.showModal();
+      }}>
+        REINICIAR ROVER
+      </button>
+      <dialog ref={resetDialog} className="debug-reset-dialog" aria-labelledby={resetTitleId} aria-describedby={resetDescriptionId}>
+        <h2 id={resetTitleId}>{resetWarning ? "Verificá el estado del rover" : "¿Reiniciar la computadora del robot?"}</h2>
+        <div id={resetDescriptionId}>
+          {resetWarning ? (
+            <>
+              <p role="alert">{resetWarning}</p>
+              <p>Verificá visualmente que el rover esté detenido y que el área esté despejada antes de continuar. Si no podés comprobarlo, cancelá.</p>
+            </>
+          ) : (
+            <p>Los servicios del robot se detendrán y Cockpit perderá la conexión mientras la computadora vuelve a arrancar.</p>
+          )}
+          <p>El reinicio demora aproximadamente 5 minutos.</p>
+        </div>
+        <form method="dialog" className="debug-reset-actions">
+          <button ref={cancelResetButton} type="submit" className="button-secondary" autoFocus>Cancelar</button>
+          <button type="button" className="debug-reset-button" onClick={confirmReset}>
+            {resetWarning ? "Ya verifiqué, reiniciar" : "Confirmar reinicio"}
+          </button>
+        </form>
+      </dialog>
+      {resetStatus && <p role="status" className="muted">{resetStatus}</p>}
     </div>
   );
 }
