@@ -8,6 +8,7 @@ import type { RosbagStatus } from "../dispatcher/impl/MissionDispatcher";
 import { NavigationCommands } from "../../navigation/commands";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
 import type { TelemetryService } from "../../telemetry/service/impl/TelemetryService";
+import { api, ApiError } from "../../../../identity/api";
 
 const SERVICE_ID = "service.mission";
 const CONNECTION_SERVICE_ID = "service.connection";
@@ -791,19 +792,39 @@ export function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Elemen
 export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const resetDialog = useRef<HTMLDialogElement>(null);
   const cancelResetButton = useRef<HTMLButtonElement>(null);
+  const resetPending = useRef(false);
   const resetTitleId = useId();
   const resetDescriptionId = useId();
   const [resetStatus, setResetStatus] = useState("");
   const [resetWarning, setResetWarning] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
     if (resetWarning) cancelResetButton.current?.focus();
   }, [resetWarning]);
 
-  function confirmReset() {
+  async function confirmReset() {
     if (resetWarning) {
+      if (resetPending.current) return;
       resetDialog.current?.close();
-      setResetStatus("El reinicio de la computadora del robot aún no está habilitado.");
+      const csrf = runtime.env.roverControlCsrf;
+      if (!csrf) {
+        setResetStatus("El reinicio de la computadora del robot aún no está habilitado.");
+        return;
+      }
+      resetPending.current = true;
+      setResetBusy(true);
+      setResetStatus("Enviando solicitud de reinicio…");
+      try {
+        await api("rover/maintenance/reboot", "POST", { visuallyConfirmed: true }, csrf);
+        setResetStatus("Reinicio solicitado. La reconexión puede demorar aproximadamente 5 minutos.");
+      } catch (error) {
+        setResetStatus(error instanceof ApiError ? error.message :
+          "Se perdió la comunicación. Verificá si el rover se está reiniciando antes de volver a intentar.");
+      } finally {
+        resetPending.current = false;
+        setResetBusy(false);
+      }
       return;
     }
 
@@ -833,7 +854,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
       <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute(NavigationCommands.openInfoModal)}>
         Información de navegación
       </button>
-      <button type="button" className="debug-reset-button" onClick={() => {
+      <button type="button" className="debug-reset-button" disabled={resetBusy} onClick={() => {
         setResetStatus("");
         setResetWarning("");
         resetDialog.current?.showModal();
@@ -855,7 +876,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
         </div>
         <form method="dialog" className="debug-reset-actions">
           <button ref={cancelResetButton} type="submit" className="button-secondary" autoFocus>Cancelar</button>
-          <button type="button" className="debug-reset-button" onClick={confirmReset}>
+          <button type="button" className="debug-reset-button" onClick={() => void confirmReset()}>
             {resetWarning ? "Ya verifiqué, reiniciar" : "Confirmar reinicio"}
           </button>
         </form>
