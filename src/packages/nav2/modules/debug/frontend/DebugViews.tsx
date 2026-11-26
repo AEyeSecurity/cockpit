@@ -824,8 +824,10 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
       return;
     }
 
-    const connected = runtime.services.has(CONNECTION_SERVICE_ID)
-      && runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID).getState().connected;
+    const connection = runtime.services.has(CONNECTION_SERVICE_ID)
+      ? runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID).getState()
+      : null;
+    const connected = connection?.preset === "real" && connection.connected;
     const telemetry = connected && runtime.services.has("service.telemetry")
       ? runtime.services.getService<TelemetryService>("service.telemetry").getSnapshot()
       : null;
@@ -835,7 +837,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
     }
     setResetWarning(connected
       ? "La telemetría disponible no permite confirmar que el rover esté detenido."
-      : "Cockpit está desconectado y no puede consultar la telemetría del rover.");
+      : "Cockpit no tiene una conexión de telemetría con el rover físico.");
   }
 
   return (
@@ -866,7 +868,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
               <p>Verificá visualmente que el rover esté detenido y que el área esté despejada antes de continuar. Si no podés comprobarlo, cancelá.</p>
             </>
           ) : (
-            <p>Los servicios del robot se detendrán y Cockpit perderá la conexión mientras la computadora vuelve a arrancar.</p>
+            <p>Se reiniciará la computadora del rover físico configurado para este Cockpit. Cockpit perderá la conexión mientras los servicios vuelven a arrancar.</p>
           )}
           <p>El reinicio demora aproximadamente 5 minutos.</p>
         </div>
