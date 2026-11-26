@@ -1,5 +1,6 @@
 import { createSalusLink } from "./salusLink.mjs";
 import { createRoverControl } from "./roverControl.mjs";
+import { createHostReboot } from "./hostReboot.mjs";
 import { readFileSync } from "node:fs";
 import { createWeatherPreview } from "../weather/preview.ts";
 import { createServer } from "node:http";
@@ -21,15 +22,29 @@ function weatherKey(path) {
 export function startServer({ db, vault, origin, env = {}, now = Date.now, control, weatherRequest }) {
   let salus;
   let destination;
-  if (env.COCKPIT_ROVER_CONTROL === "true") {
-    const destinations = [env.COCKPIT_NAVIGATION_URL, ...(env.COCKPIT_NAVIGATION_ALTERNATIVES ?? "").split(",").map(value => value.trim()).filter(Boolean)]
+  let reboot;
+  const managedControl = env.COCKPIT_ROVER_CONTROL === "true";
+  const { COCKPIT_HOST_REBOOT_SOCKET: path, COCKPIT_HOST_REBOOT_SSH_HOST: sshHost } = env;
+  const destinations = managedControl || path || sshHost
+    ? [env.COCKPIT_NAVIGATION_URL, ...(env.COCKPIT_NAVIGATION_ALTERNATIVES ?? "").split(",").map(value => value.trim()).filter(Boolean)]
       .map(value => {
         const url = new URL(value);
         if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password || url.hash) {
           throw new Error("Invalid SALUS WebSocket destination");
         }
         return url;
-      });
+      })
+    : [];
+  if (path || sshHost) {
+    if (destinations.length !== 1 || (path && (sshHost || !path.startsWith("/")))) {
+      throw new Error("Host reboot requires one fixed SALUS destination and one transport");
+    }
+    if (sshHost && sshHost.toLowerCase() !== destinations[0].hostname.toLowerCase()) {
+      throw new Error("Host reboot SSH address must match the configured SALUS destination");
+    }
+    reboot = createHostReboot({ path, sshHost }, HttpError);
+  }
+  if (managedControl) {
     const describe = url => ({ host: url.hostname, port: url.port || (url.protocol === "wss:" ? "443" : "80") });
     const saved = db.prepare("SELECT url FROM rover_destination WHERE id=1").get()?.url;
     let current = destinations.find(url => url.href === saved) ?? destinations[0];
@@ -56,7 +71,7 @@ export function startServer({ db, vault, origin, env = {}, now = Date.now, contr
       }
     };
   }
-  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination });
+  const identity = createIdentity(db, vault, origin, now, { passwordOnly: env.COCKPIT_PASSWORD_ONLY === "true", control, destination, reboot });
   const gateway = createGateway(identity, env, control, salus);
   const key = weatherKey(env.COCKPIT_WEATHER_KEY_FILE ?? "/data/weatherapi.key");
   const forecast = createWeatherPreview(key, weatherRequest);

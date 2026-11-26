@@ -8,6 +8,7 @@ import type { RosbagStatus } from "../dispatcher/impl/MissionDispatcher";
 import { NavigationCommands } from "../../navigation/commands";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
 import type { TelemetryService } from "../../telemetry/service/impl/TelemetryService";
+import { api, ApiError, type Session } from "../../../../identity/api";
 
 const SERVICE_ID = "service.mission";
 const CONNECTION_SERVICE_ID = "service.connection";
@@ -791,24 +792,42 @@ export function RecordModal({ runtime }: { runtime: ModuleContext }): JSX.Elemen
 export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.Element {
   const resetDialog = useRef<HTMLDialogElement>(null);
   const cancelResetButton = useRef<HTMLButtonElement>(null);
+  const resetPending = useRef(false);
   const resetTitleId = useId();
   const resetDescriptionId = useId();
   const [resetStatus, setResetStatus] = useState("");
   const [resetWarning, setResetWarning] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
     if (resetWarning) cancelResetButton.current?.focus();
   }, [resetWarning]);
 
-  function confirmReset() {
+  async function confirmReset() {
     if (resetWarning) {
+      if (resetPending.current) return;
       resetDialog.current?.close();
-      setResetStatus("El reinicio de la computadora del robot aún no está habilitado.");
+      resetPending.current = true;
+      setResetBusy(true);
+      setResetStatus("Enviando solicitud de reinicio…");
+      try {
+        const session = await api<Session>("session");
+        await api("rover/maintenance/reboot", "POST", { visuallyConfirmed: true }, session.csrf);
+        setResetStatus("Reinicio solicitado. La reconexión puede demorar aproximadamente 5 minutos.");
+      } catch (error) {
+        setResetStatus(error instanceof ApiError ? error.message :
+          "Se perdió la comunicación. Verificá si el rover se está reiniciando antes de volver a intentar.");
+      } finally {
+        resetPending.current = false;
+        setResetBusy(false);
+      }
       return;
     }
 
-    const connected = runtime.services.has(CONNECTION_SERVICE_ID)
-      && runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID).getState().connected;
+    const connection = runtime.services.has(CONNECTION_SERVICE_ID)
+      ? runtime.services.getService<ConnectionService>(CONNECTION_SERVICE_ID).getState()
+      : null;
+    const connected = connection?.preset === "real" && connection.connected;
     const telemetry = connected && runtime.services.has("service.telemetry")
       ? runtime.services.getService<TelemetryService>("service.telemetry").getSnapshot()
       : null;
@@ -818,7 +837,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
     }
     setResetWarning(connected
       ? "La telemetría disponible no permite confirmar que el rover esté detenido."
-      : "Cockpit está desconectado y no puede consultar la telemetría del rover.");
+      : "Cockpit no tiene una conexión de telemetría con el rover físico.");
   }
 
   return (
@@ -833,7 +852,7 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
       <button type="button" className="button-secondary" onClick={() => void runtime.commands.execute(NavigationCommands.openInfoModal)}>
         Información de navegación
       </button>
-      <button type="button" className="debug-reset-button" onClick={() => {
+      <button type="button" className="debug-reset-button" disabled={resetBusy} onClick={() => {
         setResetStatus("");
         setResetWarning("");
         resetDialog.current?.showModal();
@@ -849,13 +868,13 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
               <p>Verificá visualmente que el rover esté detenido y que el área esté despejada antes de continuar. Si no podés comprobarlo, cancelá.</p>
             </>
           ) : (
-            <p>Los servicios del robot se detendrán y Cockpit perderá la conexión mientras la computadora vuelve a arrancar.</p>
+            <p>Se reiniciará la computadora del rover físico configurado para este Cockpit. Cockpit perderá la conexión mientras los servicios vuelven a arrancar.</p>
           )}
           <p>El reinicio demora aproximadamente 5 minutos.</p>
         </div>
         <form method="dialog" className="debug-reset-actions">
           <button ref={cancelResetButton} type="submit" className="button-secondary" autoFocus>Cancelar</button>
-          <button type="button" className="debug-reset-button" onClick={confirmReset}>
+          <button type="button" className="debug-reset-button" onClick={() => void confirmReset()}>
             {resetWarning ? "Ya verifiqué, reiniciar" : "Confirmar reinicio"}
           </button>
         </form>

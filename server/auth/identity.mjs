@@ -64,7 +64,7 @@ async function readJson(req) {
   return fail(400, "Solicitud inválida.");
 }
 
-export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control, destination } = {}) {
+export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly = false, control, destination, reboot } = {}) {
   const attempts = new Map();
   function stage(account) {
     if (account.must_change) return "password";
@@ -313,6 +313,13 @@ export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly
       const session = getSession(req);
       if (!session) fail(401, "Iniciá sesión.");
       if (write && req.headers["x-cockpit-csrf"] !== session.csrf) fail(403, "Solicitud no autorizada.");
+      if (method === "POST" && path === "/api/rover/maintenance/reboot") {
+        if (stage(session.account) !== "ready" || session.account.role !== "admin") fail(403, "Permisos insuficientes.");
+        if (!reboot) fail(404, "El reinicio de la computadora del robot aún no está habilitado.");
+        if (body?.visuallyConfirmed !== true) fail(400, "Falta confirmar la verificación visual del rover.");
+        audit(db, session.account.id, null, "rover.reboot", "requested", now());
+        return reboot();
+      }
       if (path === "/api/rover/destination" && (method === "GET" || method === "PUT")) {
         if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
         if (!destination) fail(404, "Destino del Rover no disponible.");

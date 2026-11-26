@@ -3,14 +3,17 @@ import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createSocketServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { backup } from "node:sqlite";
 import { test } from "node:test";
 import { WebSocket, WebSocketServer } from "ws";
 import { openVault, totpCode } from "../auth/crypto.mjs";
 import { createRoverControl } from "../auth/roverControl.mjs";
 import { startServer } from "../auth/server.mjs";
+import { createSshRebootExchange } from "../auth/hostReboot.mjs";
 import { openStore, provision } from "../auth/store.mjs";
 
 const origin = "https://pilot.example";
@@ -50,6 +53,75 @@ function browser(base) {
     }
   };
 }
+
+test("remote maintenance uses a pinned host key and sends the request on stdin", async () => {
+  const bootId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const exchange = createSshRebootExchange("rover.private", (file, args, options, done) => {
+    assert.equal(file, "/usr/bin/ssh");
+    assert.equal(args.includes("StrictHostKeyChecking=yes"), true);
+    assert.deepEqual(args.slice(-2), ["salus-reboot@rover.private", "maintenance"]);
+    assert.equal(options.timeout, 9000);
+    return { stdin: new Writable({
+      write(chunk, encoding, callback) {
+        assert.equal(chunk.toString(), "reboot " + bootId + "\n");
+        callback();
+      },
+      final(callback) {
+        done(null, JSON.stringify({ state: "requested", boot_id: bootId }));
+        callback();
+      }
+    }) };
+  });
+  assert.deepEqual(await exchange("reboot " + bootId), { state: "requested", boot_id: bootId });
+  assert.throws(() => createSshRebootExchange("-oProxyCommand=unexpected"), /Invalid host/);
+});
+
+test("host reboot requires an authenticated administrator and visual confirmation", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "cockpit-reboot-"));
+  const file = join(folder, "keys.json");
+  writeFileSync(file, JSON.stringify({ active: "v1", keys: { v1: randomBytes(32).toString("base64") } }));
+  const vault = openVault(file);
+  const db = openStore(join(folder, "identity.sqlite"));
+  provision(db, vault, { username: "operator", name: "Operator", role: "admin", initialPassword: "admin234" });
+  provision(db, vault, { username: "driver", name: "Driver", role: "user", initialPassword: "driver234" });
+  db.prepare("UPDATE accounts SET must_change=0").run();
+  const socketPath = join(folder, "reboot.sock");
+  const bootId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const requests = [];
+  const socketServer = createSocketServer(socket => {
+    socket.setEncoding("utf8").on("data", command => {
+      requests.push(command);
+      socket.end(JSON.stringify({ state: command === "status\n" ? "ready" : "requested", boot_id: bootId }));
+    });
+  });
+  socketServer.listen(socketPath);
+  await once(socketServer, "listening");
+  const server = startServer({ db, vault, origin, env: {
+    COCKPIT_PASSWORD_ONLY: "true", COCKPIT_ROVER_CONTROL: "false",
+    COCKPIT_NAVIGATION_URL: "ws://127.0.0.1:1", COCKPIT_HOST_REBOOT_SOCKET: socketPath
+  } });
+  try {
+    const base = await listen(server);
+    const path = "/api/rover/maintenance/reboot";
+    const confirmed = { visuallyConfirmed: true };
+    const admin = browser(base);
+    const driver = browser(base);
+    assert.equal((await admin.call(path, "POST", confirmed)).status, 401);
+    assert.equal((await driver.call("/api/session/login", "POST", { username: "driver", password: "driver234" })).stage, "ready");
+    assert.equal((await driver.call(path, "POST", confirmed)).status, 403);
+    assert.equal((await admin.call("/api/session/login", "POST", { username: "operator", password: "admin234" })).stage, "ready");
+    assert.equal((await admin.call(path, "POST", confirmed, { "x-cockpit-csrf": "invalid" })).status, 403);
+    assert.equal((await admin.call(path, "POST", {})).status, 400);
+    assert.deepEqual(requests, []);
+    assert.equal((await admin.call(path, "POST", confirmed)).state, "requested");
+    assert.deepEqual(requests, ["status\n", "reboot " + bootId + "\n"]);
+  } finally {
+    await close(server);
+    await close(socketServer);
+    db.close();
+    rmSync(folder, { force: true, recursive: true });
+  }
+});
 
 test("TOTP matches RFC 6238 SHA-1 vector (last six digits)", () => {
   assert.equal(totpCode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 1), "287082");
