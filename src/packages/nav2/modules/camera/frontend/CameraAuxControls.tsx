@@ -50,6 +50,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   const validBounds = bounds.maximum - bounds.minimum >= minimumSpan;
   const minimumAngle = Math.max(bounds.minimum, Math.min(selection?.minimum ?? bounds.minimum, bounds.maximum - minimumSpan));
   const maximumAngle = Math.min(bounds.maximum, Math.max(selection?.maximum ?? bounds.maximum, minimumAngle + minimumSpan));
+  const position = (angle: number) => (angle - bounds.minimum) / (bounds.maximum - bounds.minimum) * 100;
   const label = (value: number | undefined): string => value === 1 ? "Encendida" : value === 0 ? "Apagada" : "Sin confirmar";
   return <div className="cv-camera-aux" aria-label="Paneo y luces">
     <details className="cv-camera-action-section" open>
@@ -57,20 +58,25 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
       <div className="cv-camera-action-body">
         {validBounds && <fieldset className="cv-camera-sweep-range" disabled={busy || state?.sweepRunning}>
           <legend>{state?.sweepBounds ? "Rango de paneo" : "Vista previa del rango de paneo"}</legend>
-          <label>
-            Ángulo mínimo <span aria-hidden="true">{minimumAngle}°</span>
-            <input type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={minimumAngle}
+          <div className="cv-camera-sweep-values" aria-hidden="true">
+            <span>Mínimo <strong>{minimumAngle}°</strong></span>
+            <span>Máximo <strong>{maximumAngle}°</strong></span>
+          </div>
+          <div className="cv-camera-sweep-track">
+            <div className="cv-camera-sweep-rail" aria-hidden="true">
+              <div style={{ left: `${position(minimumAngle)}%`, right: `${100 - position(maximumAngle)}%` }} />
+            </div>
+            <input aria-label="Ángulo mínimo" aria-valuetext={`${minimumAngle} grados`}
+              type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={minimumAngle}
               onChange={(event) => setSelection({
                 minimum: Math.min(event.currentTarget.valueAsNumber, maximumAngle - minimumSpan), maximum: maximumAngle
               })} />
-          </label>
-          <label>
-            Ángulo máximo <span aria-hidden="true">{maximumAngle}°</span>
-            <input type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={maximumAngle}
+            <input aria-label="Ángulo máximo" aria-valuetext={`${maximumAngle} grados`}
+              type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={maximumAngle}
               onChange={(event) => setSelection({
                 minimum: minimumAngle, maximum: Math.max(event.currentTarget.valueAsNumber, minimumAngle + minimumSpan)
               })} />
-          </label>
+          </div>
         </fieldset>}
         <p className="cv-camera-action-hint">{!validBounds ? "El preset Frente no deja espacio suficiente para el paneo."
           : state?.sweepBounds ? "0° es el frente." : "0° es el frente. Este backend usa el rango fijo de −90° a +90°."}</p>

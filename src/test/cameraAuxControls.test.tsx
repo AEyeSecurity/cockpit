@@ -46,7 +46,7 @@ describe("camera sweep and light controls", () => {
     const service = fixture();
     service.readCameraFeatures.mockResolvedValue({
       ...await service.readCameraFeatures(),
-      sweepBounds: { minimum: -35, maximum: 90 }
+      sweepBounds: { minimum: -35, maximum: 315 }
     });
     render(<CameraAuxControls service={service as never} connected controlLocked={false} />);
     await screen.findByRole("group", { name: "Rango de paneo" });
@@ -54,9 +54,9 @@ describe("camera sweep and light controls", () => {
     const maximum = screen.getByRole("slider", { name: "Ángulo máximo" });
     expect(minimum).toHaveValue("-35");
     fireEvent.change(minimum, { target: { value: "-20" } });
-    fireEvent.change(maximum, { target: { value: "50" } });
+    fireEvent.change(maximum, { target: { value: "250" } });
     fireEvent.click(screen.getByRole("button", { name: "Iniciar paneo" }));
-    expect(service.sweepCamera).toHaveBeenCalledWith(true, { minimum: -20, maximum: 50 });
+    expect(service.sweepCamera).toHaveBeenCalledWith(true, { minimum: -20, maximum: 250 });
     await screen.findByText("Buscando la posición inicial…");
   });
 
