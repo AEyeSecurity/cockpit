@@ -22,6 +22,8 @@ describe("camera sweep and light controls", () => {
     await waitFor(() => expect(start).toBeEnabled());
     const minimum = screen.getByRole("slider", { name: "Ángulo mínimo" });
     const maximum = screen.getByRole("slider", { name: "Ángulo máximo" });
+    expect(minimum).toHaveValue("-76");
+    expect(maximum).toHaveValue("80");
     fireEvent.change(maximum, { target: { value: "30" } });
     fireEvent.change(minimum, { target: { value: "40" } });
     expect(minimum).toHaveValue("28");
@@ -53,6 +55,7 @@ describe("camera sweep and light controls", () => {
     const minimum = screen.getByRole("slider", { name: "Ángulo mínimo" });
     const maximum = screen.getByRole("slider", { name: "Ángulo máximo" });
     expect(minimum).toHaveValue("-35");
+    expect(maximum).toHaveValue("80");
     fireEvent.change(minimum, { target: { value: "-20" } });
     fireEvent.change(maximum, { target: { value: "250" } });
     fireEvent.click(screen.getByRole("button", { name: "Iniciar paneo" }));
