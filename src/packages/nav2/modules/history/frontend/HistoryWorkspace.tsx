@@ -31,7 +31,7 @@ const categories: Record<string, string> = {
   mode: "Control", patrol: "Patrulla", stop: "Freno y detención", fault: "Incidentes", navigation: "Navegación"
 };
 const statuses: Record<string, string> = {
-  active: "En curso", paused: "En pausa", home: "Llegó a HOME", cancelled: "Cancelada",
+  active: "En curso", paused: "En pausa", home: "Llegó a HOME", completed: "Completada", cancelled: "Cancelada",
   held: "Retenida en HOME", failed: "Fallida", replaced: "Reemplazada", interrupted: "Registro interrumpido"
 };
 const events: Record<string, string> = {
@@ -39,6 +39,11 @@ const events: Record<string, string> = {
   OPERATOR_LEASE_RELEASED: "Permiso de operación liberado",
   RC_CONTROL_ACTIVE: "Control RC activo",
   RC_CONTROL_RELEASED: "Control RC liberado",
+  ROUTE_LOOP_STARTED: "Patrulla en bucle iniciada",
+  ROUTE_LOOP_PAUSED: "Patrulla en bucle en pausa",
+  ROUTE_LOOP_CANCELLED: "Patrulla en bucle cancelada",
+  ROUTE_LOOP_REPLACED: "Patrulla en bucle reemplazada",
+  ROUTE_LOOP_COMPLETED: "Patrulla en bucle completada",
   PATROL_MISSION_STARTED: "Patrulla iniciada",
   PATROL_MISSION_REJECTED: "Intento de patrulla rechazado",
   PATROL_PHASE_FAILED: "Fallo al iniciar una fase de patrulla",
@@ -109,7 +114,7 @@ function eventTitle(event: HistoryEvent) {
 function eventContext(event: HistoryEvent) {
   const reason = event.details.reason_code || event.details.failure_code;
   if (reason && (reasons[reason] || events[reason])) return reasons[reason] ?? events[reason];
-  if (event.code === "PATROL_ROUTE_PAUSED") return reasons[event.details.route_status] ?? "Motivo no disponible";
+  if (["PATROL_ROUTE_PAUSED", "ROUTE_LOOP_PAUSED"].includes(event.code)) return reasons[event.details.route_status] ?? "Motivo no disponible";
   if (event.code === "VEHICLE_STOP_OBSERVED" || event.code === "BRAKE_REQUESTED") return "Motivo no disponible";
   if (event.code.startsWith("CAPABILITY_") || !events[event.code] && event.severity >= 2) return event.component;
   return "";
@@ -144,7 +149,7 @@ function Timeline({ items, fullDate = false, onPatrol }: {
           <p>{event.component} · <code>{event.code}</code></p>
           {Object.entries(event.details).map(([key, value]) => <div key={key}><code>{key}</code> · {value}</div>)}
         </details>
-        {event.code === "PATROL_MISSION_STARTED" && event.patrol_id && onPatrol &&
+        {["PATROL_MISSION_STARTED", "ROUTE_LOOP_STARTED"].includes(event.code) && event.patrol_id && onPatrol &&
           <button type="button" className="button-secondary history-related"
             onClick={() => onPatrol(event.patrol_id!)}>Ver patrulla</button>}
       </div>
