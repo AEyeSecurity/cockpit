@@ -186,3 +186,15 @@ test("spectators may ask for a camera evidence window without issuing recording 
   assert.equal(send({ ...request, end: "2026-11-20T12:01:00Z" }), null);
   assert.equal(send({ op: "recordings_start" }), null);
 });
+
+test("spectators can read operational history without forwarding extra fields", () => {
+  const spectator = { permits: () => false, status: () => ({ mode: "spectator" }) };
+  const send = message => authorizeNavigationFrame(spectator, "rover", "session",
+    Buffer.from(JSON.stringify(message)), false);
+  assert.deepEqual(JSON.parse(send({
+    op: "history_list", client_req_id: "q", view: "activity", before: 90, category: "stop",
+    enabled: true
+  })), { op: "history_list", client_req_id: "q", view: "activity", before: 90, category: "stop" });
+  assert.deepEqual(JSON.parse(send({ op: "history_patrol", patrol_id: "id", after: 10, through: 20 })),
+    { op: "history_patrol", patrol_id: "id", after: 10, through: 20 });
+});

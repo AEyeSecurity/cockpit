@@ -13,9 +13,6 @@ const OPEN_SESSIONS_WORKSPACE_COMMAND_ID = "nav2.debug.openSessionsWorkspace";
 
 const RecordModal = lazy(() => import("./DebugViews").then(({ RecordModal }) => ({ default: RecordModal })));
 const DebugSidebarPanel = lazy(() => import("./DebugViews").then(({ DebugSidebarPanel }) => ({ default: DebugSidebarPanel })));
-const MissionSessionsWorkspace = lazy(() => import("./DebugViews")
-  .then(({ MissionSessionsWorkspace }) => ({ default: MissionSessionsWorkspace })));
-
 export function createDebugModule(): CockpitModule {
   return {
     id: "debug",
@@ -47,18 +44,9 @@ export function createDebugModule(): CockpitModule {
       );
 
       ctx.commands.register(
-        { id: OPEN_SESSIONS_WORKSPACE_COMMAND_ID, title: "Open Mission Sessions", category: "Debug" },
-        () => ctx.commands.execute(ShellCommands.openWorkspace, "workspace.sessions", { focused: true, toggleFocused: true })
+        { id: OPEN_SESSIONS_WORKSPACE_COMMAND_ID, title: "Abrir historial operativo", category: "Debug" },
+        () => ctx.commands.execute(ShellCommands.openWorkspace, "workspace.history", { focused: true, toggleFocused: true })
       );
-
-      ctx.contributions.register({
-        id: "workspace.sessions",
-        slot: "workspace",
-        label: "Sessions",
-        hiddenFromTabs: true,
-        order: 40,
-        render: () => <DeferredView key="sessions"><MissionSessionsWorkspace runtime={ctx} /></DeferredView>
-      });
 
       ctx.contributions.register({
         id: "sidebar.debug",

@@ -18,6 +18,14 @@ export function authorizeNavigationFrame(control, instanceId, sessionId, frame, 
   for (const field of ["requestId", "client_req_id"]) {
     if (typeof message[field] === "string") ids[field] = message[field];
   }
+  if (message.op === "history_list") {
+    const { view, start, end, category, before } = message;
+    return JSON.stringify({ ...ids, op: message.op, view, start, end, category, before });
+  }
+  if (message.op === "history_patrol") {
+    const { patrol_id, after, through } = message;
+    return JSON.stringify({ ...ids, op: message.op, patrol_id, after, through });
+  }
   if (message.op === "recordings_list") {
     const { camera, start, end } = message;
     if (!["main", "mobile", "rear"].includes(camera) || typeof start !== "string" ||
