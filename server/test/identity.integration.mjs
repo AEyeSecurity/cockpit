@@ -97,7 +97,7 @@ test("host reboot requires an authenticated administrator and visual confirmatio
   socketServer.listen(socketPath);
   await once(socketServer, "listening");
   const server = startServer({ db, vault, origin, env: {
-    COCKPIT_PASSWORD_ONLY: "true", COCKPIT_ROVER_CONTROL: "true",
+    COCKPIT_PASSWORD_ONLY: "true", COCKPIT_ROVER_CONTROL: "false",
     COCKPIT_NAVIGATION_URL: "ws://127.0.0.1:1", COCKPIT_HOST_REBOOT_SOCKET: socketPath
   } });
   try {

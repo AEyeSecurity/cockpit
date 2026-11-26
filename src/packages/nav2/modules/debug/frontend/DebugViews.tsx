@@ -8,7 +8,7 @@ import type { RosbagStatus } from "../dispatcher/impl/MissionDispatcher";
 import { NavigationCommands } from "../../navigation/commands";
 import type { ConnectionService } from "../../navigation/service/impl/ConnectionService";
 import type { TelemetryService } from "../../telemetry/service/impl/TelemetryService";
-import { api, ApiError } from "../../../../identity/api";
+import { api, ApiError, type Session } from "../../../../identity/api";
 
 const SERVICE_ID = "service.mission";
 const CONNECTION_SERVICE_ID = "service.connection";
@@ -807,16 +807,12 @@ export function DebugSidebarPanel({ runtime }: { runtime: ModuleContext }): JSX.
     if (resetWarning) {
       if (resetPending.current) return;
       resetDialog.current?.close();
-      const csrf = runtime.env.roverControlCsrf;
-      if (!csrf) {
-        setResetStatus("El reinicio de la computadora del robot aún no está habilitado.");
-        return;
-      }
       resetPending.current = true;
       setResetBusy(true);
       setResetStatus("Enviando solicitud de reinicio…");
       try {
-        await api("rover/maintenance/reboot", "POST", { visuallyConfirmed: true }, csrf);
+        const session = await api<Session>("session");
+        await api("rover/maintenance/reboot", "POST", { visuallyConfirmed: true }, session.csrf);
         setResetStatus("Reinicio solicitado. La reconexión puede demorar aproximadamente 5 minutos.");
       } catch (error) {
         setResetStatus(error instanceof ApiError ? error.message :
