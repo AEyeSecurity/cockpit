@@ -9897,19 +9897,66 @@
   font-size: 12px;
 }
 .cv-camera-sweep-range legend { padding-inline: 4px; font-weight: 700; }
-.cv-camera-sweep-range label {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  column-gap: 8px;
+.cv-camera-sweep-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
 }
-.cv-camera-sweep-range label > span { font-variant-numeric: tabular-nums; }
-.cv-camera-sweep-range input {
-  grid-column: 1 / -1;
+.cv-camera-sweep-track {
+  --sweep-thumb-size: 16px;
+  position: relative;
+  height: 24px;
+}
+.cv-camera-sweep-rail {
+  position: absolute;
+  inset: 50% calc(var(--sweep-thumb-size) / 2) auto;
+  height: 5px;
+  transform: translateY(-50%);
+  border-radius: 5px;
+  background: #a8bacb;
+}
+.cv-camera-sweep-rail > div {
+  position: absolute;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+}
+.cv-camera-sweep-track input[type="range"] {
+  appearance: none;
+  position: absolute;
+  inset: 0;
   width: 100%;
+  height: 100%;
   margin: 0;
-  accent-color: #2563eb;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
 }
+.cv-camera-sweep-track input:focus-visible { outline: 2px solid #2563eb; }
+.cv-camera-sweep-track input::-webkit-slider-thumb {
+  appearance: none;
+  box-sizing: border-box;
+  width: var(--sweep-thumb-size);
+  height: var(--sweep-thumb-size);
+  border: 2px solid #17324a;
+  border-radius: 50%;
+  background: #35a9fa;
+  cursor: grab;
+  pointer-events: auto;
+}
+.cv-camera-sweep-track input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--sweep-thumb-size);
+  height: var(--sweep-thumb-size);
+  border: 2px solid #17324a;
+  border-radius: 50%;
+  background: #35a9fa;
+  cursor: grab;
+  pointer-events: auto;
+}
+.cv-camera-sweep-range:disabled .cv-camera-sweep-track { opacity: .55; }
 .cv-camera-light-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: center; }
 .cv-camera-light-row > div { display: grid; gap: 2px; font-size: 11px; }
 .cv-camera-light-row > div > span { color: #697e90; font-size: 10px; }
