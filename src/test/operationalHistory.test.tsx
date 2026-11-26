@@ -60,3 +60,20 @@ it("exports a versioned JSONL file in query order across event pages", async () 
     vi.unstubAllGlobals();
   }
 });
+
+it("explains navigation waits and separates controller stop signals from braking", async () => {
+  const items = [
+    { ...stop, sequence: 5, code: "PATH_HEALTH_RECOVERED", details: { reason_code: "costmap_stale" } },
+    { ...stop, sequence: 4, code: "PATH_STOP_AND_WAIT", details: { reason_code: "costmap_stale" } },
+    { ...stop, sequence: 3, code: "BRAKE_APPLIED", details: { brake_pct: "100", stop_signal: "True" } },
+    { ...stop, sequence: 2, code: "SAFETY_STOP_SIGNAL_ACTIVE", details: { brake_pct: "0", stop_signal: "True" } }
+  ];
+  const read = vi.fn(async () => ({ robot: "SALUS", degraded: false, next: null, items }));
+  render(<HistoryWorkspace dispatcher={{ read } as unknown as HistoryDispatcher} />);
+  expect(await screen.findByText("Navegación en espera")).toBeInTheDocument();
+  expect(screen.getByText("Datos del mapa de obstáculos vencidos")).toBeInTheDocument();
+  expect(screen.getByText("Camino válido recuperado")).toBeInTheDocument();
+  expect(screen.getByText("Freno aplicado según el controlador")).toBeInTheDocument();
+  expect(screen.getByText("Señal de parada reportada sin freno aplicado")).toBeInTheDocument();
+  expect(screen.queryByText("Parada de emergencia activa")).not.toBeInTheDocument();
+});

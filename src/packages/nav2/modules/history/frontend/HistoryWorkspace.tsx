@@ -58,13 +58,18 @@ const events: Record<string, string> = {
   BATTERY_RETURN_RECOMMENDED: "Retorno recomendado por batería",
   BATTERY_RETURN_RECOMMENDATION_CLEARED: "Se quitó la recomendación de retorno por batería",
   BRAKE_REQUESTED: "Orden de freno",
+  MANUAL_BRAKE_REQUESTED: "Orden de freno manual",
+  MANUAL_BRAKE_RELEASE_REQUESTED: "Orden de liberar el freno manual",
   BRAKE_APPLIED: "Freno aplicado según el controlador",
   BRAKE_RELEASED: "Freno liberado",
-  ESTOP_ACTIVE: "Parada de emergencia activa",
-  ESTOP_CLEARED: "Parada de emergencia liberada",
+  ESTOP_ACTIVE: "Señal de parada reportada",
+  ESTOP_CLEARED: "Señal de parada desactivada",
+  SAFETY_STOP_SIGNAL_ACTIVE: "Señal de parada reportada sin freno aplicado",
   VEHICLE_STOP_OBSERVED: "Detención medida",
   NAVIGATION_BLOCK_CLEARED: "Bloqueo de navegación liberado",
   COLLISION_STOP: "Monitor de colisión en parada",
+  PATH_STOP_AND_WAIT: "Navegación en espera",
+  PATH_HEALTH_RECOVERED: "Camino válido recuperado",
   PATH_HEALTH_STOP: "Parada por datos de ruta no disponibles",
   SAFETY_SCAN_STALE: "Parada por datos vencidos del LiDAR",
   MANUAL_WATCHDOG_STOP: "Parada por pérdida de mando manual",
@@ -89,6 +94,20 @@ const phases: Record<string, string> = {
   EXIT_LOOP: "Salida del circuito", RETURN_HOME: "Regreso a HOME", AT_HOME: "En HOME"
 };
 const reasons: Record<string, string> = {
+  new_goal_pending_path: "Esperando el primer camino para el nuevo objetivo",
+  tf_unavailable: "Posición del robot no disponible para validar la ruta",
+  costmap_unavailable: "Mapa de obstáculos no disponible",
+  costmap_stale: "Datos del mapa de obstáculos vencidos",
+  path_frame_missing: "El camino llegó sin sistema de coordenadas",
+  costmap_frame_mismatch: "El camino y el mapa usan sistemas de coordenadas distintos",
+  path_missing: "Camino no disponible",
+  path_too_short: "Camino demasiado corto para validar",
+  path_collision: "El camino intersecta un obstáculo",
+  clearance_degraded: "El camino tiene poco espacio libre",
+  cross_track_error: "El robot se desvió del camino",
+  progress_stalled: "El robot dejó de avanzar por el camino",
+  keepout_revision_changed: "Cambió una zona de exclusión",
+  far_obstacle_persistent: "Se detectó un obstáculo persistente más adelante",
   ROUTE_EXECUTOR_UNAVAILABLE: "Ejecutor de rutas no disponible",
   ROUTE_DISPATCH_FAILED: "El ejecutor no pudo iniciar la fase",
   RETURN_EXIT_CANCEL_FAILED: "Fallo al cerrar el tramo antes del regreso",
@@ -102,7 +121,24 @@ const reasons: Record<string, string> = {
   UI_CLIENT_DISCONNECTED: "Cockpit se desconectó", UI_HEARTBEAT_TIMEOUT: "Se perdió la señal de Cockpit",
 };
 
+function describeReason(reason: string | undefined): string {
+  if (!reason) return "";
+  const [kind, detail, cause] = reason.split(":");
+  if (kind === "maneuver") {
+    return [detail === "NEEDS_OPERATOR" ? "La maniobra requiere intervención" : "Esperando un camino alternativo",
+      reasons[cause]].filter(Boolean).join(" · ");
+  }
+  if (kind === "candidate_invalid") {
+    return reasons[detail] ? `Camino alternativo rechazado · ${reasons[detail]}` : "Camino alternativo rechazado";
+  }
+  return reasons[reason] ?? reasons[kind] ?? events[reason] ?? "";
+}
+
 function eventTitle(event: HistoryEvent) {
+  if (event.code === "SAFETY_STOP_SIGNAL_CHANGED") {
+    return event.details.stop_signal?.toLowerCase() === "true"
+      ? "Señal de parada reportada" : "Señal de parada desactivada";
+  }
   if (event.code === "MANUAL_MODE_CHANGED") {
     return event.details.enabled?.toLowerCase() === "true" ? "Modo manual confirmado" : "Modo manual desactivado";
   }
@@ -112,12 +148,24 @@ function eventTitle(event: HistoryEvent) {
   return events[event.code] ?? (event.severity >= 2 ? "Fallo reportado" : "Evento de operación");
 }
 function eventContext(event: HistoryEvent) {
-  const reason = event.details.reason_code || event.details.failure_code;
-  if (reason && (reasons[reason] || events[reason])) return reasons[reason] ?? events[reason];
+  const reason = describeReason(event.details.reason_code || event.details.failure_code);
+  if (event.code === "PATH_HEALTH_RECOVERED") return reason ? `Motivo de la espera: ${reason}` : "";
+  if (event.code === "PATH_STOP_AND_WAIT") return reason || "Motivo no disponible";
+  if (reason) return reason;
+  if (event.code === "BRAKE_APPLIED" && event.details.stop_signal?.toLowerCase() === "true") {
+    return "El controlador también reportó la señal de parada.";
+  }
   if (["PATROL_ROUTE_PAUSED", "ROUTE_LOOP_PAUSED"].includes(event.code)) return reasons[event.details.route_status] ?? "Motivo no disponible";
   if (event.code === "VEHICLE_STOP_OBSERVED" || event.code === "BRAKE_REQUESTED") return "Motivo no disponible";
   if (event.code.startsWith("CAPABILITY_") || !events[event.code] && event.severity >= 2) return event.component;
   return "";
+}
+function eventTag(event: HistoryEvent) {
+  if (event.code.startsWith("PATH_")) return "Navegación";
+  if (event.code.includes("BRAKE")) return "Freno";
+  if (event.code.startsWith("ESTOP_") || event.code.startsWith("SAFETY_STOP_SIGNAL_")) return "Seguridad";
+  if (event.category === "stop") return "Detención";
+  return event.severity >= 2 ? "Fallo" : categories[event.category] ?? "Operación";
 }
 function localDay() {
   const now = new Date();
@@ -141,7 +189,7 @@ function Timeline({ items, fullDate = false, onPatrol }: {
         <div className="history-event-heading">
           <strong>{eventTitle(event)}</strong>
           <span className="history-tag" data-tone={event.severity >= 2 ? "error" : event.severity >= 1 ? "warn" : "normal"}>
-            {event.category === "stop" ? "Detención" : event.severity >= 2 ? "Fallo" : categories[event.category] ?? "Operación"}
+            {eventTag(event)}
           </span>
         </div>
         {eventContext(event) && <p className="muted">{eventContext(event)}</p>}
