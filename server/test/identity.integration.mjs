@@ -76,7 +76,7 @@ test("remote maintenance uses a pinned host key and sends the request on stdin",
   assert.throws(() => createSshRebootExchange("-oProxyCommand=unexpected"), /Invalid host/);
 });
 
-test("host reboot requires an authenticated administrator and visual confirmation", async () => {
+test("host reboot allows authenticated operators and administrators with visual confirmation", async () => {
   const folder = mkdtempSync(join(tmpdir(), "cockpit-reboot-"));
   const file = join(folder, "keys.json");
   writeFileSync(file, JSON.stringify({ active: "v1", keys: { v1: randomBytes(32).toString("base64") } }));
@@ -108,13 +108,15 @@ test("host reboot requires an authenticated administrator and visual confirmatio
     const driver = browser(base);
     assert.equal((await admin.call(path, "POST", confirmed)).status, 401);
     assert.equal((await driver.call("/api/session/login", "POST", { username: "driver", password: "driver234" })).stage, "ready");
-    assert.equal((await driver.call(path, "POST", confirmed)).status, 403);
     assert.equal((await admin.call("/api/session/login", "POST", { username: "operator", password: "admin234" })).stage, "ready");
     assert.equal((await admin.call(path, "POST", confirmed, { "x-cockpit-csrf": "invalid" })).status, 403);
     assert.equal((await admin.call(path, "POST", {})).status, 400);
+    assert.equal((await driver.call(path, "POST", confirmed, { "x-cockpit-csrf": "invalid" })).status, 403);
+    assert.equal((await driver.call(path, "POST", {})).status, 400);
     assert.deepEqual(requests, []);
     assert.equal((await admin.call(path, "POST", confirmed)).state, "requested");
-    assert.deepEqual(requests, ["status\n", "reboot " + bootId + "\n"]);
+    assert.equal((await driver.call(path, "POST", confirmed)).state, "requested");
+    assert.deepEqual(requests, ["status\n", "reboot " + bootId + "\n", "status\n", "reboot " + bootId + "\n"]);
   } finally {
     await close(server);
     await close(socketServer);

@@ -314,7 +314,7 @@ export function createIdentity(db, vault, origin, now = Date.now, { passwordOnly
       if (!session) fail(401, "Iniciá sesión.");
       if (write && req.headers["x-cockpit-csrf"] !== session.csrf) fail(403, "Solicitud no autorizada.");
       if (method === "POST" && path === "/api/rover/maintenance/reboot") {
-        if (stage(session.account) !== "ready" || session.account.role !== "admin") fail(403, "Permisos insuficientes.");
+        if (stage(session.account) !== "ready") fail(403, "Completá el inicio de sesión.");
         if (!reboot) fail(404, "El reinicio de la computadora del robot aún no está habilitado.");
         if (body?.visuallyConfirmed !== true) fail(400, "Falta confirmar la verificación visual del rover.");
         audit(db, session.account.id, null, "rover.reboot", "requested", now());
