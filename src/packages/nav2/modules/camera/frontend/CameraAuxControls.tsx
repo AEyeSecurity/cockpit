@@ -13,7 +13,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   const [state, setState] = useState<CameraFeaturesData | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [selection, setSelection] = useState<CameraSweepRange | null>(null);
+  const [selection, setSelection] = useState<CameraSweepRange>({ minimum: -76, maximum: 80 });
   useEffect(() => {
     setState(null);
     setError("");
@@ -48,8 +48,8 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   const cannotStart = unavailable || busy || controlLocked;
   const bounds = state?.sweepBounds ?? previewBounds;
   const validBounds = bounds.maximum - bounds.minimum >= minimumSpan;
-  const minimumAngle = Math.max(bounds.minimum, Math.min(selection?.minimum ?? bounds.minimum, bounds.maximum - minimumSpan));
-  const maximumAngle = Math.min(bounds.maximum, Math.max(selection?.maximum ?? bounds.maximum, minimumAngle + minimumSpan));
+  const minimumAngle = Math.max(bounds.minimum, Math.min(selection.minimum, bounds.maximum - minimumSpan));
+  const maximumAngle = Math.min(bounds.maximum, Math.max(selection.maximum, minimumAngle + minimumSpan));
   const position = (angle: number) => (angle - bounds.minimum) / (bounds.maximum - bounds.minimum) * 100;
   const label = (value: number | undefined): string => value === 1 ? "Encendida" : value === 0 ? "Apagada" : "Sin confirmar";
   return <div className="cv-camera-aux" aria-label="Paneo y luces">
