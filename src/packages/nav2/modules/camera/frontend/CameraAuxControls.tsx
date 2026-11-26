@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import type { CameraFeaturesData, NavigationService } from "../../navigation/service/impl/NavigationService";
+import type { CameraFeaturesData, CameraSweepRange, NavigationService } from "../../navigation/service/impl/NavigationService";
+
+const previewBounds = { minimum: -90, maximum: 90 };
+const minimumSpan = 2;
 
 export function CameraAuxControls({ service, connected, controlLocked, onSweepStart }: {
   service: NavigationService | null;
@@ -10,6 +13,7 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
   const [state, setState] = useState<CameraFeaturesData | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selection, setSelection] = useState<CameraSweepRange | null>(null);
   useEffect(() => {
     setState(null);
     setError("");
@@ -42,21 +46,48 @@ export function CameraAuxControls({ service, connected, controlLocked, onSweepSt
     : "";
   const unavailable = !connected || !service || !state?.supported;
   const cannotStart = unavailable || busy || controlLocked;
+  const bounds = state?.sweepBounds ?? previewBounds;
+  const validBounds = bounds.maximum - bounds.minimum >= minimumSpan;
+  const minimumAngle = Math.max(bounds.minimum, Math.min(selection?.minimum ?? bounds.minimum, bounds.maximum - minimumSpan));
+  const maximumAngle = Math.min(bounds.maximum, Math.max(selection?.maximum ?? bounds.maximum, minimumAngle + minimumSpan));
   const label = (value: number | undefined): string => value === 1 ? "Encendida" : value === 0 ? "Apagada" : "Sin confirmar";
   return <div className="cv-camera-aux" aria-label="Paneo y luces">
     <details className="cv-camera-action-section" open>
       <summary>Paneo <span>Cámara móvil</span></summary>
       <div className="cv-camera-action-body">
+        {validBounds && <fieldset className="cv-camera-sweep-range" disabled={busy || state?.sweepRunning}>
+          <legend>{state?.sweepBounds ? "Rango de paneo" : "Vista previa del rango de paneo"}</legend>
+          <label>
+            Ángulo mínimo <span aria-hidden="true">{minimumAngle}°</span>
+            <input type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={minimumAngle}
+              onChange={(event) => setSelection({
+                minimum: Math.min(event.currentTarget.valueAsNumber, maximumAngle - minimumSpan), maximum: maximumAngle
+              })} />
+          </label>
+          <label>
+            Ángulo máximo <span aria-hidden="true">{maximumAngle}°</span>
+            <input type="range" min={bounds.minimum} max={bounds.maximum} step={1} value={maximumAngle}
+              onChange={(event) => setSelection({
+                minimum: minimumAngle, maximum: Math.max(event.currentTarget.valueAsNumber, minimumAngle + minimumSpan)
+              })} />
+          </label>
+        </fieldset>}
+        <p className="cv-camera-action-hint">{!validBounds ? "El preset Frente no deja espacio suficiente para el paneo."
+          : state?.sweepBounds ? "0° es el frente." : "0° es el frente. Este backend usa el rango fijo de −90° a +90°."}</p>
         <div className="cv-camera-preset-row">
           <button className="cv-camera-action-button" type="button"
-            title="Paneo desde Frente, 90° a cada lado, hasta detener"
-            disabled={cannotStart || state?.sweepRunning}
-            onClick={() => { onSweepStart?.(); void run(() => service!.sweepCamera(true)); }}>Iniciar paneo</button>
+            disabled={cannotStart || !validBounds || state?.sweepRunning}
+            onClick={() => {
+              onSweepStart?.();
+              void run(() => state?.sweepBounds
+                ? service!.sweepCamera(true, { minimum: minimumAngle, maximum: maximumAngle })
+                : service!.sweepCamera(true));
+            }}>Iniciar paneo</button>
           <button className="cv-camera-action-button" type="button" disabled={!connected || !service || busy}
             onClick={() => void run(() => service!.sweepCamera(false))}>Detener paneo</button>
         </div>
         {sweepUnavailableReason && <p className="cv-camera-action-hint" role="status">{sweepUnavailableReason}</p>}
-        {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "recovering" ? "Reintentando paneo en unos segundos…" : state.sweepPhase === "centering" ? "Centrando al frente…" : state.sweepPhase === "moving_left" ? "Buscando límite izquierdo…" : state.sweepPhase === "sweeping_left" ? "Paneando hacia la izquierda…" : "Paneando hacia la derecha…"}</p>}
+        {state?.sweepRunning && <p className="cv-ptz-inline-note" role="status">{state.sweepPhase === "recovering" ? "Reintentando paneo en unos segundos…" : state.sweepPhase === "centering" ? "Buscando la posición inicial…" : state.sweepPhase === "moving_left" ? "Buscando límite izquierdo…" : state.sweepPhase === "sweeping_left" ? "Paneando hacia la izquierda…" : "Paneando hacia la derecha…"}</p>}
       </div>
     </details>
     <details className="cv-camera-action-section">

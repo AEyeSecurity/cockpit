@@ -20,9 +20,16 @@ describe("camera sweep and light controls", () => {
     fireEvent.click(screen.getByText("Luces"));
     const start = screen.getByRole("button", { name: "Iniciar paneo" });
     await waitFor(() => expect(start).toBeEnabled());
+    const minimum = screen.getByRole("slider", { name: "Ángulo mínimo" });
+    const maximum = screen.getByRole("slider", { name: "Ángulo máximo" });
+    fireEvent.change(maximum, { target: { value: "30" } });
+    fireEvent.change(minimum, { target: { value: "40" } });
+    expect(minimum).toHaveValue("28");
+    expect(maximum).toHaveValue("30");
+    expect(service.sweepCamera).not.toHaveBeenCalled();
     fireEvent.click(start);
     await waitFor(() => expect(service.sweepCamera).toHaveBeenCalledWith(true));
-    expect(await screen.findByText("Centrando al frente…")).toBeInTheDocument();
+    expect(await screen.findByText("Buscando la posición inicial…")).toBeInTheDocument();
     expect(start).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Detener paneo" }));
     await waitFor(() => expect(service.sweepCamera).toHaveBeenCalledWith(false));
@@ -33,6 +40,24 @@ describe("camera sweep and light controls", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Apagar luz fija" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Apagar luz fija" }));
     await waitFor(() => expect(service.setCameraLight).toHaveBeenCalledWith("fixed", false));
+  });
+
+  it("uses the camera's available range and sends the selected limits", async () => {
+    const service = fixture();
+    service.readCameraFeatures.mockResolvedValue({
+      ...await service.readCameraFeatures(),
+      sweepBounds: { minimum: -35, maximum: 90 }
+    });
+    render(<CameraAuxControls service={service as never} connected controlLocked={false} />);
+    await screen.findByRole("group", { name: "Rango de paneo" });
+    const minimum = screen.getByRole("slider", { name: "Ángulo mínimo" });
+    const maximum = screen.getByRole("slider", { name: "Ángulo máximo" });
+    expect(minimum).toHaveValue("-35");
+    fireEvent.change(minimum, { target: { value: "-20" } });
+    fireEvent.change(maximum, { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Iniciar paneo" }));
+    expect(service.sweepCamera).toHaveBeenCalledWith(true, { minimum: -20, maximum: 50 });
+    await screen.findByText("Buscando la posición inicial…");
   });
 
   it("blocks starts without control but leaves stop and off accessible", async () => {

@@ -46,11 +46,13 @@ Los controles están al inicio del panel PTZ; las luces usan un desplegable
 compacto cerrado inicialmente, con el mismo estilo de botones de presets.
 El módulo Camera añade iniciar/detener paneo completo izquierdo→derecho de la
 móvil y encender/apagar luz fija para ambas lentes. API WebSocket:
-`get_camera_features`, `camera_sweep {enabled}` y
+`get_camera_features`, `camera_sweep {enabled, sweep_min_deg?, sweep_max_deg?}` y
 `camera_light {lens: fixed|mobile, enabled}`. El backend es responsable del
 recorrido y renovación; abandonar la vista no apaga las luces.
 Encendido/inicio requiere control del operador. Apagado/detención no requiere
 lease y sigue accesible conectado aunque el estado previo sea desconocido.
+Los límites opcionales se miden en grados respecto de Frente y se envían solo
+si el backend anuncia `sweep_allowed_min_deg` y `sweep_allowed_max_deg`.
 Estado de luces: última orden reconocida, sin lectura óptica garantizada.
 
 La luz móvil selecciona blanco y fuerza noche; apagar restaura el perfil previo.

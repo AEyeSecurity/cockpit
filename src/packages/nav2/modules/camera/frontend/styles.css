@@ -9885,6 +9885,31 @@
 .cv-camera-action-section > summary:focus-visible { outline: 2px solid #2769ff; outline-offset: -3px; border-radius: 12px; }
 .cv-camera-action-section > summary > span { color: #577087; font-size: 9px; }
 .cv-camera-action-body { display: grid; gap: 8px; padding: 10px; }
+.cv-camera-sweep-range {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #cbd9e8;
+  border-radius: 8px;
+  color: #172b46;
+  font-size: 12px;
+}
+.cv-camera-sweep-range legend { padding-inline: 4px; font-weight: 700; }
+.cv-camera-sweep-range label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+}
+.cv-camera-sweep-range label > span { font-variant-numeric: tabular-nums; }
+.cv-camera-sweep-range input {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+  accent-color: #2563eb;
+}
 .cv-camera-light-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: center; }
 .cv-camera-light-row > div { display: grid; gap: 2px; font-size: 11px; }
 .cv-camera-light-row > div > span { color: #697e90; font-size: 10px; }

@@ -171,9 +171,15 @@ export interface CameraFeaturesData {
   supported: boolean;
   sweepRunning: boolean;
   sweepPhase: string;
+  sweepBounds?: CameraSweepRange;
   fixedLight: number;
   mobileLight: number;
   error: string;
+}
+
+export interface CameraSweepRange {
+  minimum: number;
+  maximum: number;
 }
 
 export interface ManualKeysState {
@@ -3249,10 +3255,15 @@ export class NavigationService {
     const response = await this.robotDispatcher.requestCameraFeatures(op, fields);
     if (response.ok === false) throw new Error(response.error ?? "Camera command failed");
     const payload = (response.payload ?? response) as Record<string, unknown>;
+    const minimum = payload.sweep_allowed_min_deg;
+    const maximum = payload.sweep_allowed_max_deg;
     return {
       supported: payload.supported === true,
       sweepRunning: payload.sweep_running === true,
       sweepPhase: String(payload.sweep_phase ?? "idle"),
+      sweepBounds: typeof minimum === "number" && Number.isFinite(minimum)
+        && typeof maximum === "number" && Number.isFinite(maximum)
+        ? { minimum: Math.ceil(minimum), maximum: Math.floor(maximum) } : undefined,
       fixedLight: Number(payload.fixed_light ?? -1),
       mobileLight: Number(payload.mobile_light ?? -1),
       error: String(payload.error ?? "")
@@ -3263,8 +3274,10 @@ export class NavigationService {
     return this.cameraFeaturesRequest("get_camera_features");
   }
 
-  sweepCamera(enabled: boolean): Promise<CameraFeaturesData> {
-    return this.cameraFeaturesRequest("camera_sweep", { enabled });
+  sweepCamera(enabled: boolean, range?: CameraSweepRange): Promise<CameraFeaturesData> {
+    return this.cameraFeaturesRequest("camera_sweep", enabled && range
+      ? { enabled, sweep_min_deg: range.minimum, sweep_max_deg: range.maximum }
+      : { enabled });
   }
 
   setCameraLight(lens: "fixed" | "mobile", enabled: boolean): Promise<CameraFeaturesData> {
