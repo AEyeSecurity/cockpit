@@ -10,7 +10,6 @@ type RobotPose = NonNullable<TelemetrySnapshot["robotPose"]>;
 function RoverPosition({ pose }: { pose: RobotPose }): JSX.Element {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map>();
-  const marker = useRef<L.Marker>();
 
   useEffect(() => {
     if (!element.current) return;
@@ -21,8 +20,6 @@ function RoverPosition({ pose }: { pose: RobotPose }): JSX.Element {
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       maxNativeZoom: 19, attribution: "Tiles © Esri"
     }).addTo(view);
-    const icon = L.icon({ iconUrl: robotMarkerUrl, iconSize: [30, 30], iconAnchor: [15, 15] });
-    marker.current = L.marker([0, 0], { icon, interactive: false, keyboard: false, alt: "Rover" }).addTo(view);
     map.current = view;
     const observer = typeof ResizeObserver === "undefined" ? undefined
       : new ResizeObserver(() => view.invalidateSize({ pan: false }));
@@ -31,19 +28,22 @@ function RoverPosition({ pose }: { pose: RobotPose }): JSX.Element {
       observer?.disconnect();
       view.remove();
       map.current = undefined;
-      marker.current = undefined;
     };
   }, []);
 
   useEffect(() => {
-    const center: L.LatLngTuple = [pose.lat, pose.lon];
-    marker.current?.setLatLng(center);
-    map.current?.setView(center, 17, { animate: false });
-    const icon = marker.current?.getElement();
-    if (icon) icon.style.rotate = `${90 - (pose.headingDeg ?? 0)}deg`;
-  }, [pose.lat, pose.lon, pose.headingDeg]);
+    map.current?.setView([pose.lat, pose.lon], 17, { animate: false });
+  }, [pose.lat, pose.lon]);
 
-  return <div ref={element} className="cv-rover-map-canvas" aria-label="Posición del rover en el mapa" />;
+  // The non-interactive map follows the rover, so its center is the rover position.
+  const rotation = Number.isFinite(pose.headingDeg) ? 90 - pose.headingDeg : 90;
+  return <div className="cv-rover-map-position">
+    <div ref={element} className="cv-rover-map-canvas" />
+    <div className="cv-rover-map-marker">
+      <img src={robotMarkerUrl} alt="Posición del rover en el mapa" draggable={false}
+        style={{ transform: `rotate(${rotation}deg)` }} />
+    </div>
+  </div>;
 }
 
 export function CameraRoverMap({ runtime, connected }: { runtime: ModuleContext; connected: boolean }): JSX.Element {
