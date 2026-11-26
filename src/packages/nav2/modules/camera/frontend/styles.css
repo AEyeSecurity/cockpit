@@ -10072,7 +10072,29 @@
 }
 
 .cv-rover-map > header { border-radius: 0; }
+.cv-rover-map-position {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
 .cv-rover-map-canvas { min-height: 0; isolation: isolate; }
+.cv-rover-map-marker {
+  position: absolute;
+  z-index: 1;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #17324a;
+  box-shadow: 0 1px 5px #000a;
+}
+.cv-rover-map-marker img {
+  display: block;
+  width: 32px;
+  height: 32px;
+}
 .cv-rover-map-empty {
   display: grid;
   place-items: center;

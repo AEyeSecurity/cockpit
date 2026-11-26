@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import L from "leaflet";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootstrapApp } from "../core/bootstrap/bootstrapApp";
+import { CameraRoverMap } from "../packages/nav2/modules/camera/frontend/CameraRoverMap";
+import type { TelemetryService } from "../packages/nav2/modules/telemetry/service/impl/TelemetryService";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -29,6 +31,25 @@ function expectCenter(map: L.Map, lat: number, lon: number) {
 }
 
 describe("camera minimap robot tracking", () => {
+  it("shows the centered rover marker over the map in the Cameras panel", async () => {
+    const runtime = await bootstrapApp();
+    const telemetry = runtime.getService<TelemetryService>("nav2.service.telemetry");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher;
+    vi.spyOn(runtime.services, "has").mockReturnValue(true);
+    vi.spyOn(runtime.services, "getService").mockReturnValue(telemetry);
+    const panel = render(<CameraRoverMap runtime={runtime} connected />);
+    const markerName = "Posición del rover en el mapa";
+    expect(screen.queryByRole("img", { name: markerName })).toBeNull();
+    act(() => dispatcher.handleIncoming({
+      op: "robot_pose", robot_pose: { lat: -31.48, lon: -64.24, heading_deg: 45 }
+    }, dispatcher.transportId));
+    const marker = screen.getByRole("img", { name: markerName });
+    expect(marker).toHaveStyle({ transform: "rotate(45deg)" });
+    expect(marker.closest(".cv-rover-map-marker")?.previousElementSibling).toHaveClass("cv-rover-map-canvas");
+    panel.rerender(<CameraRoverMap runtime={runtime} connected={false} />);
+    expect(screen.queryByRole("img", { name: markerName })).toBeNull();
+  });
+
   it("centers on the existing robot pose immediately and follows new poses without changing the main map preference", async () => {
     const { workspace, pose, miniMap } = await mapWorkspace();
     pose(-31.48, -64.24);
