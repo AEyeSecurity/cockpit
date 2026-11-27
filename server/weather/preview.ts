@@ -58,7 +58,7 @@ export function createWeatherPreview(key: string, request = fetch, now = Date.no
       return {
         updatedAt: current.last_updated_epoch * 1000,
         condition: current.condition.text,
-        raining: (current.precip_mm ?? 0) > 0 || (rainCondition && !rainNearby),
+        raining: !rainNearby && (rainCondition || (current.precip_mm ?? 0) > 0),
         rainNearby,
         windKph: current.wind_kph,
         gustKph: current.gust_kph,
