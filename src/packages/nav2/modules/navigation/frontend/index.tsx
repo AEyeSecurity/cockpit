@@ -2,7 +2,7 @@ import { MissionAlertSound } from "./MissionAlertSound";
 import { useRoverAccessContext } from "./RoverAccessDialog";
 import { RoverDestinationFields } from "./RoverDestinationFields";
 import { describeRouteBlock } from "../blockedRouteStatus";
-import { lazy, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
+import { lazy, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import "./styles.css";
 import { PanelCollapsibleSection, PanelSection } from "../../../../core";
 import { CORE_EVENTS, NAV_EVENTS } from "../../../../../core/events/topics";
@@ -745,13 +745,6 @@ function NavSidebarCollapsibleSection({
   const accordionStyle = {
     "--nav-accordion-open-height": `${Math.max(contentHeight, 1)}px`
   } as CSSProperties;
-  const handleHeaderWheel = (event: WheelEvent<HTMLButtonElement>): void => {
-    if (Math.abs(event.deltaY) < 4) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setCollapsed(event.deltaY > 0);
-  };
-
   useEffect(() => {
     const contentElement = contentRef.current;
     if (!contentElement) return;
@@ -795,7 +788,6 @@ function NavSidebarCollapsibleSection({
         aria-label={compact ? `${title}: ${compactSummaryLabel ?? ""}` : undefined}
         aria-controls={bodyId}
         onClick={() => setCollapsed(!collapsed)}
-        onWheel={handleHeaderWheel}
       >
         <span className="nav-sidebar-section-title-row">
           <span className="nav-sidebar-section-icon" aria-hidden="true">

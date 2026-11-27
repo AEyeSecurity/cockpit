@@ -37,7 +37,15 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.getByText("CONTROL MANUAL")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "PERFIL DE NAVEGACIÓN" })).toBeInTheDocument();
     expect(screen.getByText("RUTA ACTUAL")).toBeInTheDocument();
-    expect(screen.getByText("RUTA AUTOMÁTICA")).toBeInTheDocument();
+    const automaticRoute = screen.getByRole("button", { name: "RUTA AUTOMÁTICA" });
+    expect(automaticRoute).toHaveAttribute("aria-expanded", "true");
+    expect(fireEvent.wheel(automaticRoute, { deltaY: 120 })).toBe(true);
+    expect(automaticRoute).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(automaticRoute);
+    expect(automaticRoute).toHaveAttribute("aria-expanded", "false");
+    expect(fireEvent.wheel(automaticRoute, { deltaY: -120 })).toBe(true);
+    expect(automaticRoute).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(automaticRoute);
     expect(screen.getByText("Sin ruta seleccionada")).toBeInTheDocument();
     expect(screen.getByText("EDITAR / AÑADIR PUNTOS")).toBeInTheDocument();
     expect(screen.getByText("Añade al menos 2 puntos desde el editor.")).toBeInTheDocument();
