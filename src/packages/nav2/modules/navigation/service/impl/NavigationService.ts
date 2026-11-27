@@ -53,6 +53,9 @@ export interface RouteEditorState {
 }
 
 export interface PatrolMissionStateData {
+  preparationId?: number;
+  preparationStatus?: string;
+  preparationRejection?: string;
   active: boolean;
   phase: string;
   lowBatteryActive: boolean;
@@ -216,6 +219,7 @@ export interface NavigationState {
   submittedRoutePreparation?: { id: number };
   goalMode: boolean;
   manualMode: boolean;
+  robotManualEnabled?: boolean;
   manualDisablePending: boolean;
   manualLinearSpeed: number;
   manualWaypointDirection: boolean;
@@ -1002,7 +1006,7 @@ function parsePatrolMissionState(message: Record<string, unknown>): PatrolMissio
   const candidate = messageCandidates(message)
     .map((entry) => asRecord(entry.patrol_mission))
     .find((entry): entry is Record<string, unknown> => entry !== null);
-  if (!candidate) return null;
+  if (!candidate || candidate.available === false) return null;
 
   const parseWaypoints = (raw: unknown): RouteMissionWaypoint[] =>
     Array.isArray(raw)
@@ -1010,6 +1014,9 @@ function parsePatrolMissionState(message: Record<string, unknown>): PatrolMissio
       : [];
 
   return {
+    preparationId: Number(candidate.preparation_id) || undefined,
+    preparationStatus: String(candidate.preparation_status ?? ""),
+    preparationRejection: String(candidate.preparation_rejection ?? ""),
     active: candidate.active === true,
     phase: String(candidate.phase ?? "idle"),
     lowBatteryActive: candidate.low_battery_active === true || candidate.lowBatteryActive === true,
@@ -2629,10 +2636,13 @@ export class NavigationService {
       throw new Error("No waypoint queued");
     }
 
-    await this.applyNavigationProfile(
-      this.state.navigationStartProfile,
-      "Navigation start profile applied"
-    );
+    // The backend keeps the navigation profile locked while the prior route is paused.
+    if (!this.state.routeMission.paused) {
+      await this.applyNavigationProfile(
+        this.state.navigationStartProfile,
+        "Navigation start profile applied"
+      );
+    }
 
     const payload: Record<string, unknown> = {
       waypoints: missionWaypointsToWire(queued, this.state.loopRoute),
@@ -2926,7 +2936,7 @@ export class NavigationService {
     legSpacingM?: number;
     chunkSpanM?: number;
     chunkMaxWaypoints?: number;
-  }): Promise<{ inputCount: number; expandedCount: number }> {
+  }): Promise<{ inputCount: number; expandedCount: number; preparationId: number }> {
     if (this.state.controlLocked) {
       throw new Error(`Controls are locked (${this.state.controlLockReason || "locked"})`);
     }
@@ -2942,10 +2952,13 @@ export class NavigationService {
       throw new Error("Patrol HOME waypoint is missing");
     }
 
-    await this.applyNavigationProfile(
-      this.state.navigationStartProfile,
-      "Navigation start profile applied"
-    );
+    // The backend keeps the navigation profile locked while the prior route is paused.
+    if (!this.state.routeMission.paused && this.state.patrolMission.phase !== "paused") {
+      await this.applyNavigationProfile(
+        this.state.navigationStartProfile,
+        "Navigation start profile applied"
+      );
+    }
 
     const payload: Record<string, unknown> = {
       patrol_mission: {
@@ -2980,33 +2993,13 @@ export class NavigationService {
     const expandedCount =
       Number(response.loop_expanded_waypoint_count ?? reconciledProfile.loopWaypoints.length) ||
       reconciledProfile.loopWaypoints.length;
-    this.state = {
-      ...this.state,
-      patrolMissionProfile: reconciledProfile,
-      patrolMission: {
-        active: true,
-        phase: reconciledProfile.departWaypoints.length > 0 ? "depart_home" : "loop_main",
-        lowBatteryActive: false,
-        returnHomeRequested: false,
-        returnHomeActive: false,
-        returnExitLoopIndex: -1,
-        departEntryLoopIndex: reconciledProfile.departEntryLoopIndex,
-        homeAvailable: true,
-        missionId: "",
-        status: "PATROL",
-        homeWaypoint: cloneGoal(reconciledProfile.homeWaypoint),
-        loopWaypoints: reconciledProfile.loopWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        returnWaypoints: reconciledProfile.returnWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        departWaypoints: reconciledProfile.departWaypoints.map((waypoint) => cloneGoal(waypoint)),
-        activeChunkWaypoints: (reconciledProfile.departWaypoints.length > 0
-          ? reconciledProfile.departWaypoints
-          : reconciledProfile.loopWaypoints
-        ).map((waypoint) => cloneGoal(waypoint))
-      },
-      lastStatus: `Patrol mission sent (${inputCount} -> ${expandedCount})`
-    };
+    const preparationId = Number(response.preparation_id);
+    if (!Number.isSafeInteger(preparationId) || preparationId <= 0) {
+      throw new Error("El robot no informó el identificador de preparación de la patrulla.");
+    }
+    this.state = { ...this.state, patrolMissionProfile: reconciledProfile };
     this.emit();
-    return { inputCount, expandedCount };
+    return { inputCount, expandedCount, preparationId };
   }
 
   async requestReturnHome(): Promise<void> {
@@ -3061,13 +3054,24 @@ export class NavigationService {
   }
 
   async cancelRouteMission(): Promise<void> {
-    const response = await this.robotDispatcher.requestCancelRouteMission();
+    await this.cancelMission("route");
+  }
+
+  async cancelPatrolMission(): Promise<void> {
+    await this.cancelMission("patrol");
+  }
+
+  private async cancelMission(kind: "route" | "patrol"): Promise<void> {
+    const response = kind === "patrol"
+      ? await this.robotDispatcher.requestCancelPatrolMission()
+      : await this.robotDispatcher.requestCancelRouteMission();
     if (response.ok === false) {
       throw new Error(response.error ?? "Cancel route failed");
     }
     this.state = {
       ...this.state,
-      lastStatus: "Route mission cancelled",
+      lastStatus: "Mission cancelled",
+      patrolMission: kind === "patrol" ? createDefaultPatrolMissionState() : this.state.patrolMission,
       submittedRoutePreparation: undefined,
       routeMission: {
         ...this.state.routeMission,
@@ -3521,9 +3525,17 @@ export class NavigationService {
 
   private applyManualControlPayload(message: Record<string, unknown>): void {
     if (!message || typeof message !== "object") return;
-    const manual = messageCandidates(message)
+    const candidates = messageCandidates(message);
+    const manual = candidates
       .map((candidate) => asRecord(candidate.manual_control))
       .find((value): value is Record<string, unknown> => value !== null);
+    const telemetry = candidates.find((candidate) => typeof candidate.manual_enabled === "boolean");
+    const robotManualEnabled = telemetry ? telemetry.manual_enabled === true : this.state.robotManualEnabled;
+    if (robotManualEnabled !== this.state.robotManualEnabled) {
+      // Remote telemetry gates mission starts without acquiring the local manual command loop.
+      this.state = { ...this.state, robotManualEnabled };
+      this.emit();
+    }
     if (!manual) return;
     const enabledFromServer = manual.enabled === true;
     if (this.state.manualDisablePending && enabledFromServer) {

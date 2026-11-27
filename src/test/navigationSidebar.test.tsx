@@ -150,6 +150,79 @@ describe("navigation sidebar and route editor", () => {
     expect(screen.queryByText("VOLVER A HOME")).not.toBeInTheDocument();
   });
 
+  it.each(["route", "patrol"] as const)("offers a new %s start while paused", async (kind) => {
+    const runtime = await bootstrapApp();
+    const sidebar = runtime.contributions.get("nav2.sidebar.navigation");
+    if (!sidebar || sidebar.slot !== "sidebar") throw new Error("Navigation sidebar not registered");
+    const navigation = runtime.services.getService<NavigationService>("nav2.service.navigation");
+    const connection = runtime.services.getService<{
+      applyTransportStatus: (status: { connected: boolean; intentional: boolean; reason: string }) => void;
+    }>("nav2.service.connection");
+    const dispatcher = runtime.dispatchers.get("nav2.dispatcher.robot")!.dispatcher as RobotDispatcher;
+    const send = kind === "patrol"
+      ? vi.spyOn(navigation, "sendPatrolMission")
+          .mockResolvedValueOnce({ inputCount: 2, expandedCount: 2, preparationId: 7 })
+          .mockResolvedValueOnce({ inputCount: 2, expandedCount: 2, preparationId: 8 })
+      : vi.spyOn(navigation, "sendRouteMission").mockResolvedValue({ inputCount: 2, expandedCount: 2, preparationId: 7, loopRoute: false });
+    const cancelRoute = vi.spyOn(navigation, "cancelRouteMission").mockResolvedValue(undefined);
+    const cancelPatrol = vi.spyOn(navigation, "cancelPatrolMission").mockResolvedValue(undefined);
+    connection.applyTransportStatus({ connected: true, intentional: false, reason: "" });
+    navigation.applyLocalControlLock(false, "SIM_BACKEND");
+    navigation.queueWaypoint({ x: 10, y: 10 });
+    navigation.queueWaypoint({ x: 20, y: 20 });
+    if (kind === "patrol") {
+      navigation.queueWaypoint({ x: 30, y: 30, role: "home" });
+      navigation.useQueuedWaypointsAsPatrolLoop();
+      navigation.toggleWaypointSelection(0);
+      navigation.setPatrolDepartEntryFromSelected();
+    }
+    const publish = (paused: boolean, manual = false, preparationStatus = "", preparationId = 6) => act(() => {
+      dispatcher.handleIncoming({
+        op: "state",
+        manual_enabled: manual,
+        route_mission: { active: !paused, paused, status: paused ? "PAUSED" : "ACTIVE" },
+        ...(kind === "patrol" ? { patrol_mission: {
+          active: !paused, phase: paused ? "paused" : "loop_main",
+          mission_id: paused ? "old" : "active",
+          preparation_id: preparationId, preparation_status: preparationStatus,
+          preparation_rejection: "Fallo de preparación"
+        } } : {})
+      }, dispatcher.transportId);
+    });
+    render(<>{sidebar.render()}</>);
+    publish(false);
+    const name = kind === "patrol" ? /INICIAR PATRULLA/ : /INICIAR RUTA/;
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    publish(true, true);
+    expect(navigation.getState().manualMode).toBe(false);
+    expect(screen.getByText(kind === "patrol" ? "Patrulla pausada" : "Ruta pausada")).toBeVisible();
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+    publish(true);
+    const start = screen.getByRole("button", { name });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(start).toBeDisabled();
+    fireEvent.click(start);
+    expect(send).toHaveBeenCalledOnce();
+    expect(cancelRoute).not.toHaveBeenCalled();
+    expect(cancelPatrol).not.toHaveBeenCalled();
+    if (kind === "patrol") {
+      publish(true, false, "rejected", 6);
+      expect(start).toBeDisabled();
+      publish(true, false, "rejected", 7);
+      expect(screen.getByText("Fallo de preparación")).toBeVisible();
+      expect(start).toBeEnabled();
+      fireEvent.click(start);
+      await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+      publish(false, false, "accepted", 8);
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: /CANCELAR MISIÓN/ }));
+    await waitFor(() => expect(kind === "patrol" ? cancelPatrol : cancelRoute).toHaveBeenCalledOnce());
+    navigation.stopControlHeartbeat();
+  });
+
   it.each(["nav_event", "state"])("shows preparation and explains a matching rejection via %s", async (op) => {
     const runtime = await bootstrapApp();
     const sidebar = runtime.contributions.get("nav2.sidebar.navigation");

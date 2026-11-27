@@ -851,7 +851,7 @@ describe("services", () => {
       }),
       requestPatrolMission: vi.fn().mockResolvedValue({
         op: "ack", ok: true,
-        loop_input_waypoint_count: 3,
+        preparation_id: 7, loop_input_waypoint_count: 3,
         loop_expanded_waypoint_count: 3
       })
     };
@@ -872,7 +872,7 @@ describe("services", () => {
     service.toggleWaypointSelection(0);
     service.setPatrolDepartEntryFromSelected();
 
-    await service.sendPatrolMission();
+    expect(await service.sendPatrolMission()).toMatchObject({ preparationId: 7 });
 
     const payload = dispatcher.requestPatrolMission.mock.calls[0][0] as {
       patrol_mission: {
@@ -883,20 +883,17 @@ describe("services", () => {
     expect(payload.patrol_mission.loop_waypoints).toHaveLength(3);
     expect(payload.patrol_mission.loop_waypoints.every((waypoint) => waypoint.yaw_deg === undefined)).toBe(true);
     expect(Number.isFinite(payload.patrol_mission.home_waypoint.yaw_deg)).toBe(true);
-    expect(service.getState().patrolMission).toMatchObject({
-      active: true,
-      phase: "loop_main",
-      homeAvailable: true,
-      status: "PATROL"
-    });
+    expect(service.getState().patrolMission.active).toBe(false);
   });
 
   it("keeps structured return HOME available after patrol dispatch", async () => {
+    let onState: ((message: Record<string, unknown>) => void) | undefined;
     const dispatcher = {
+      subscribeState: (callback: typeof onState) => { onState = callback; },
       requestControlLock: vi.fn().mockResolvedValue({ op: "ack", ok: true }),
       requestNavigationProfile: vi.fn().mockResolvedValue({ op: "ack", ok: true, active_profile: "urban" }),
       requestPatrolMission: vi.fn().mockResolvedValue({
-        op: "ack", ok: true, loop_input_waypoint_count: 2, loop_expanded_waypoint_count: 2
+        op: "ack", ok: true, preparation_id: 7, loop_input_waypoint_count: 2, loop_expanded_waypoint_count: 2
       }),
       requestReturnHome: vi.fn().mockResolvedValue({ op: "ack", ok: true })
     };
@@ -915,7 +912,11 @@ describe("services", () => {
     service.toggleWaypointSelection(0);
     service.setPatrolDepartEntryFromSelected();
 
-    await service.sendPatrolMission();
+    expect(await service.sendPatrolMission()).toMatchObject({ preparationId: 7 });
+    onState?.({
+      op: "state",
+      patrol_mission: { active: true, phase: "loop_main", home_available: true, mission_id: "patrol-1" }
+    });
     await service.requestReturnHome();
 
     expect(dispatcher.requestReturnHome).toHaveBeenCalledOnce();
