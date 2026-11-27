@@ -139,8 +139,9 @@ export function WeatherPreview({ connected, pose }: {
   const report = current?.report;
   const upToDate = report && !current.failed;
   const rainChance = report ? Math.max(...report.hours.map((hour) => hour.rainChance)) : 0;
-  const level = !upToDate ? "unknown" : report.raining ? "stop" : rainChance >= RAIN_CHANCE ? "caution" : "clear";
-  const advice = level === "stop" || level === "caution" ? "Postergar navegación"
+  const level = !upToDate ? "unknown" : report.raining ? "stop" : (report.rainNearby || rainChance >= RAIN_CHANCE) ? "caution" : "clear";
+  const advice = level === "stop" ? "Postergar navegación"
+    : level === "caution" ? (report?.rainNearby ? "Lluvia en las cercanías" : "Postergar navegación")
     : level === "clear" ? "Sin alerta de lluvia"
     : locating ? "Buscando ubicación…"
     : current?.failed || locationError ? "Clima no disponible"
@@ -149,11 +150,12 @@ export function WeatherPreview({ connected, pose }: {
     ? `${current.failed ? "Último dato" : "Actualizado"} ${new Date(report.updatedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
     : "";
   const detail = level === "stop" ? "Está lloviendo en la ubicación consultada."
+    : level === "caution" && report?.rainNearby ? "Hay lluvia en las cercanías. Navegá con precaución."
     : level === "caution" ? `Hasta ${rainChance}% de probabilidad de lluvia en las próximas dos horas.`
     : level === "clear" ? "Sin lluvia actual ni alta probabilidad de lluvia en las próximas dos horas."
     : locationError || freshness || advice;
   const condition = report?.condition ?? "";
-  const weatherIcon = report?.raining ? "🌧️"
+  const weatherIcon = report?.raining || report?.rainNearby ? "🌧️"
     : /parcial|partly/i.test(condition) ? "🌤️"
     : /soleado|sunny/i.test(condition) ? "☀️"
     : /despejado|clear/i.test(condition) ? "🌙" : "☁️";

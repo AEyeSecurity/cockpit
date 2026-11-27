@@ -7,6 +7,7 @@ const report = {
   updatedAt: 1_790_000_000_000,
   condition: "Partly cloudy",
   raining: false,
+  rainNearby: false,
   windKph: 18,
   gustKph: 25,
   hours: [{ at: "16:00", rainChance: 65 }, { at: "17:00", rainChance: 5 }]
@@ -103,9 +104,11 @@ it("prefers fresh Rover GPS, falls back when it expires, and keeps the recommend
 });
 
 it.each([
+  { raining: false, rainNearby: true, label: "Lluvia en las cercanías", level: "caution" },
+  { raining: true, rainNearby: true, label: "Postergar navegación", level: "stop" },
   { raining: true, label: "Postergar navegación", level: "stop" },
   { raining: false, label: "Sin alerta de lluvia", level: "clear" }
-])("loads the PC forecast automatically with permission and shows the $level state", async ({ raining, label, level }) => {
+])("loads the PC forecast automatically with permission and shows the $level state", async ({ raining, rainNearby = false, label, level }) => {
   Object.defineProperty(navigator, "permissions", { configurable: true, value: {
     query: vi.fn(async () => ({ state: "granted" }))
   } });
@@ -113,11 +116,22 @@ it.each([
     getCurrentPosition: (success: (value: unknown) => void) => success({ coords: { latitude: -31.4, longitude: -64.18 } })
   } });
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-    ...report, raining, hours: report.hours.map((hour) => ({ ...hour, rainChance: 5 }))
+    ...report, raining, rainNearby, hours: report.hours.map((hour) => ({ ...hour, rainChance: 5 }))
   }))));
 
   await act(async () => { render(<WeatherPreview connected={false} pose={null} />); });
   expect(screen.getByRole("status")).toHaveTextContent(label);
   expect(screen.getByRole("status")).toHaveClass(`weather-advice--${level}`);
   expect(screen.getByRole("img", { name: /Condiciones actuales.*Esta PC/ })).toBeVisible();
+});
+
+it.each([0, 0.5])("distinguishes nearby rain from local precipitation (%s mm)", async (precip_mm) => {
+  const upstream = async () => new Response(JSON.stringify({
+    ...provider,
+    current: { ...provider.current, precip_mm, condition: { text: "Lluvia en las cercanías" } }
+  }));
+  const weather = createWeatherPreview("test-secret", upstream);
+  await expect(weather("-31.4", "-64.18")).resolves.toMatchObject({
+    rainNearby: true, raining: precip_mm > 0
+  });
 });

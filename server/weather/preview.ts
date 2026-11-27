@@ -4,6 +4,7 @@ export interface WeatherReport {
   updatedAt: number;
   condition: string;
   raining: boolean;
+  rainNearby: boolean;
   windKph: number;
   gustKph: number;
   hours: { at: string; rainChance: number }[];
@@ -52,11 +53,13 @@ export function createWeatherPreview(key: string, request = fetch, now = Date.no
         .slice(0, 2)
         .map((hour) => ({ at: hour.time.slice(-5), rainChance: hour.chance_of_rain }));
       if (hours.length < 2) throw new Error("Pronóstico horario incompleto.");
+      const rainCondition = /\b(rain|drizzle|lluvias?|llovizna|chubascos?)\b/i.test(current.condition.text);
+      const rainNearby = rainCondition && /nearby|cerca|alrededores|proximidades/i.test(current.condition.text);
       return {
         updatedAt: current.last_updated_epoch * 1000,
         condition: current.condition.text,
-        raining: /\b(rain|drizzle|lluvias?|llovizna|chubascos?)\b/i.test(current.condition.text) &&
-          ((current.precip_mm ?? 0) > 0 || !/nearby|cerca|alrededores/i.test(current.condition.text)),
+        raining: (current.precip_mm ?? 0) > 0 || (rainCondition && !rainNearby),
+        rainNearby,
         windKph: current.wind_kph,
         gustKph: current.gust_kph,
         hours
