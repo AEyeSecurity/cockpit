@@ -108,3 +108,48 @@
   .history-patrols button { grid-template-columns: minmax(0, 1fr) auto; row-gap: .5rem; }
   .history-patrols button > .history-patrol-open { grid-column: 1 / -1; }
 }
+
+.history-waypoints { display: grid; gap: .65rem; }
+.history-waypoints h3 { margin: 0; }
+.history-waypoint-map {
+  height: clamp(12rem, 32vw, 19rem);
+  border: 1px solid var(--history-line);
+  border-radius: .65rem;
+  isolation: isolate;
+}
+.history-waypoint-list {
+  max-height: 14rem;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.history-waypoint-list button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1rem;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--history-line);
+  background: transparent;
+  color: inherit;
+  padding: .5rem;
+  cursor: pointer;
+}
+.history-waypoint-list button[aria-pressed="true"] { background: var(--history-surface); }
+.history-waypoint-visits ul { margin: .25rem 0; padding-left: 1.5rem; max-height: 10rem; overflow: auto; }
+.history-waypoint-pin {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #173e62;
+  color: white;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px #142332;
+  font-weight: 700;
+}
+.history-waypoint-pin.is-selected { background: #ad4c16; }
+
+#root .history-waypoint-list button { justify-content: flex-start; box-shadow: none; border-radius: 0; }

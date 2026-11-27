@@ -197,4 +197,7 @@ test("spectators can read operational history without forwarding extra fields", 
   })), { op: "history_list", client_req_id: "q", view: "activity", before: 90, category: "stop" });
   assert.deepEqual(JSON.parse(send({ op: "history_patrol", patrol_id: "id", after: 10, through: 20 })),
     { op: "history_patrol", patrol_id: "id", after: 10, through: 20 });
+  const visits = { op: "history_patrol", patrol_id: "id", stream: "visits",
+    route_mission_id: "leg", input_index: "4", through: 100 };
+  assert.deepEqual(JSON.parse(send({ ...visits, unexpected: true })), visits);
 });

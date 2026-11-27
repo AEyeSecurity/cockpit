@@ -77,3 +77,28 @@ it("explains navigation waits and separates controller stop signals from braking
   expect(screen.getByText("Señal de parada reportada sin freno aplicado")).toBeInTheDocument();
   expect(screen.queryByText("Parada de emergencia activa")).not.toBeInTheDocument();
 });
+
+it("keeps repeated visits in a single row and loads them only on selection", async () => {
+  const waypoint = {
+    ...stop, sequence: 10, code: "ROUTE_CHECKPOINT_REACHED", category: "waypoint",
+    details: { input_index: "3", loop_iteration: "0", route_mission_id: "leg",
+      gps_lat: "-31.4", gps_lon: "-64.2" }
+  };
+  const summary = { ...waypoint, visit_count: 240, last_at: waypoint.timestamp };
+  const read = vi.fn(async (op, fields) => {
+    if (op === "history_list") return { robot: "SALUS", degraded: false, next: null, items: [patrol] };
+    return { patrol, schema_version: 1, through: 500,
+      next: null, items: fields.stream === "visits" ? [waypoint] : [stop], waypoints: [summary] };
+  });
+  render(<HistoryWorkspace dispatcher={{ read } as unknown as HistoryDispatcher} />);
+  fireEvent.click(screen.getByRole("button", { name: "Patrullas" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Ver detalle/ }));
+  expect(await screen.findByText("240 visitas")).toBeInTheDocument();
+  expect(screen.getByText("Detención medida")).toBeInTheDocument();
+  expect(screen.queryByText("Visitas al punto 4")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTitle("Punto 4"));
+  expect(await screen.findByText(/Vuelta 1/)).toBeInTheDocument();
+  expect(read).toHaveBeenCalledWith("history_patrol", expect.objectContaining({
+    stream: "visits", route_mission_id: "leg", input_index: "3", through: 500
+  }));
+});

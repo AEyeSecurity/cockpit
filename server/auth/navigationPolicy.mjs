@@ -23,8 +23,8 @@ export function authorizeNavigationFrame(control, instanceId, sessionId, frame, 
     return JSON.stringify({ ...ids, op: message.op, view, start, end, category, before });
   }
   if (message.op === "history_patrol") {
-    const { patrol_id, after, through } = message;
-    return JSON.stringify({ ...ids, op: message.op, patrol_id, after, through });
+    const { patrol_id, after, through, stream, route_mission_id, input_index } = message;
+    return JSON.stringify({ ...ids, op: message.op, patrol_id, after, through, stream, route_mission_id, input_index });
   }
   if (message.op === "recordings_list") {
     const { camera, start, end } = message;
