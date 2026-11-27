@@ -1,3 +1,4 @@
+import { CameraBatteryFooter } from "./CameraBatteryFooter";
 import { CameraRoverMap } from "./CameraRoverMap";
 import { CameraQualityButton } from "./CameraQualityButton";
 import { useCameraStreamConfig } from "../../../shared/cameraStreamQuality";
@@ -751,7 +752,17 @@ export function createCameraModule(): CockpitModule {
         id: "workspace.camera",
         slot: "workspace",
         label: "Camera",
+        order: -10,
         render: () => <CameraVisionWorkspaceView runtime={ctx} sweepEvents={sweepEvents} />
+      });
+
+      ctx.contributions.register({
+        id: "footer.camera-battery",
+        slot: "footer",
+        align: "right",
+        beforeId: "nav2.footer.person-watch",
+        viewContext: "nav2.workspace.camera",
+        render: () => <CameraBatteryFooter runtime={ctx} />
       });
     }
   };

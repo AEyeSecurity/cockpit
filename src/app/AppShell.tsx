@@ -541,7 +541,7 @@ export function AppShell({ runtime, layoutMode = "default" }: AppShellProps): JS
       <GlobalDialogHost runtime={runtime} />
       <OperatorAlerts runtime={runtime} />
       <Footer
-        items={footerItems}
+        items={footerItems.filter((item) => !item.viewContext || item.viewContext === presentedWorkspaceId)}
         consoleCollapsed={true}
         onToggleConsoleCollapse={() => {
           if (usingVscodeLayout) return;

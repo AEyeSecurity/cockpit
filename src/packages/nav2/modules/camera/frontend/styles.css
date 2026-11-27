@@ -10259,3 +10259,15 @@
   border-color: #dc2626;
   color: #991b1b;
 }
+
+.shell-footer .camera-battery-footer {
+  background: #101010;
+  color: #bdbdbd;
+  font: inherit;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.shell-footer .camera-battery-footer.tone-ok { color: #86efac; }
+.shell-footer .camera-battery-footer.tone-warn { color: #fbbf24; }
+.shell-footer .camera-battery-footer.tone-critical { color: #f87171; }
