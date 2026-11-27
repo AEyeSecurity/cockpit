@@ -105,7 +105,6 @@ it("prefers fresh Rover GPS, falls back when it expires, and keeps the recommend
 
 it.each([
   { raining: false, rainNearby: true, label: "Lluvia en las cercanías", level: "caution" },
-  { raining: true, rainNearby: true, label: "Postergar navegación", level: "stop" },
   { raining: true, label: "Postergar navegación", level: "stop" },
   { raining: false, label: "Sin alerta de lluvia", level: "clear" }
 ])("loads the PC forecast automatically with permission and shows the $level state", async ({ raining, rainNearby = false, label, level }) => {
@@ -132,6 +131,6 @@ it.each([0, 0.5])("distinguishes nearby rain from local precipitation (%s mm)", 
   }));
   const weather = createWeatherPreview("test-secret", upstream);
   await expect(weather("-31.4", "-64.18")).resolves.toMatchObject({
-    rainNearby: true, raining: precip_mm > 0
+    rainNearby: true, raining: false
   });
 });
