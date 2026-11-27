@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HistoryDispatcher } from "./index";
+import { checkpointCode, PatrolWaypoints, waypointNumber, type WaypointSummary } from "./PatrolWaypoints";
 import "./styles.css";
 
 interface HistoryEvent {
@@ -25,10 +26,10 @@ interface Patrol {
 }
 interface Page<T> { items: T[]; next: number | null }
 interface HistoryPage extends Page<HistoryEvent | Patrol> { robot: string; degraded: boolean }
-interface PatrolPage extends Page<HistoryEvent> { patrol: Patrol; through: number; schema_version: number }
+interface PatrolPage extends Page<HistoryEvent> { patrol: Patrol; through: number; schema_version: number; waypoints?: WaypointSummary[] }
 
 const categories: Record<string, string> = {
-  mode: "Control", patrol: "Patrulla", stop: "Freno y detención", fault: "Incidentes", navigation: "Navegación"
+  mode: "Control", patrol: "Patrulla", stop: "Freno y detención", fault: "Incidentes", navigation: "Navegación", waypoint: "Puntos alcanzados"
 };
 const statuses: Record<string, string> = {
   active: "En curso", paused: "En pausa", home: "Llegó a HOME", completed: "Completada", cancelled: "Cancelada",
@@ -135,6 +136,10 @@ function describeReason(reason: string | undefined): string {
 }
 
 function eventTitle(event: HistoryEvent) {
+  if (event.code === checkpointCode) {
+    const number = waypointNumber(event.details);
+    return number === undefined ? "Punto alcanzado" : `Punto ${number} alcanzado`;
+  }
   if (event.code === "SAFETY_STOP_SIGNAL_CHANGED") {
     return event.details.stop_signal?.toLowerCase() === "true"
       ? "Señal de parada reportada" : "Señal de parada desactivada";
@@ -148,6 +153,7 @@ function eventTitle(event: HistoryEvent) {
   return events[event.code] ?? (event.severity >= 2 ? "Fallo reportado" : "Evento de operación");
 }
 function eventContext(event: HistoryEvent) {
+  if (event.code === checkpointCode && !event.details.gps_received_at) return "GPS no disponible";
   const reason = describeReason(event.details.reason_code || event.details.failure_code);
   if (event.code === "PATH_HEALTH_RECOVERED") return reason ? `Motivo de la espera: ${reason}` : "";
   if (event.code === "PATH_STOP_AND_WAIT") return reason || "Motivo no disponible";
@@ -212,7 +218,7 @@ function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: Histo
   const [exporting, setExporting] = useState(false);
   useEffect(() => {
     let current = true;
-    dispatcher.read<PatrolPage>("history_patrol", { patrol_id: id })
+    dispatcher.read<PatrolPage>("history_patrol", { patrol_id: id, stream: "operations" })
       .then(result => { if (current) setPage(result); })
       .catch(failure => { if (current) setError(String(failure)); });
     return () => { current = false; };
@@ -223,7 +229,7 @@ function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: Histo
     setBusy(true);
     setError("");
     try {
-      const result = await dispatcher.read<PatrolPage>("history_patrol", { patrol_id: id, after: page.next, through: page.through });
+      const result = await dispatcher.read<PatrolPage>("history_patrol", { patrol_id: id, after: page.next, through: page.through, stream: "operations" });
       setPage({ ...page, next: result.next, items: [...page.items, ...result.items] });
     } catch (failure) { setError(String(failure)); }
     finally { setBusy(false); }
@@ -276,7 +282,13 @@ function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: Histo
         <div><dt>Fin registrado</dt><dd>{page.patrol.ended_at ? dateTime.format(new Date(page.patrol.ended_at)) : "Sin cierre registrado"}</dd></div>
       </dl>
       {page.patrol.incomplete && <p role="status">Registro incompleto. Los tiempos reflejan el tramo registrado.</p>}
-      <Timeline items={page.items} fullDate />
+      {page.waypoints && <PatrolWaypoints points={page.waypoints} readVisits={(point, after) =>
+        dispatcher.read<PatrolPage>("history_patrol", {
+          patrol_id: id, stream: "visits", after, through: page.through,
+          route_mission_id: point.details.route_mission_id, input_index: point.details.input_index
+        })
+      } />}
+      <Timeline items={page.items.filter(event => event.code !== checkpointCode)} fullDate />
       {page.next !== null && <button type="button" className="button-secondary" disabled={busy} onClick={() => void more()}>
         Cargar más eventos
       </button>}
