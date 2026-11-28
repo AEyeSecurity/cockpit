@@ -185,7 +185,52 @@ function duration(seconds: number) {
   const minutes = Math.floor(total % 3600 / 60);
   return [hours && `${hours} h`, minutes && `${minutes} min`, `${total % 60} s`].filter(Boolean).join(" ");
 }
-function Timeline({ items, fullDate = false, onPatrol }: {
+const incidentLabels: Record<string, string> = {
+  capturing: "Capturando", available: "Disponible", partial: "Parcial", expired: "Vencido",
+};
+
+function IncidentCapture({ event, dispatcher, managed }: {
+  event: HistoryEvent; dispatcher: HistoryDispatcher; managed?: boolean;
+}) {
+  const [status, setStatus] = useState(event.details.status);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function download() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await dispatcher.read<{status: string; url?: string}>(
+        "history_incident", { incident_id: event.details.id },
+      );
+      setStatus(result.status);
+      if (result.status === "available" || result.status === "partial") {
+        if (!result.url) throw new Error("Descarga no configurada en el robot.");
+        const url = new URL(result.url);
+        if (!["https:", "http:"].includes(url.protocol)) throw new Error("Dirección de descarga inválida.");
+        const link = document.createElement("a");
+        link.href = managed ? "/operation/recordings" + url.pathname + url.search : url.href;
+        link.rel = "noreferrer";
+        link.download = `salus-${event.details.id}.tar`;
+        link.click();
+      }
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="stack">
+    <span>{incidentLabels[status] ?? "Estado desconocido"}</span>
+    {status !== "expired" && <button type="button" className="button-secondary"
+      disabled={busy} onClick={() => void download()}>
+      {status === "capturing" ? "Consultar captura" : "Descargar diagnóstico"}
+    </button>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
+}
+
+function Timeline({ items, fullDate = false, onPatrol, dispatcher, managed }: {
+  dispatcher: HistoryDispatcher; managed?: boolean;
   items: HistoryEvent[]; fullDate?: boolean; onPatrol?: (id: string) => void;
 }) {
   return <ol className="history-timeline">
@@ -193,11 +238,12 @@ function Timeline({ items, fullDate = false, onPatrol }: {
       <time dateTime={event.timestamp}>{(fullDate ? dateTime : time).format(new Date(event.timestamp))}</time>
       <div className="history-event">
         <div className="history-event-heading">
-          <strong>{eventTitle(event)}</strong>
+          <strong>{event.code === "NAVIGATION_INCIDENT" ? "Captura de navegación" : eventTitle(event)}</strong>
           <span className="history-tag" data-tone={event.severity >= 2 ? "error" : event.severity >= 1 ? "warn" : "normal"}>
             {eventTag(event)}
           </span>
         </div>
+        {event.code === "NAVIGATION_INCIDENT" && <IncidentCapture event={event} dispatcher={dispatcher} managed={managed} />}
         {eventContext(event) && <p className="muted">{eventContext(event)}</p>}
         <details><summary>Detalles técnicos</summary>
           <p>{event.component} · <code>{event.code}</code></p>
@@ -211,7 +257,7 @@ function Timeline({ items, fullDate = false, onPatrol }: {
   </ol>;
 }
 
-function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: HistoryDispatcher; close: () => void }) {
+function PatrolDetail({ id, dispatcher, close, managed }: { id: string; dispatcher: HistoryDispatcher; close: () => void; managed?: boolean }) {
   const [page, setPage] = useState<PatrolPage>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -288,7 +334,7 @@ function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: Histo
           route_mission_id: point.details.route_mission_id, input_index: point.details.input_index
         })
       } />}
-      <Timeline items={page.items.filter(event => event.code !== checkpointCode)} fullDate />
+      <Timeline dispatcher={dispatcher} managed={managed} items={page.items.filter(event => event.code !== checkpointCode)} fullDate />
       {page.next !== null && <button type="button" className="button-secondary" disabled={busy} onClick={() => void more()}>
         Cargar más eventos
       </button>}
@@ -296,7 +342,7 @@ function PatrolDetail({ id, dispatcher, close }: { id: string; dispatcher: Histo
   </section>;
 }
 
-export default function HistoryWorkspace({ dispatcher }: { dispatcher: HistoryDispatcher }) {
+export default function HistoryWorkspace({ dispatcher, managed }: { dispatcher: HistoryDispatcher; managed?: boolean }) {
   const [view, setView] = useState<"activity" | "patrols">("activity");
   const [date, setDate] = useState(localDay);
   const [category, setCategory] = useState("");
@@ -334,7 +380,7 @@ export default function HistoryWorkspace({ dispatcher }: { dispatcher: HistoryDi
   }, [load]);
 
   return <div className="history-workspace stack">
-    {detail ? <PatrolDetail key={detail} id={detail} dispatcher={dispatcher} close={() => setDetail(undefined)} /> : <>
+    {detail ? <PatrolDetail managed={managed} key={detail} id={detail} dispatcher={dispatcher} close={() => setDetail(undefined)} /> : <>
       <section className="panel-card stack">
         <header className="history-toolbar">
           <div><h2>Historial</h2><p className="muted">Control, patrullas y detenciones del robot{page ? ` · ${page.robot}` : ""}</p></div>
@@ -360,7 +406,7 @@ export default function HistoryWorkspace({ dispatcher }: { dispatcher: HistoryDi
         {date && error && <p role="alert">No se pudo consultar el historial. {error}</p>}
         {date && page?.degraded && <p role="status">El registro del robot tiene datos incompletos.</p>}
         {date && page?.items.length === 0 && <p>No hay {view === "activity" ? "eventos" : "patrullas"} para esta fecha y filtro.</p>}
-        {date && view === "activity" && page && <Timeline items={page.items.filter((item): item is HistoryEvent => "sequence" in item)} onPatrol={setDetail} />}
+        {date && view === "activity" && page && <Timeline dispatcher={dispatcher} managed={managed} items={page.items.filter((item): item is HistoryEvent => "sequence" in item)} onPatrol={setDetail} />}
         {date && view === "patrols" && page && <ul className="history-patrols">
           {page.items.filter((item): item is Patrol => "id" in item).map(patrol => <li key={patrol.id}>
             <button type="button" onClick={() => setDetail(patrol.id)}>
