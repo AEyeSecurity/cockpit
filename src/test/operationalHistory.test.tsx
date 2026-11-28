@@ -102,3 +102,24 @@ it("keeps repeated visits in a single row and loads them only on selection", asy
     stream: "visits", route_mission_id: "leg", input_index: "3", through: 500
   }));
 });
+
+it("looks up a saved capture and downloads a fresh signed link through the operator proxy", async () => {
+  const captureId = "f".repeat(32);
+  const item = { ...stop, code: "NAVIGATION_INCIDENT", component: "incident_recorder",
+    details: { id: captureId, status: "partial" } };
+  const read = vi.fn(async (op) => op === "history_incident"
+    ? { status: "partial", url: "https://robot.invalid/download?incident=capture&sig=temporary" }
+    : { robot: "SALUS", degraded: false, next: null, items: [item] });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    expect(this.getAttribute("href")).toBe("/operation/recordings/download?incident=capture&sig=temporary");
+  });
+  try {
+    render(<HistoryWorkspace dispatcher={{ read } as unknown as HistoryDispatcher} managed />);
+    expect(await screen.findByText("Parcial")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Descargar diagnóstico" }));
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    expect(read).toHaveBeenCalledWith("history_incident", { incident_id: captureId });
+  } finally {
+    click.mockRestore();
+  }
+});

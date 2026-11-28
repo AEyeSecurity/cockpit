@@ -7,7 +7,7 @@ import { DeferredView } from "../../../shared/DeferredView";
 const HistoryWorkspace = lazy(() => import("./HistoryWorkspace"));
 
 export class HistoryDispatcher extends Nav2DispatcherBase {
-  async read<T>(op: "history_list" | "history_patrol", fields: Record<string, unknown>): Promise<T> {
+  async read<T>(op: "history_list" | "history_patrol" | "history_incident", fields: Record<string, unknown>): Promise<T> {
     const result = await this.request(op, fields, { timeoutMs: 6000 });
     if (result.ok !== true) {
       throw new Error(result.error_code === "unknown_op"
@@ -35,7 +35,7 @@ export function createHistoryModule(): CockpitModule {
       });
       ctx.contributions.register({
         id: "workspace.history", slot: "workspace", label: "Historial", hiddenFromTabs: true,
-        render: () => <DeferredView key="history"><HistoryWorkspace dispatcher={dispatcher} /></DeferredView>
+        render: () => <DeferredView key="history"><HistoryWorkspace dispatcher={dispatcher} managed={ctx.env.managed} /></DeferredView>
       });
     }
   };
